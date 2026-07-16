@@ -81,10 +81,12 @@ if(APPLE)
     set(APP_SOURCE ${APP_SOURCE} ${LIB_UPDATE_SCRIPT})
 
     # Configure manual files
-    set_source_files_properties(${INDEX_OUTPUT_PATH} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
-    set_source_files_properties(${DOC_MANUAL_TARGET_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
-    set_source_files_properties(${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
-    set_source_files_properties(${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual/images)
+    if(TB_BUILD_MANUAL)
+        set_source_files_properties(${INDEX_OUTPUT_PATH} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
+        set_source_files_properties(${DOC_MANUAL_TARGET_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
+        set_source_files_properties(${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
+        set_source_files_properties(${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual/images)
+    endif()
 endif()
 
 # Set up resource compilation for Windows
@@ -306,18 +308,20 @@ if(WIN32 OR ${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
     tb_add_post_build_copy_files(TrenchBroom "${APP_RESOURCE_DEST_DIR}/update" "${LIB_UPDATE_SCRIPT}")
 
     # Copy manual files to resource directory
-    tb_add_post_build_copy_files(
-        TrenchBroom
-        "${APP_RESOURCE_DEST_DIR}/manual"
-        "${INDEX_OUTPUT_PATH}"
-        "${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE}"
-        ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
-    )
-    tb_add_post_build_copy_files(
-        TrenchBroom
-        "${APP_RESOURCE_DEST_DIR}/manual/images"
-        ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
-    )
+    if(TB_BUILD_MANUAL)
+        tb_add_post_build_copy_files(
+            TrenchBroom
+            "${APP_RESOURCE_DEST_DIR}/manual"
+            "${INDEX_OUTPUT_PATH}"
+            "${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE}"
+            ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
+        )
+        tb_add_post_build_copy_files(
+            TrenchBroom
+            "${APP_RESOURCE_DEST_DIR}/manual/images"
+            ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
+        )
+    endif()
 endif()
 
 # Common CPack configuration
@@ -367,14 +371,16 @@ if(WIN32)
 
     
     #Manual
-    install(FILES ${INDEX_OUTPUT_PATH} DESTINATION manual COMPONENT TrenchBroom)
-    install(FILES ${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} DESTINATION manual COMPONENT TrenchBroom)
-    install(FILES
-            ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
-            DESTINATION manual COMPONENT TrenchBroom)
-    install(FILES
-            ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
-            DESTINATION manual/images COMPONENT TrenchBroom)
+    if(TB_BUILD_MANUAL)
+        install(FILES ${INDEX_OUTPUT_PATH} DESTINATION manual COMPONENT TrenchBroom)
+        install(FILES ${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} DESTINATION manual COMPONENT TrenchBroom)
+        install(FILES
+                ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
+                DESTINATION manual COMPONENT TrenchBroom)
+        install(FILES
+                ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
+                DESTINATION manual/images COMPONENT TrenchBroom)
+    endif()
     install(DIRECTORY
             "${TB_RESOURCE_DIR}/defaults"
             "${TB_RESOURCE_DIR}/fonts"
@@ -458,7 +464,9 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fonts"           DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/defaults"        DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/games"           DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
-    install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/manual"          DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
+    if(TB_BUILD_MANUAL)
+        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/manual"      DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
+    endif()
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/images"          DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shader"          DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stylesheets"     DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)

@@ -78,15 +78,18 @@ if(NOT GIT_FOUND)
   message(FATAL_ERROR "Could not find git")
 endif()
 
-# Find Pandoc
+# Find Pandoc, which is needed to generate the manual. If it is not available, the
+# manual is skipped.
 if(NOT PANDOC_PATH)
   find_program(PANDOC_PATH NAMES "pandoc" DOC "Pandoc program location")
+endif()
 
-  if(PANDOC_PATH STREQUAL "PANDOC_PATH-NOTFOUND")
-    message(FATAL_ERROR "Could not find pandoc")
-  else()
-    message(STATUS "Found Pandoc: ${PANDOC_PATH}")
-  endif()
+if(PANDOC_PATH AND NOT PANDOC_PATH STREQUAL "PANDOC_PATH-NOTFOUND")
+  message(STATUS "Found Pandoc: ${PANDOC_PATH}")
+  set(TB_BUILD_MANUAL TRUE)
+else()
+  message(WARNING "Could not find pandoc, the manual will not be generated")
+  set(TB_BUILD_MANUAL FALSE)
 endif()
 
 # Prevent overriding the parent project's compiler/linker
