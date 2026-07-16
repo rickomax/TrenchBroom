@@ -1,0 +1,294 @@
+FilePickerDialog {
+	position: absolute;
+	left: 0;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	font-family: Poppins;
+	z-index: 1000;
+	// Root is non-interactive — when closed the markup renders nothing inside
+	// it, so clicks pass through to the toolbar / world. The .overlay and
+	// .dialog children re-enable pointer-events for themselves only.
+	pointer-events: none;
+
+	.overlay {
+		position: absolute;
+		left: 0;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		background-color: rgba( 0, 0, 0, 0.55 );
+		pointer-events: all;
+	}
+
+	.dialog {
+		position: absolute;
+		left: 50%;
+		top: 50%;
+		width: 520px;
+		height: 480px;
+		margin-left: -260px;
+		margin-top: -240px;
+		flex-direction: column;
+		background-color: rgba( 40, 40, 40, 0.98 );
+		border: 1px solid rgba( 80, 80, 80, 1 );
+		border-radius: 6px;
+		pointer-events: all;
+	}
+
+	.header {
+		flex-direction: row;
+		align-items: center;
+		height: 36px;
+		padding: 0 8px 0 12px;
+		border-bottom: 1px solid rgba( 80, 80, 80, 1 );
+	}
+
+	.title {
+		flex-grow: 1;
+		color: rgba( 230, 230, 230, 1 );
+		font-size: 14px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+	}
+
+	.close-btn {
+		width: 24px;
+		height: 24px;
+		align-items: center;
+		justify-content: center;
+		background-color: transparent;
+		color: rgba( 200, 200, 200, 1 );
+		font-size: 18px;
+		font-weight: 700;
+		border-radius: 3px;
+		cursor: pointer;
+	}
+	.close-btn:hover {
+		background-color: rgba( 80, 80, 80, 1 );
+	}
+
+	.path-bar {
+		flex-direction: row;
+		align-items: center;
+		height: 28px;
+		padding: 0 8px;
+		gap: 6px;
+		background-color: rgba( 30, 30, 30, 1 );
+		border-bottom: 1px solid rgba( 60, 60, 60, 1 );
+	}
+
+	.up-btn {
+		width: 22px;
+		height: 22px;
+		align-items: center;
+		justify-content: center;
+		background-color: rgba( 60, 60, 60, 1 );
+		border: 1px solid rgba( 80, 80, 80, 1 );
+		border-radius: 3px;
+		color: rgba( 230, 230, 230, 1 );
+		font-size: 14px;
+		font-weight: 700;
+		cursor: pointer;
+	}
+	.up-btn:hover {
+		background-color: rgba( 80, 80, 80, 1 );
+	}
+	.up-btn.disabled {
+		opacity: 0.35;
+		cursor: default;
+		pointer-events: none;
+	}
+
+	.current-path {
+		flex-grow: 1;
+		height: 24px;
+		padding: 0 6px;
+		background-color: rgba( 30, 30, 30, 1 );
+		border: 1px solid rgba( 80, 80, 80, 1 );
+		border-radius: 3px;
+		color: rgba( 220, 220, 220, 1 );
+		font-size: 12px;
+		font-weight: 600;
+		pointer-events: all;
+		cursor: text;
+	}
+
+	.list {
+		flex-grow: 1;
+		flex-direction: column;
+		overflow: scroll;
+		padding: 4px 0;
+		background-color: rgba( 25, 25, 25, 1 );
+	}
+
+	.entry {
+		flex-direction: row;
+		align-items: center;
+		height: 36px;
+		flex-shrink: 0;
+		padding: 0 12px;
+		gap: 8px;
+		background-color: transparent;
+		color: rgba( 220, 220, 220, 1 );
+		font-size: 13px;
+		font-weight: 500;
+		cursor: pointer;
+	}
+	.entry * {
+		color: rgba( 220, 220, 220, 1 );
+		font-size: 13px;
+		font-weight: 500;
+	}
+	.entry:hover {
+		background-color: rgba( 50, 70, 100, 0.6 );
+	}
+	.entry.selected {
+		background-color: rgba( 70, 130, 200, 0.7 );
+	}
+	.entry.selected * {
+		color: white;
+	}
+
+	.entry-icon {
+		width: 28px;
+		height: 28px;
+		flex-shrink: 0;
+		align-items: center;
+		justify-content: center;
+		color: rgba( 150, 180, 220, 1 );
+		font-size: 11px;
+		font-weight: 700;
+	}
+	.entry.directory .entry-icon {
+		color: rgba( 240, 200, 120, 1 );
+	}
+	.entry-thumb {
+		width: 28px;
+		height: 28px;
+		flex-shrink: 0;
+		background-color: rgba( 0, 0, 0, 0.3 );
+		border: 1px solid rgba( 60, 60, 60, 1 );
+		background-size: contain;
+		background-repeat: no-repeat;
+		background-position: center;
+	}
+	.entry-name {
+		flex-grow: 1;
+		align-items: center;
+	}
+
+	.empty {
+		padding: 20px;
+		color: rgba( 140, 140, 140, 1 );
+		font-size: 12px;
+		font-style: italic;
+		text-align: center;
+	}
+
+	.save-row {
+		flex-direction: row;
+		align-items: center;
+		height: 32px;
+		padding: 0 12px;
+		gap: 8px;
+		border-top: 1px solid rgba( 80, 80, 80, 1 );
+		background-color: rgba( 30, 30, 30, 1 );
+	}
+
+	.save-label {
+		color: rgba( 200, 200, 200, 1 );
+		font-size: 12px;
+		font-weight: 600;
+		width: 48px;
+		flex-shrink: 0;
+	}
+
+	.save-name {
+		flex-grow: 1;
+		height: 22px;
+		padding: 0 6px;
+		background-color: rgba( 25, 25, 25, 1 );
+		border: 1px solid rgba( 70, 70, 70, 1 );
+		border-radius: 3px;
+		color: rgba( 230, 230, 230, 1 );
+		font-size: 12px;
+	}
+
+	.footer {
+		flex-direction: row;
+		align-items: center;
+		height: 44px;
+		padding: 0 12px;
+		gap: 8px;
+		border-top: 1px solid rgba( 80, 80, 80, 1 );
+	}
+
+	.selection-label {
+		flex-grow: 1;
+		color: rgba( 180, 180, 180, 1 );
+		font-size: 11px;
+		font-weight: 600;
+	}
+
+	.disk-path-row {
+		flex-direction: row;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px 10px 12px;
+		flex-shrink: 0;
+	}
+
+	.disk-path-prefix {
+		color: rgba( 140, 140, 140, 1 );
+		font-size: 10px;
+		font-weight: 500;
+		flex-shrink: 0;
+	}
+
+	.disk-path {
+		flex-grow: 1;
+		height: 22px;
+		padding: 0 6px;
+		background-color: rgba( 30, 30, 30, 1 );
+		border: 1px solid rgba( 80, 80, 80, 1 );
+		border-radius: 3px;
+		color: rgba( 200, 200, 200, 1 );
+		font-size: 10px;
+		font-weight: 500;
+		word-break: break-all;
+		pointer-events: all;
+		cursor: text;
+	}
+
+	.btn {
+		min-width: 80px;
+		height: 28px;
+		align-items: center;
+		justify-content: center;
+		padding: 0 14px;
+		background-color: rgba( 60, 60, 60, 1 );
+		border: 1px solid rgba( 80, 80, 80, 1 );
+		border-radius: 4px;
+		color: white;
+		font-size: 12px;
+		font-weight: 700;
+		letter-spacing: 0.5px;
+		cursor: pointer;
+	}
+	.btn:hover {
+		background-color: rgba( 80, 80, 80, 1 );
+	}
+	.btn.confirm {
+		background-color: rgba( 70, 130, 200, 1 );
+		border-color: rgba( 120, 180, 240, 1 );
+	}
+	.btn.confirm:hover {
+		background-color: rgba( 90, 150, 220, 1 );
+	}
+	.btn.disabled {
+		opacity: 0.35;
+		cursor: default;
+		pointer-events: none;
+	}
+}

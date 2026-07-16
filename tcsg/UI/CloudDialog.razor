@@ -1,0 +1,236 @@
+@using System
+@using System.Linq
+@using System.Threading.Tasks
+@using Sandbox
+@using Sandbox.UI
+@inherits PanelComponent
+
+<root class="@(IsOpen ? "open" : "closed")">
+	@if ( IsOpen )
+	{
+		<div class="overlay" onclick=@Cancel></div>
+
+		<div class="dialog">
+			<div class="header">
+				<label class="title">Cloud Assets</label>
+				<button class="close-btn" onclick=@Cancel>×</button>
+			</div>
+
+			<div class="path-bar">
+				<button class="up-btn @(InFolder ? "" : "disabled")" onclick=@GoUp>↑</button>
+				<label class="current-path">/@CurrentPath</label>
+			</div>
+
+			<div class="list">
+				@if ( !InFolder )
+				{
+					<button class="entry directory" onclick=@(() => EnterFolder( FolderEntities ))>
+						<label class="entry-icon">[D]</label>
+						<label class="entry-name">@FolderEntities</label>
+					</button>
+					<button class="entry directory" onclick=@(() => EnterFolder( FolderModels ))>
+						<label class="entry-icon">[D]</label>
+						<label class="entry-name">@FolderModels</label>
+					</button>
+				}
+				else if ( IsLoading )
+				{
+					<label class="empty">Loading…</label>
+				}
+				else if ( Entries.Count == 0 )
+				{
+					<label class="empty">No cloud assets in this folder.</label>
+				}
+				else
+				{
+					@foreach ( var entry in Entries )
+					{
+						<button class="entry @(SelectedIdent == entry.Ident ? "selected" : "")"
+						        onclick=@(() => Select( entry ))
+						        ondoubleclick=@(() => Confirm( entry ))>
+							<Image class="entry-thumb" Texture=@GetThumb( entry )></Image>
+							<label class="entry-name">@entry.Title</label>
+						</button>
+					}
+				}
+			</div>
+
+			<div class="footer">
+				<label class="selection-label">@SelectionLabel</label>
+				<button class="btn cancel" onclick=@Cancel>CANCEL</button>
+				<button class="btn confirm @(CanConfirm ? "" : "disabled")"
+				        onclick=@ConfirmCurrent>SPAWN</button>
+			</div>
+		</div>
+	}
+</root>
+
+@code {
+	public const string FolderEntities = "entities";
+	public const string FolderModels = "models";
+
+	public bool IsOpen { get; private set; }
+	public bool IsLoading { get; private set; }
+	public string CurrentPath { get; private set; } = "";
+	public string SelectedIdent { get; private set; } = "";
+
+	public sealed class Entry
+	{
+		public string Ident;
+		public string Title;
+		public string Thumb;
+		public Package Package;
+	}
+
+	public List<Entry> Entries { get; } = new();
+	readonly Dictionary<string, Texture> _thumbCache = new( StringComparer.OrdinalIgnoreCase );
+
+	Action<Package> _onSelected;
+
+	public bool InFolder => !string.IsNullOrEmpty( CurrentPath );
+	public bool CanConfirm => InFolder && !string.IsNullOrEmpty( SelectedIdent );
+
+	string SelectionLabel
+	{
+		get
+		{
+			if ( string.IsNullOrEmpty( SelectedIdent ) ) return "";
+			var entry = Entries.FirstOrDefault( e => e.Ident == SelectedIdent );
+			return entry?.Title ?? SelectedIdent;
+		}
+	}
+
+	public void Show( Action<Package> onSelected )
+	{
+		_onSelected = onSelected;
+		CurrentPath = "";
+		SelectedIdent = "";
+		Entries.Clear();
+		IsLoading = false;
+		IsOpen = true;
+		StateHasChanged();
+	}
+
+	public void Hide()
+	{
+		if ( !IsOpen ) return;
+		IsOpen = false;
+		_onSelected = null;
+		Entries.Clear();
+		_thumbCache.Clear();
+		SelectedIdent = "";
+		CurrentPath = "";
+		StateHasChanged();
+	}
+
+	public void Cancel()
+	{
+		Hide();
+	}
+
+	public void GoUp()
+	{
+		if ( !InFolder ) return;
+		CurrentPath = "";
+		SelectedIdent = "";
+		Entries.Clear();
+		StateHasChanged();
+	}
+
+	public void EnterFolder( string folder )
+	{
+		CurrentPath = folder;
+		SelectedIdent = "";
+		_ = RefreshAsync();
+	}
+
+	async Task RefreshAsync()
+	{
+		IsLoading = true;
+		Entries.Clear();
+		StateHasChanged();
+
+		var query = CurrentPath switch
+		{
+			FolderEntities => "type:sent",
+			FolderModels => "type:model",
+			_ => null,
+		};
+		if ( query is null )
+		{
+			IsLoading = false;
+			StateHasChanged();
+			return;
+		}
+
+		IEnumerable<Package> packages;
+		try
+		{
+			var result = await Package.FindAsync( query );
+			packages = result.Packages;
+		}
+		catch ( Exception ex )
+		{
+			Log.Warning( $"CloudDialog: Package.FindAsync failed: {ex.Message}" );
+			IsLoading = false;
+			StateHasChanged();
+			return;
+		}
+
+		foreach ( var pkg in packages )
+		{
+			Entries.Add( new Entry
+			{
+				Ident = pkg.FullIdent,
+				Title = pkg.Title,
+				Thumb = pkg.Thumb,
+				Package = pkg,
+			} );
+		}
+		Entries.Sort( ( a, b ) => string.Compare( a.Title, b.Title, StringComparison.OrdinalIgnoreCase ) );
+
+		IsLoading = false;
+		StateHasChanged();
+	}
+
+	public void Select( Entry entry )
+	{
+		SelectedIdent = entry?.Ident ?? "";
+		StateHasChanged();
+	}
+
+	public void Confirm( Entry entry )
+	{
+		if ( entry?.Package is null ) return;
+		var callback = _onSelected;
+		Hide();
+		callback?.Invoke( entry.Package );
+	}
+
+	public void ConfirmCurrent()
+	{
+		if ( !CanConfirm ) return;
+		var entry = Entries.FirstOrDefault( e => e.Ident == SelectedIdent );
+		Confirm( entry );
+	}
+
+	Texture GetThumb( Entry entry )
+	{
+		if ( entry is null || string.IsNullOrEmpty( entry.Thumb ) ) return null;
+		if ( _thumbCache.TryGetValue( entry.Thumb, out var cached ) ) return cached;
+		Texture tex = null;
+		try
+		{
+			tex = Texture.Load( entry.Thumb );
+		}
+		catch
+		{
+			tex = null;
+		}
+		_thumbCache[entry.Thumb] = tex;
+		return tex;
+	}
+
+	protected override int BuildHash() => HashCode.Combine(
+		IsOpen, IsLoading, CurrentPath, SelectedIdent, Entries.Count );
+}
