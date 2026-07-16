@@ -187,6 +187,21 @@ void SplineTool::renderFeedback(
   }
 }
 
+bool SplineTool::addPointMode() const
+{
+  return m_addPointMode;
+}
+
+void SplineTool::setAddPointMode(const bool addPointMode)
+{
+  if (addPointMode != m_addPointMode)
+  {
+    m_addPointMode = addPointMode;
+    refreshViews();
+    splineDidChangeNotifier();
+  }
+}
+
 bool SplineTool::hasPoints() const
 {
   return !m_points.empty();
@@ -372,41 +387,69 @@ void SplineTool::setSubdivisions(const size_t subdivisions)
   }
 }
 
-bool SplineTool::canLinkTemplateGroup() const
+bool SplineTool::canLinkTemplate() const
 {
-  return selectedGroup() != nullptr;
+  return selectedGroup() != nullptr || !m_document.map().selection().brushes.empty();
 }
 
-void SplineTool::linkTemplateGroup()
+void SplineTool::linkTemplate()
 {
   if (const auto* groupNode = selectedGroup())
   {
     if (groupNode->persistentId() && groupNode->persistentId() != m_templateGroupId)
     {
       m_templateGroupId = groupNode->persistentId();
-      commitSpline("Link Spline Group");
+      m_templateBrushes.clear();
+      commitSpline("Link Spline Template");
     }
+    return;
+  }
+
+  const auto& selectedBrushes = m_document.map().selection().brushes;
+  if (!selectedBrushes.empty())
+  {
+    // Individually selected brushes cannot be referenced persistently, so take a
+    // snapshot of their current state instead.
+    m_templateBrushes.clear();
+    m_templateBrushes.reserve(selectedBrushes.size());
+    for (const auto* brushNode : selectedBrushes)
+    {
+      m_templateBrushes.push_back(brushNode->brush());
+    }
+    m_templateGroupId = std::nullopt;
+    commitSpline("Link Spline Template");
   }
 }
 
-bool SplineTool::hasTemplateGroup() const
+bool SplineTool::hasTemplate() const
 {
-  return m_templateGroupId.has_value();
+  return m_templateGroupId.has_value() || !m_templateBrushes.empty();
 }
 
-void SplineTool::unlinkTemplateGroup()
+void SplineTool::unlinkTemplate()
+{
+  if (hasTemplate())
+  {
+    m_templateGroupId = std::nullopt;
+    m_templateBrushes.clear();
+    commitSpline("Unlink Spline Template");
+  }
+}
+
+std::string SplineTool::templateName() const
 {
   if (m_templateGroupId)
   {
-    m_templateGroupId = std::nullopt;
-    commitSpline("Unlink Spline Group");
+    const auto* groupNode = findTemplateGroup();
+    return groupNode ? groupNode->group().name() : "";
   }
-}
-
-std::string SplineTool::templateGroupName() const
-{
-  const auto* groupNode = findTemplateGroup();
-  return groupNode ? groupNode->group().name() : "";
+  if (!m_templateBrushes.empty())
+  {
+    return m_templateBrushes.size() == 1
+             ? std::string{"1 brush"}
+             : fmt::format("{} brushes", m_templateBrushes.size());
+  }
+  return "";
 }
 
 mdl::GroupNode* SplineTool::findTemplateGroup() const
@@ -468,12 +511,21 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
 {
   if (const auto data = mdl::parseSplineEntity(splineNode->entity()))
   {
+    auto& map = m_document.map();
+
     m_splineNode = splineNode;
     m_points = data->points;
     m_subdivisions = data->subdivisions;
     m_templateGroupId = data->templateGroupId;
+    m_templateBrushes = mdl::parseSplineTemplateBrushes(
+      splineNode->entity(), map.worldNode().mapFormat(), map.worldBounds());
     m_selectedIndex = std::nullopt;
     m_dragState = std::nullopt;
+
+    // Picking up an existing spline is usually done to edit its points, so disable
+    // add point mode to prevent accidentally appending new points.
+    m_addPointMode = false;
+
     refreshViews();
     splineDidChangeNotifier();
   }
@@ -485,6 +537,7 @@ void SplineTool::clearSpline()
   m_points.clear();
   m_subdivisions = mdl::SplineDefaultSubdivisions;
   m_templateGroupId = std::nullopt;
+  m_templateBrushes.clear();
   m_selectedIndex = std::nullopt;
   m_dragState = std::nullopt;
   refreshViews();
@@ -511,8 +564,9 @@ void SplineTool::commitSpline(const std::string& commandName)
   }
 
   const auto data = mdl::SplineEntityData{m_points, m_subdivisions, m_templateGroupId};
-  auto entity =
-    mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data);
+  auto entity = mdl::writeSplineTemplateBrushes(
+    mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data),
+    m_templateBrushes);
 
   // Give the entity an origin so that it has a sensible position while it has no
   // brushes yet.
@@ -557,24 +611,28 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes() const
     return {};
   }
 
-  auto* groupNode = findTemplateGroup();
-  if (!groupNode)
-  {
-    return {};
-  }
-
   auto templateBrushes = std::vector<const mdl::Brush*>{};
-  groupNode->visitChildren(kdl::overload(
-    [](auto&& thisLambda, mdl::GroupNode& nestedGroup) {
-      nestedGroup.visitChildren(thisLambda);
-    },
-    [](auto&& thisLambda, mdl::EntityNode& entityNode) {
-      entityNode.visitChildren(thisLambda);
-    },
-    [&](mdl::BrushNode& brushNode) { templateBrushes.push_back(&brushNode.brush()); },
-    [](mdl::WorldNode&) {},
-    [](mdl::LayerNode&) {},
-    [](mdl::PatchNode&) {}));
+  if (const auto* groupNode = findTemplateGroup())
+  {
+    groupNode->visitChildren(kdl::overload(
+      [](auto&& thisLambda, mdl::GroupNode& nestedGroup) {
+        nestedGroup.visitChildren(thisLambda);
+      },
+      [](auto&& thisLambda, mdl::EntityNode& entityNode) {
+        entityNode.visitChildren(thisLambda);
+      },
+      [&](mdl::BrushNode& brushNode) { templateBrushes.push_back(&brushNode.brush()); },
+      [](mdl::WorldNode&) {},
+      [](mdl::LayerNode&) {},
+      [](mdl::PatchNode&) {}));
+  }
+  else
+  {
+    for (const auto& brush : m_templateBrushes)
+    {
+      templateBrushes.push_back(&brush);
+    }
+  }
 
   if (templateBrushes.empty())
   {
@@ -613,7 +671,13 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes() const
 bool SplineTool::doActivate()
 {
   connectObservers();
+
+  // Start with add point mode enabled for a new spline; loading an existing spline
+  // from the selection disables it again.
+  m_addPointMode = true;
   loadFromSelection();
+
+  splineDidChangeNotifier();
   return true;
 }
 

@@ -21,6 +21,7 @@
 
 #include "Notifier.h"
 #include "NotifierConnection.h"
+#include "mdl/Brush.h"
 #include "mdl/HitType.h"
 #include "mdl/Spline.h"
 #include "mdl/SplineEntity.h"
@@ -85,7 +86,14 @@ private:
 
   std::vector<mdl::SplinePoint> m_points;
   size_t m_subdivisions = mdl::SplineDefaultSubdivisions;
+
+  /** The template is either a group (referenced by its persistent ID) or a snapshot
+   * of individually linked brushes; at most one of these is set. */
   std::optional<mdl::IdType> m_templateGroupId;
+  std::vector<mdl::Brush> m_templateBrushes;
+
+  /** Whether clicking empty space appends new points. */
+  bool m_addPointMode = true;
 
   /** The entity node holding the spline currently being edited, if any. */
   mdl::EntityNode* m_splineNode = nullptr;
@@ -121,6 +129,16 @@ public:
     render::RenderContext& renderContext,
     render::RenderBatch& renderBatch,
     const vm::vec3d& point) const;
+
+public: // add point mode
+  /**
+   * While add point mode is enabled, clicking empty space appends a new point to the
+   * spline; while it is disabled, clicks only select existing points. The mode is
+   * enabled automatically when the tool is activated with a new, empty spline, and
+   * disabled when an existing spline is picked up for editing.
+   */
+  bool addPointMode() const;
+  void setAddPointMode(bool addPointMode);
 
 public: // point management
   bool hasPoints() const;
@@ -161,13 +179,19 @@ public: // template group linkage
   size_t subdivisions() const;
   void setSubdivisions(size_t subdivisions);
 
-  /** Whether the current selection contains a group that can be linked. */
-  bool canLinkTemplateGroup() const;
-  /** Links the selected group as the spline's deformation template. */
-  void linkTemplateGroup();
-  bool hasTemplateGroup() const;
-  void unlinkTemplateGroup();
-  std::string templateGroupName() const;
+  /** Whether the current selection contains a group or brushes that can be linked. */
+  bool canLinkTemplate() const;
+  /**
+   * Links the current selection as the spline's deformation template. A selected
+   * group is linked by reference, so later changes to it are picked up when the
+   * spline is regenerated; a plain brush selection is linked by taking a snapshot of
+   * the selected brushes.
+   */
+  void linkTemplate();
+  bool hasTemplate() const;
+  void unlinkTemplate();
+  /** A user facing description of the linked template. */
+  std::string templateName() const;
 
 private:
   mdl::GroupNode* findTemplateGroup() const;

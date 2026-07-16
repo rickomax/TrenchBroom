@@ -24,12 +24,16 @@
 
 #include "kd/reflection_decl.h"
 
+#include "vm/bbox.h"
+
 #include <optional>
 #include <vector>
 
 namespace tb::mdl
 {
+class Brush;
 class Entity;
+enum class MapFormat;
 
 namespace SplinePropertyKeys
 {
@@ -40,6 +44,11 @@ constexpr auto PointPrefix = "_spline_point_";
 constexpr auto Subdivisions = "_spline_subdivisions";
 /** Persistent ID of the group whose brushes serve as the deformation template. */
 constexpr auto TemplateGroupId = "_spline_template_group";
+/** Per brush property holding a snapshot of a template brush; the index is appended,
+ * e.g. "_spline_template_brush_0". The value contains one face per semicolon separated
+ * segment, each of the form "x1 y1 z1 x2 y2 z2 x3 y3 z3 material". Used when the
+ * template is a plain brush selection rather than a group. */
+constexpr auto TemplateBrushPrefix = "_spline_template_brush_";
 } // namespace SplinePropertyKeys
 
 /**
@@ -81,5 +90,19 @@ std::optional<SplineEntityData> parseSplineEntity(const Entity& entity);
  * from the given entity's properties.
  */
 Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data);
+
+/**
+ * Reads the template brush snapshot stored in the given entity's properties. Invalid
+ * brushes are skipped; returns an empty vector if no snapshot is stored.
+ */
+std::vector<Brush> parseSplineTemplateBrushes(
+  const Entity& entity, MapFormat mapFormat, const vm::bbox3d& worldBounds);
+
+/**
+ * Returns an entity carrying a snapshot of the given brushes in its properties. Any
+ * previously stored snapshot is removed; passing an empty vector just removes it.
+ */
+Entity writeSplineTemplateBrushes(
+  const Entity& entity, const std::vector<Brush>& brushes);
 
 } // namespace tb::mdl

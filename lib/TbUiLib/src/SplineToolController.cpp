@@ -76,7 +76,9 @@ public:
     render::RenderContext& renderContext,
     render::RenderBatch& renderBatch) const
   {
-    if (inputState.mouseButtons() == MouseButtons::None && !inputState.anyToolDragging())
+    if (
+      m_tool.addPointMode() && inputState.mouseButtons() == MouseButtons::None
+      && !inputState.anyToolDragging())
     {
       if (const auto position = newPointPosition(inputState))
       {
@@ -276,16 +278,20 @@ private:
       return false;
     }
 
-    // Clicking an existing point selects it; clicking elsewhere appends a new point.
+    // Clicking an existing point selects it; clicking elsewhere appends a new point,
+    // but only while add point mode is enabled.
     if (m_delegate->tool().selectPoint(inputState.pickResult()))
     {
       return true;
     }
 
-    if (const auto position = m_delegate->newPointPosition(inputState))
+    if (m_delegate->tool().addPointMode())
     {
-      m_delegate->tool().addPoint(*position);
-      return true;
+      if (const auto position = m_delegate->newPointPosition(inputState))
+      {
+        m_delegate->tool().addPoint(*position);
+        return true;
+      }
     }
     return false;
   }
@@ -350,6 +356,11 @@ void SplineToolControllerBase::render(
 
 bool SplineToolControllerBase::cancel()
 {
+  if (m_tool.addPointMode())
+  {
+    m_tool.setAddPointMode(false);
+    return true;
+  }
   if (m_tool.selectedPointIndex())
   {
     m_tool.deselectPoint();

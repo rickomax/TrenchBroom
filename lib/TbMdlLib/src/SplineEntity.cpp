@@ -19,10 +19,15 @@
 
 #include "mdl/SplineEntity.h"
 
+#include "mdl/Brush.h"
+#include "mdl/BrushFace.h"
+#include "mdl/BrushFaceAttributes.h"
 #include "mdl/Entity.h"
 #include "mdl/EntityProperties.h"
 
 #include "kd/reflection_impl.h"
+#include "kd/result.h"
+#include "kd/string_format.h"
 #include "kd/string_utils.h"
 
 #include "vm/vec.h"
@@ -30,6 +35,8 @@
 
 #include <fmt/format.h>
 
+#include <array>
+#include <sstream>
 #include <string>
 
 namespace tb::mdl
@@ -40,6 +47,77 @@ namespace
 std::string pointKey(const size_t index)
 {
   return fmt::format("{}{}", SplinePropertyKeys::PointPrefix, index);
+}
+
+std::string templateBrushKey(const size_t index)
+{
+  return fmt::format("{}{}", SplinePropertyKeys::TemplateBrushPrefix, index);
+}
+
+std::string formatTemplateBrush(const Brush& brush)
+{
+  auto faces = std::vector<std::string>{};
+  faces.reserve(brush.faceCount());
+  for (const auto& face : brush.faces())
+  {
+    const auto& p = face.points();
+    faces.push_back(fmt::format(
+      "{} {} {} {} {} {} {} {} {} {}",
+      p[0].x(),
+      p[0].y(),
+      p[0].z(),
+      p[1].x(),
+      p[1].y(),
+      p[1].z(),
+      p[2].x(),
+      p[2].y(),
+      p[2].z(),
+      face.attributes().materialName()));
+  }
+  return kdl::str_join(faces, ";");
+}
+
+std::optional<Brush> parseTemplateBrush(
+  const std::string& value, const MapFormat mapFormat, const vm::bbox3d& worldBounds)
+{
+  auto faces = std::vector<BrushFace>{};
+
+  for (const auto& faceStr : kdl::str_split(value, ";"))
+  {
+    auto stream = std::istringstream{faceStr};
+    auto coords = std::array<double, 9>{};
+    for (auto& coord : coords)
+    {
+      stream >> coord;
+    }
+    if (stream.fail())
+    {
+      return std::nullopt;
+    }
+
+    auto materialName = std::string{};
+    std::getline(stream, materialName);
+    materialName = kdl::str_trim(materialName);
+
+    auto face = BrushFace::create(
+      vm::vec3d{coords[0], coords[1], coords[2]},
+      vm::vec3d{coords[3], coords[4], coords[5]},
+      vm::vec3d{coords[6], coords[7], coords[8]},
+      BrushFaceAttributes{materialName},
+      mapFormat);
+    if (face.is_error())
+    {
+      return std::nullopt;
+    }
+    faces.push_back(std::move(face) | kdl::value());
+  }
+
+  auto brush = Brush::create(worldBounds, std::move(faces));
+  if (brush.is_error())
+  {
+    return std::nullopt;
+  }
+  return std::move(brush) | kdl::value();
 }
 
 std::optional<SplinePoint> parsePoint(const std::string& value)
@@ -146,6 +224,47 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   {
     result.addOrUpdateProperty(
       SplinePropertyKeys::TemplateGroupId, kdl::str_to_string(*data.templateGroupId));
+  }
+
+  return result;
+}
+
+std::vector<Brush> parseSplineTemplateBrushes(
+  const Entity& entity, const MapFormat mapFormat, const vm::bbox3d& worldBounds)
+{
+  auto brushes = std::vector<Brush>{};
+
+  for (size_t i = 0;; ++i)
+  {
+    const auto* value = entity.property(templateBrushKey(i));
+    if (!value)
+    {
+      break;
+    }
+    if (auto brush = parseTemplateBrush(*value, mapFormat, worldBounds))
+    {
+      brushes.push_back(std::move(*brush));
+    }
+  }
+
+  return brushes;
+}
+
+Entity writeSplineTemplateBrushes(const Entity& entity, const std::vector<Brush>& brushes)
+{
+  auto result = entity;
+
+  for (const auto& property : entity.properties())
+  {
+    if (property.hasPrefix(SplinePropertyKeys::TemplateBrushPrefix))
+    {
+      result.removeProperty(property.key());
+    }
+  }
+
+  for (size_t i = 0; i < brushes.size(); ++i)
+  {
+    result.addOrUpdateProperty(templateBrushKey(i), formatTemplateBrush(brushes[i]));
   }
 
   return result;

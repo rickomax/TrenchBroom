@@ -45,10 +45,15 @@ SplineToolPage::SplineToolPage(MapDocument& document, SplineTool& tool, QWidget*
 
 void SplineToolPage::createGui()
 {
+  m_addPoints = new QCheckBox{tr("Add Points")};
+  m_addPoints->setToolTip(
+    tr("While enabled, clicking empty space appends new points to the spline; "
+       "disable it to select and edit points without adding new ones"));
+
   m_templateLabel = new QLabel{tr("<none>")};
-  m_linkButton = new QPushButton{tr("Link Group")};
+  m_linkButton = new QPushButton{tr("Link Selection")};
   m_linkButton->setToolTip(
-    tr("Use the selected group's brushes as the spline's template"));
+    tr("Use the selected group or the selected brushes as the spline's template"));
   m_unlinkButton = new QPushButton{tr("Unlink")};
 
   m_roll = new QDoubleSpinBox{};
@@ -77,6 +82,8 @@ void SplineToolPage::createGui()
   auto* layout = new QHBoxLayout{};
   layout->setContentsMargins(0, 0, 0, 0);
 
+  layout->addWidget(m_addPoints);
+  layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Template:")});
   layout->addWidget(m_templateLabel);
   layout->addWidget(m_linkButton);
@@ -96,11 +103,15 @@ void SplineToolPage::createGui()
 
   setLayout(layout);
 
-  connect(
-    m_linkButton, &QPushButton::clicked, this, [this]() { m_tool.linkTemplateGroup(); });
-  connect(m_unlinkButton, &QPushButton::clicked, this, [this]() {
-    m_tool.unlinkTemplateGroup();
+  connect(m_addPoints, &QCheckBox::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setAddPointMode(checked);
+    }
   });
+  connect(m_linkButton, &QPushButton::clicked, this, [this]() { m_tool.linkTemplate(); });
+  connect(
+    m_unlinkButton, &QPushButton::clicked, this, [this]() { m_tool.unlinkTemplate(); });
   connect(
     m_roll,
     QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -146,14 +157,16 @@ void SplineToolPage::updateControls()
 {
   m_updatingControls = true;
 
-  const auto templateName = m_tool.templateGroupName();
+  m_addPoints->setChecked(m_tool.addPointMode());
+
+  const auto templateName = m_tool.templateName();
   m_templateLabel->setText(
-    m_tool.hasTemplateGroup()
+    m_tool.hasTemplate()
       ? (!templateName.empty() ? QString::fromStdString(templateName) : tr("<missing>"))
       : tr("<none>"));
 
-  m_linkButton->setEnabled(m_tool.canLinkTemplateGroup());
-  m_unlinkButton->setEnabled(m_tool.hasTemplateGroup());
+  m_linkButton->setEnabled(m_tool.canLinkTemplate());
+  m_unlinkButton->setEnabled(m_tool.hasTemplate());
 
   const auto hasSelectedPoint = m_tool.selectedPointIndex().has_value();
   m_roll->setEnabled(hasSelectedPoint && !m_tool.selectedPointLocked());

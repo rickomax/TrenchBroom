@@ -17,10 +17,19 @@
  along with TrenchBroom. If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "mdl/Brush.h"
+#include "mdl/BrushBuilder.h"
+#include "mdl/BrushFace.h"
 #include "mdl/Entity.h"
+#include "mdl/MapFormat.h"
 #include "mdl/SplineEntity.h"
 
+#include "kd/result.h"
+
+#include "vm/approx.h"
+#include "vm/bbox.h"
 #include "vm/vec.h"
+#include "vm/vec_io.h" // IWYU pragma: keep
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -85,6 +94,37 @@ TEST_CASE("SplineEntity")
     const auto splineEntity = writeSplineEntity(entity, data);
     REQUIRE(splineEntity.property("angle") != nullptr);
     CHECK(*splineEntity.property("angle") == "45");
+  }
+
+  SECTION("template brush snapshot round-trip")
+  {
+    const auto worldBounds = vm::bbox3d{8192.0};
+    const auto builder = BrushBuilder{MapFormat::Standard, worldBounds};
+    const auto brush =
+      builder.createCuboid(vm::bbox3d{{0, -16, -16}, {64, 16, 16}}, "some_material")
+      | kdl::value();
+
+    const auto entity = writeSplineTemplateBrushes(Entity{}, {brush});
+    CHECK(entity.property("_spline_template_brush_0") != nullptr);
+
+    const auto parsed =
+      parseSplineTemplateBrushes(entity, MapFormat::Standard, worldBounds);
+    REQUIRE(parsed.size() == 1);
+
+    CHECK(parsed.front().bounds().min == vm::approx{vm::vec3d{0, -16, -16}});
+    CHECK(parsed.front().bounds().max == vm::approx{vm::vec3d{64, 16, 16}});
+    for (const auto& face : parsed.front().faces())
+    {
+      CHECK(face.attributes().materialName() == "some_material");
+    }
+
+    SECTION("an empty snapshot removes stored brushes")
+    {
+      const auto clearedEntity = writeSplineTemplateBrushes(entity, {});
+      CHECK(clearedEntity.property("_spline_template_brush_0") == nullptr);
+      CHECK(parseSplineTemplateBrushes(clearedEntity, MapFormat::Standard, worldBounds)
+              .empty());
+    }
   }
 }
 
