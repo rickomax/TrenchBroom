@@ -160,6 +160,11 @@ inline auto ClipHandleColor =
 inline auto ClipFaceColor =
   Preference<Color>{"render/Colors/Clip face", RgbaF{0.6f, 0.4f, 0.0f, 0.35f}};
 
+inline auto SplineLineColor =
+  Preference<Color>{"render/Colors/Spline line", RgbF{1.0f, 0.5f, 0.0f}};
+inline auto SplineLockedHandleColor =
+  Preference<Color>{"render/Colors/Spline locked handle", RgbF{0.6f, 0.6f, 0.65f}};
+
 inline auto ExtrudeHandleColor =
   Preference<Color>{"render/Colors/Resize handle", RgbB{248, 230, 60}};
 inline auto RotateHandleRadius =

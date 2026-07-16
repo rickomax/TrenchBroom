@@ -38,9 +38,10 @@ constexpr Type ScaleTool = 1u << 6u;
 constexpr Type ShearTool = 1u << 7u;
 constexpr Type AnyVertexTool = 1u << 8u;
 constexpr Type ControlPointTool = 1u << 9u;
+constexpr Type SplineTool = 1u << 13u;
 constexpr Type AnyNodeHandleTool = AnyVertexTool | ControlPointTool;
-constexpr Type AnyTool =
-  AnyNodeHandleTool | AssembleBrushTool | ClipTool | RotateTool | ScaleTool | ShearTool;
+constexpr Type AnyTool = AnyNodeHandleTool | AssembleBrushTool | ClipTool | RotateTool
+                         | ScaleTool | ShearTool | SplineTool;
 constexpr Type AnyOrNoTool = AnyTool | NoTool;
 constexpr Type NoSelection = 1u << 10u;
 constexpr Type NodeSelection = 1u << 11u;

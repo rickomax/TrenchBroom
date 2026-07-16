@@ -1,0 +1,716 @@
+/*
+ Copyright (C) 2026 Kristian Duske
+
+ This file is part of TrenchBroom.
+
+ TrenchBroom is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, either version 3 of the License, or
+ (at your option) any later version.
+
+ TrenchBroom is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ GNU General Public License for more details.
+
+ You should have received a copy of the GNU General Public License
+ along with TrenchBroom. If not, see <http://www.gnu.org/licenses/>.
+ */
+
+#include "ui/SplineTool.h"
+
+#include "Logger.h"
+#include "PreferenceManager.h"
+#include "Preferences.h"
+#include "gl/Camera.h"
+#include "mdl/Brush.h"
+#include "mdl/BrushNode.h"
+#include "mdl/Entity.h"
+#include "mdl/EntityNode.h"
+#include "mdl/GroupNode.h"
+#include "mdl/Hit.h"
+#include "mdl/HitFilter.h"
+#include "mdl/LayerNode.h"
+#include "mdl/Map.h"
+#include "mdl/Map_Nodes.h"
+#include "mdl/PatchNode.h"
+#include "mdl/PickResult.h"
+#include "mdl/SplineBrushes.h"
+#include "mdl/Transaction.h"
+#include "mdl/WorldNode.h"
+#include "render/RenderService.h"
+#include "ui/MapDocument.h"
+#include "ui/SplineToolPage.h"
+
+#include "kd/overload.h"
+#include "kd/ranges/to.h"
+#include "kd/result.h"
+#include "kd/set_temp.h"
+
+#include "vm/vec.h"
+
+#include <fmt/format.h>
+
+#include <algorithm>
+#include <ranges>
+
+namespace tb::ui
+{
+
+const mdl::HitType::Type SplineTool::PointHitType = mdl::HitType::freeType();
+
+SplineTool::SplineTool(MapDocument& document)
+  : Tool{false}
+  , m_document{document}
+{
+}
+
+SplineTool::~SplineTool() = default;
+
+const mdl::Grid& SplineTool::grid() const
+{
+  return m_document.map().grid();
+}
+
+void SplineTool::pick(
+  const vm::ray3d& pickRay, const gl::Camera& camera, mdl::PickResult& pickResult)
+{
+  for (size_t i = 0; i < m_points.size(); ++i)
+  {
+    if (
+      const auto distance = camera.pickPointHandle(
+        pickRay, m_points[i].position, double(pref(Preferences::HandleRadius))))
+    {
+      const auto hitPoint = vm::point_at_distance(pickRay, *distance);
+      pickResult.addHit(mdl::Hit{PointHitType, *distance, hitPoint, i});
+    }
+  }
+}
+
+void SplineTool::render(
+  render::RenderContext& renderContext,
+  render::RenderBatch& renderBatch,
+  const mdl::PickResult& pickResult)
+{
+  if (m_points.empty())
+  {
+    return;
+  }
+
+  auto renderService = render::RenderService{renderContext, renderBatch};
+  renderService.setShowOccludedObjects();
+
+  if (m_points.size() > 1)
+  {
+    const auto samples = mdl::sampleSpline(m_points, m_subdivisions);
+    const auto vertices =
+      samples | std::views::transform([](const auto& point) { return vm::vec3f{point}; })
+      | kdl::ranges::to<std::vector>();
+
+    renderService.setForegroundColor(pref(Preferences::SplineLineColor));
+    renderService.setLineWidth(2.0f);
+    renderService.renderLineStrip(vertices);
+  }
+
+  // Visualize the roll of the selected point by rendering the coordinate frame at its
+  // position.
+  if (m_selectedIndex && m_points.size() > 1)
+  {
+    const auto frames = mdl::computeSplineFrames(m_points, m_subdivisions);
+    const auto frameIndex = *m_selectedIndex * m_subdivisions;
+    if (frameIndex < frames.size())
+    {
+      const auto& frame = frames[frameIndex];
+      const auto axisLength = 24.0;
+
+      renderService.setLineWidth(2.0f);
+      renderService.setForegroundColor(pref(Preferences::YAxisColor));
+      renderService.renderLine(
+        vm::vec3f{frame.position}, vm::vec3f{frame.position + frame.normal * axisLength});
+      renderService.setForegroundColor(pref(Preferences::ZAxisColor));
+      renderService.renderLine(
+        vm::vec3f{frame.position},
+        vm::vec3f{frame.position + frame.binormal * axisLength});
+    }
+  }
+
+  for (size_t i = 0; i < m_points.size(); ++i)
+  {
+    const auto& point = m_points[i];
+
+    renderService.setForegroundColor(
+      m_selectedIndex == i ? pref(Preferences::SelectedHandleColor)
+      : point.locked       ? pref(Preferences::SplineLockedHandleColor)
+                           : pref(Preferences::HandleColor));
+    renderService.renderHandle(vm::vec3f{point.position});
+  }
+
+  using namespace mdl::HitFilters;
+  const auto& hit = pickResult.first(type(PointHitType));
+  if (hit.isMatch())
+  {
+    const auto index = hit.target<size_t>();
+    renderService.setForegroundColor(pref(Preferences::SelectedHandleColor));
+    renderService.renderHandleHighlight(vm::vec3f{m_points[index].position});
+  }
+
+  if (m_selectedIndex && *m_selectedIndex < m_points.size())
+  {
+    const auto& point = m_points[*m_selectedIndex];
+    renderService.setForegroundColor(pref(Preferences::SelectedHandleColor));
+    renderService.renderHandleHighlight(vm::vec3f{point.position});
+    renderService.setBackgroundColor(pref(Preferences::InfoOverlayBackgroundColor));
+    renderService.renderString(
+      fmt::format(
+        "Point {} | Roll {:g}{}",
+        *m_selectedIndex,
+        point.roll,
+        point.locked ? " | Locked" : ""),
+      vm::vec3f{point.position});
+  }
+}
+
+void SplineTool::renderFeedback(
+  render::RenderContext& renderContext,
+  render::RenderBatch& renderBatch,
+  const vm::vec3d& point) const
+{
+  auto renderService = render::RenderService{renderContext, renderBatch};
+  renderService.setShowOccludedObjects();
+  renderService.setForegroundColor(pref(Preferences::HandleColor));
+  renderService.renderHandle(vm::vec3f{point});
+
+  if (!m_points.empty())
+  {
+    renderService.setForegroundColor(pref(Preferences::SplineLineColor));
+    renderService.renderLine(vm::vec3f{m_points.back().position}, vm::vec3f{point});
+  }
+}
+
+bool SplineTool::hasPoints() const
+{
+  return !m_points.empty();
+}
+
+const std::vector<mdl::SplinePoint>& SplineTool::points() const
+{
+  return m_points;
+}
+
+std::optional<vm::vec3d> SplineTool::lastPointPosition() const
+{
+  return !m_points.empty() ? std::optional{m_points.back().position} : std::nullopt;
+}
+
+void SplineTool::addPoint(const vm::vec3d& point)
+{
+  m_points.push_back(mdl::SplinePoint{point});
+  m_selectedIndex = m_points.size() - 1;
+  commitSpline("Add Spline Point");
+}
+
+bool SplineTool::canRemovePoint() const
+{
+  return !m_points.empty();
+}
+
+void SplineTool::removePoint()
+{
+  if (m_points.empty())
+  {
+    return;
+  }
+
+  const auto index = m_selectedIndex ? *m_selectedIndex : m_points.size() - 1;
+  m_points.erase(std::next(m_points.begin(), std::ptrdiff_t(index)));
+  m_selectedIndex = std::nullopt;
+  commitSpline("Remove Spline Point");
+}
+
+bool SplineTool::selectPoint(const mdl::PickResult& pickResult)
+{
+  using namespace mdl::HitFilters;
+
+  const auto& hit = pickResult.first(type(PointHitType));
+  if (!hit.isMatch())
+  {
+    return false;
+  }
+
+  m_selectedIndex = hit.target<size_t>();
+  refreshViews();
+  splineDidChangeNotifier();
+  return true;
+}
+
+void SplineTool::deselectPoint()
+{
+  m_selectedIndex = std::nullopt;
+  refreshViews();
+  splineDidChangeNotifier();
+}
+
+std::optional<size_t> SplineTool::selectedPointIndex() const
+{
+  return m_selectedIndex;
+}
+
+std::optional<std::tuple<vm::vec3d, vm::vec3d>> SplineTool::beginDragPoint(
+  const mdl::PickResult& pickResult)
+{
+  using namespace mdl::HitFilters;
+
+  const auto& hit = pickResult.first(type(PointHitType));
+  if (!hit.isMatch())
+  {
+    return std::nullopt;
+  }
+
+  const auto index = hit.target<size_t>();
+  if (m_points[index].locked)
+  {
+    return std::nullopt;
+  }
+
+  m_selectedIndex = index;
+  m_dragState = DragState{index, m_points[index]};
+  splineDidChangeNotifier();
+  return {{m_points[index].position, hit.hitPoint()}};
+}
+
+bool SplineTool::dragPoint(const vm::vec3d& newPosition)
+{
+  if (!m_dragState)
+  {
+    return false;
+  }
+
+  m_points[m_dragState->index].position = newPosition;
+  refreshViews();
+  return true;
+}
+
+void SplineTool::endDragPoint()
+{
+  m_dragState = std::nullopt;
+  commitSpline("Move Spline Point");
+}
+
+void SplineTool::cancelDragPoint()
+{
+  if (m_dragState)
+  {
+    m_points[m_dragState->index] = m_dragState->originalPoint;
+    m_dragState = std::nullopt;
+    refreshViews();
+  }
+}
+
+double SplineTool::selectedPointRoll() const
+{
+  return m_selectedIndex && *m_selectedIndex < m_points.size()
+           ? m_points[*m_selectedIndex].roll
+           : 0.0;
+}
+
+void SplineTool::setSelectedPointRoll(const double roll)
+{
+  if (
+    m_selectedIndex && *m_selectedIndex < m_points.size()
+    && m_points[*m_selectedIndex].roll != roll && !m_points[*m_selectedIndex].locked)
+  {
+    m_points[*m_selectedIndex].roll = roll;
+    commitSpline("Rotate Spline Point");
+  }
+}
+
+bool SplineTool::selectedPointLocked() const
+{
+  return m_selectedIndex && *m_selectedIndex < m_points.size()
+         && m_points[*m_selectedIndex].locked;
+}
+
+void SplineTool::toggleSelectedPointLocked()
+{
+  if (m_selectedIndex && *m_selectedIndex < m_points.size())
+  {
+    m_points[*m_selectedIndex].locked = !m_points[*m_selectedIndex].locked;
+    commitSpline(
+      m_points[*m_selectedIndex].locked ? "Lock Spline Point" : "Unlock Spline Point");
+  }
+}
+
+void SplineTool::rotateUnlockedPoints(const double deltaRoll)
+{
+  auto changed = false;
+  for (auto& point : m_points)
+  {
+    if (!point.locked)
+    {
+      point.roll += deltaRoll;
+      changed = true;
+    }
+  }
+
+  if (changed)
+  {
+    commitSpline("Rotate Spline Points");
+  }
+}
+
+size_t SplineTool::subdivisions() const
+{
+  return m_subdivisions;
+}
+
+void SplineTool::setSubdivisions(const size_t subdivisions)
+{
+  if (subdivisions > 0 && subdivisions != m_subdivisions)
+  {
+    m_subdivisions = subdivisions;
+    commitSpline("Change Spline Subdivisions");
+  }
+}
+
+bool SplineTool::canLinkTemplateGroup() const
+{
+  return selectedGroup() != nullptr;
+}
+
+void SplineTool::linkTemplateGroup()
+{
+  if (const auto* groupNode = selectedGroup())
+  {
+    if (groupNode->persistentId() && groupNode->persistentId() != m_templateGroupId)
+    {
+      m_templateGroupId = groupNode->persistentId();
+      commitSpline("Link Spline Group");
+    }
+  }
+}
+
+bool SplineTool::hasTemplateGroup() const
+{
+  return m_templateGroupId.has_value();
+}
+
+void SplineTool::unlinkTemplateGroup()
+{
+  if (m_templateGroupId)
+  {
+    m_templateGroupId = std::nullopt;
+    commitSpline("Unlink Spline Group");
+  }
+}
+
+std::string SplineTool::templateGroupName() const
+{
+  const auto* groupNode = findTemplateGroup();
+  return groupNode ? groupNode->group().name() : "";
+}
+
+mdl::GroupNode* SplineTool::findTemplateGroup() const
+{
+  if (!m_templateGroupId)
+  {
+    return nullptr;
+  }
+
+  mdl::GroupNode* result = nullptr;
+  m_document.map().worldNode().accept(kdl::overload(
+    [](auto&& thisLambda, mdl::WorldNode& worldNode) {
+      worldNode.visitChildren(thisLambda);
+    },
+    [](auto&& thisLambda, mdl::LayerNode& layerNode) {
+      layerNode.visitChildren(thisLambda);
+    },
+    [&](auto&& thisLambda, mdl::GroupNode& groupNode) {
+      if (groupNode.persistentId() == m_templateGroupId)
+      {
+        result = &groupNode;
+      }
+      else
+      {
+        groupNode.visitChildren(thisLambda);
+      }
+    },
+    [](mdl::EntityNode&) {},
+    [](mdl::BrushNode&) {},
+    [](mdl::PatchNode&) {}));
+
+  return result;
+}
+
+mdl::GroupNode* SplineTool::selectedGroup() const
+{
+  const auto& groups = m_document.map().selection().groups;
+  return groups.size() == 1 ? groups.front() : nullptr;
+}
+
+void SplineTool::loadFromSelection()
+{
+  for (auto* node : m_document.map().selection().nodes)
+  {
+    // Look for a selected spline entity, or a selected brush belonging to one.
+    for (auto* candidate = node; candidate != nullptr; candidate = candidate->parent())
+    {
+      if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(candidate);
+          entityNode && mdl::isSplineEntity(entityNode->entity()))
+      {
+        loadSplineNode(entityNode);
+        return;
+      }
+    }
+  }
+}
+
+void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
+{
+  if (const auto data = mdl::parseSplineEntity(splineNode->entity()))
+  {
+    m_splineNode = splineNode;
+    m_points = data->points;
+    m_subdivisions = data->subdivisions;
+    m_templateGroupId = data->templateGroupId;
+    m_selectedIndex = std::nullopt;
+    m_dragState = std::nullopt;
+    refreshViews();
+    splineDidChangeNotifier();
+  }
+}
+
+void SplineTool::clearSpline()
+{
+  m_splineNode = nullptr;
+  m_points.clear();
+  m_subdivisions = mdl::SplineDefaultSubdivisions;
+  m_templateGroupId = std::nullopt;
+  m_selectedIndex = std::nullopt;
+  m_dragState = std::nullopt;
+  refreshViews();
+  splineDidChangeNotifier();
+}
+
+void SplineTool::commitSpline(const std::string& commandName)
+{
+  const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
+  auto& map = m_document.map();
+
+  if (m_points.empty())
+  {
+    if (m_splineNode)
+    {
+      auto transaction = mdl::Transaction{map, commandName};
+      removeNodes(map, {m_splineNode});
+      m_splineNode = nullptr;
+      transaction.commit();
+    }
+    refreshViews();
+    splineDidChangeNotifier();
+    return;
+  }
+
+  const auto data = mdl::SplineEntityData{m_points, m_subdivisions, m_templateGroupId};
+  auto entity =
+    mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data);
+
+  // Give the entity an origin so that it has a sensible position while it has no
+  // brushes yet.
+  entity.addOrUpdateProperty(
+    "origin",
+    fmt::format(
+      "{:g} {:g} {:g}",
+      m_points.front().position.x(),
+      m_points.front().position.y(),
+      m_points.front().position.z()));
+
+  auto* newNode = new mdl::EntityNode{std::move(entity)};
+  newNode->addChildren(createBrushNodes());
+
+  auto* parent = m_splineNode ? m_splineNode->parent() : parentForNodes(map, {});
+
+  auto transaction = mdl::Transaction{map, commandName};
+  if (m_splineNode)
+  {
+    removeNodes(map, {m_splineNode});
+  }
+  const auto addedNodes = addNodes(map, {{parent, {newNode}}});
+  if (addedNodes.empty())
+  {
+    transaction.cancel();
+    m_splineNode = nullptr;
+  }
+  else
+  {
+    m_splineNode = newNode;
+    transaction.commit();
+  }
+
+  refreshViews();
+  splineDidChangeNotifier();
+}
+
+std::vector<mdl::Node*> SplineTool::createBrushNodes() const
+{
+  if (m_points.size() < 2)
+  {
+    return {};
+  }
+
+  auto* groupNode = findTemplateGroup();
+  if (!groupNode)
+  {
+    return {};
+  }
+
+  auto templateBrushes = std::vector<const mdl::Brush*>{};
+  groupNode->visitChildren(kdl::overload(
+    [](auto&& thisLambda, mdl::GroupNode& nestedGroup) {
+      nestedGroup.visitChildren(thisLambda);
+    },
+    [](auto&& thisLambda, mdl::EntityNode& entityNode) {
+      entityNode.visitChildren(thisLambda);
+    },
+    [&](mdl::BrushNode& brushNode) { templateBrushes.push_back(&brushNode.brush()); },
+    [](mdl::WorldNode&) {},
+    [](mdl::LayerNode&) {},
+    [](mdl::PatchNode&) {}));
+
+  if (templateBrushes.empty())
+  {
+    return {};
+  }
+
+  auto templateBounds = templateBrushes.front()->bounds();
+  for (const auto* brush : templateBrushes)
+  {
+    templateBounds = vm::merge(templateBounds, brush->bounds());
+  }
+
+  const auto frames = mdl::computeSplineFrames(m_points, m_subdivisions);
+
+  auto& map = m_document.map();
+  return mdl::createSplineBrushes(
+           map.worldNode().mapFormat(),
+           map.worldBounds(),
+           frames,
+           templateBrushes,
+           templateBounds)
+         | kdl::transform([](auto brushes) {
+             return brushes | std::views::transform([](auto& brush) {
+                      return static_cast<mdl::Node*>(
+                        new mdl::BrushNode{std::move(brush)});
+                    })
+                    | kdl::ranges::to<std::vector>();
+           })
+         | kdl::transform_error([&](const auto& e) {
+             map.logger().error() << "Could not create spline brushes: " << e.msg;
+             return std::vector<mdl::Node*>{};
+           })
+         | kdl::value();
+}
+
+bool SplineTool::doActivate()
+{
+  connectObservers();
+  loadFromSelection();
+  return true;
+}
+
+bool SplineTool::doDeactivate()
+{
+  m_notifierConnection.disconnect();
+  clearSpline();
+  return true;
+}
+
+QWidget* SplineTool::doCreatePage(QWidget* parent)
+{
+  return new SplineToolPage{m_document, *this, parent};
+}
+
+void SplineTool::connectObservers()
+{
+  auto& map = m_document.map();
+  m_notifierConnection += map.nodesWereAddedNotifier.connect(
+    [this](const auto& nodes) { nodesWereAdded(nodes); });
+  m_notifierConnection += map.nodesWereRemovedNotifier.connect(
+    [this](const auto& nodes) { nodesWereRemoved(nodes); });
+  m_notifierConnection += map.nodesDidChangeNotifier.connect(
+    [this](const auto& nodes) { nodesDidChange(nodes); });
+  m_notifierConnection +=
+    map.selectionDidChangeNotifier.connect([this](const auto&) { selectionDidChange(); });
+}
+
+void SplineTool::nodesWereAdded(const std::vector<mdl::Node*>& nodes)
+{
+  if (m_ignoreNotifications || m_splineNode != nullptr)
+  {
+    return;
+  }
+
+  // Adopt a spline entity that reappears, e.g. when a spline edit is undone.
+  for (auto* node : nodes)
+  {
+    if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(node);
+        entityNode && mdl::isSplineEntity(entityNode->entity()))
+    {
+      loadSplineNode(entityNode);
+      return;
+    }
+  }
+}
+
+void SplineTool::nodesWereRemoved(const std::vector<mdl::Node*>& nodes)
+{
+  if (m_ignoreNotifications || !m_splineNode)
+  {
+    return;
+  }
+
+  if (std::ranges::find(nodes, m_splineNode) != nodes.end())
+  {
+    clearSpline();
+  }
+}
+
+void SplineTool::nodesDidChange(const std::vector<mdl::Node*>& nodes)
+{
+  if (m_ignoreNotifications || !m_splineNode)
+  {
+    return;
+  }
+
+  if (std::ranges::find(nodes, static_cast<mdl::Node*>(m_splineNode)) != nodes.end())
+  {
+    loadSplineNode(m_splineNode);
+  }
+}
+
+void SplineTool::selectionDidChange()
+{
+  if (m_ignoreNotifications)
+  {
+    return;
+  }
+
+  // Switch to a newly selected spline entity, but keep editing the current spline if
+  // the selection does not contain one.
+  for (auto* node : m_document.map().selection().nodes)
+  {
+    for (auto* candidate = node; candidate != nullptr; candidate = candidate->parent())
+    {
+      if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(candidate);
+          entityNode && entityNode != m_splineNode
+          && mdl::isSplineEntity(entityNode->entity()))
+      {
+        loadSplineNode(entityNode);
+        return;
+      }
+    }
+  }
+
+  splineDidChangeNotifier();
+}
+
+} // namespace tb::ui

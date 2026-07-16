@@ -123,6 +123,10 @@ std::string actionContextName(const ActionContext::Type actionContext)
     {
       actionContexts.emplace_back("control point tool");
     }
+    if (actionContext & ActionContext::SplineTool)
+    {
+      actionContexts.emplace_back("spline tool");
+    }
   }
 
   return kdl::str_join(actionContexts, ", ");

@@ -25,6 +25,7 @@
 #include "ui/AssembleBrushTool.h"
 #include "ui/ClipTool.h"
 #include "ui/ControlPointTool.h"
+#include "ui/SplineTool.h"
 #include "ui/CreateEntityTool.h"
 #include "ui/DrawShapeTool.h"
 #include "ui/EdgeTool.h"
@@ -174,6 +175,16 @@ const ControlPointTool& MapViewToolBox::controlPointTool() const
 ControlPointTool& MapViewToolBox::controlPointTool()
 {
   return KDL_CONST_OVERLOAD(controlPointTool());
+}
+
+const SplineTool& MapViewToolBox::splineTool() const
+{
+  return *m_splineTool;
+}
+
+SplineTool& MapViewToolBox::splineTool()
+{
+  return KDL_CONST_OVERLOAD(splineTool());
 }
 
 bool MapViewToolBox::canToggleAssembleBrushTool() const
@@ -395,6 +406,24 @@ bool MapViewToolBox::controlPointToolActive() const
   return m_controlPointTool->active();
 }
 
+bool MapViewToolBox::canToggleSplineTool() const
+{
+  return true;
+}
+
+void MapViewToolBox::toggleSplineTool()
+{
+  if (canToggleSplineTool())
+  {
+    toggleTool(splineTool());
+  }
+}
+
+bool MapViewToolBox::splineToolActive() const
+{
+  return m_splineTool->active();
+}
+
 bool MapViewToolBox::anyModalToolActive() const
 {
   return rotateToolActive() || scaleToolActive() || shearToolActive()
@@ -438,6 +467,7 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   m_edgeTool = std::make_unique<EdgeTool>(m_document);
   m_faceTool = std::make_unique<FaceTool>(m_document);
   m_controlPointTool = std::make_unique<ControlPointTool>(m_document);
+  m_splineTool = std::make_unique<SplineTool>(m_document);
 
   addExclusiveToolGroup(
     assembleBrushTool(),
@@ -447,7 +477,8 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
     controlPointTool(),
     edgeTool(),
     faceTool(),
-    clipTool());
+    clipTool(),
+    splineTool());
 
   addExclusiveToolGroup(
     assembleBrushTool(),
@@ -455,7 +486,8 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
     edgeTool(),
     faceTool(),
     controlPointTool(),
-    clipTool());
+    clipTool(),
+    splineTool());
 
   suppressWhileActive(
     assembleBrushTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
@@ -468,6 +500,7 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   suppressWhileActive(
     controlPointTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
   suppressWhileActive(clipTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
+  suppressWhileActive(splineTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
 
   registerTool(moveObjectsTool(), bookCtrl);
   registerTool(rotateTool(), bookCtrl);
@@ -480,6 +513,7 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   registerTool(edgeTool(), bookCtrl);
   registerTool(faceTool(), bookCtrl);
   registerTool(controlPointTool(), bookCtrl);
+  registerTool(splineTool(), bookCtrl);
   registerTool(createEntityTool(), bookCtrl);
   registerTool(drawShapeTool(), bookCtrl);
 
@@ -567,6 +601,10 @@ void MapViewToolBox::updateToolPage()
   else if (clipToolActive())
   {
     clipTool().showPage();
+  }
+  else if (splineToolActive())
+  {
+    splineTool().showPage();
   }
   else
   {

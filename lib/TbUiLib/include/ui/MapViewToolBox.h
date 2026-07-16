@@ -51,6 +51,7 @@ class VertexTool;
 class EdgeTool;
 class FaceTool;
 class ControlPointTool;
+class SplineTool;
 
 class MapViewToolBox : public ToolBox
 {
@@ -70,6 +71,7 @@ private:
   std::unique_ptr<EdgeTool> m_edgeTool;
   std::unique_ptr<FaceTool> m_faceTool;
   std::unique_ptr<ControlPointTool> m_controlPointTool;
+  std::unique_ptr<SplineTool> m_splineTool;
 
   NotifierConnection m_notifierConnection;
 
@@ -117,6 +119,9 @@ public: // tools
   const ControlPointTool& controlPointTool() const;
   ControlPointTool& controlPointTool();
 
+  const SplineTool& splineTool() const;
+  SplineTool& splineTool();
+
   bool canToggleAssembleBrushTool() const;
   void toggleAssembleBrushTool();
   bool assembleBrushToolActive() const;
@@ -160,6 +165,10 @@ public: // tools
   bool canToggleControlPointTool() const;
   void toggleControlPointTool();
   bool controlPointToolActive() const;
+
+  bool canToggleSplineTool() const;
+  void toggleSplineTool();
+  bool splineToolActive() const;
 
   bool anyModalToolActive() const;
 

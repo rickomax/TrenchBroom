@@ -177,6 +177,9 @@ target_sources(TbMdlLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SetVisibilityCommand.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SoftMapBounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SoftMapBoundsValidator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Spline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineBrushes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineEntity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/StandardMapParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SwapNodeContentsCommand.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Tag.cpp

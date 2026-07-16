@@ -93,6 +93,9 @@ target_sources(TbMdlLibTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_PortalFile.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_Quake3ShaderParser.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_Selection.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_Spline.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_SplineBrushes.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_SplineEntity.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_Tagging.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_Transaction.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_UpdateBrushFaceAttributes.cpp
