@@ -231,9 +231,16 @@ if(WIN32)
     endif()
 endif()
 
-# Generate a small stripped PDB for release builds so we get stack traces with symbols
+# Generate a small stripped PDB for release builds so we get stack traces with symbols.
+# Use an absolute path for the stripped PDB: a relative path is resolved against the
+# linker's working directory, which depends on the generator, and the linker fails
+# with a write error if the resulting directory does not exist.
 if(COMPILER_IS_MSVC)
-    set_target_properties(TrenchBroom PROPERTIES LINK_FLAGS_RELEASE "/DEBUG /PDBSTRIPPED:app/TrenchBroom/TrenchBroom-stripped.pdb /PDBALTPATH:TrenchBroom-stripped.pdb")
+    target_link_options(TrenchBroom PRIVATE
+        "$<$<CONFIG:Release>:/DEBUG>"
+        "$<$<CONFIG:Release>:/PDBSTRIPPED:${CMAKE_CURRENT_BINARY_DIR}/TrenchBroom-stripped.pdb>"
+        "$<$<CONFIG:Release>:/PDBALTPATH:TrenchBroom-stripped.pdb>"
+    )
 endif()
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
@@ -341,7 +348,7 @@ if(WIN32)
             DESTINATION . COMPONENT TrenchBroom
             CONFIGURATIONS Debug RelWithDebInfo)
         install(FILES
-            "$<TARGET_FILE_DIR:TrenchBroom>/TrenchBroom-stripped.pdb"
+            "${CMAKE_CURRENT_BINARY_DIR}/TrenchBroom-stripped.pdb"
             DESTINATION . COMPONENT TrenchBroom
             CONFIGURATIONS Release)
     endif()
