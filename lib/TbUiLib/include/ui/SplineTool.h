@@ -93,7 +93,7 @@ private:
   std::vector<mdl::Brush> m_templateBrushes;
 
   /** Whether clicking empty space appends new points. */
-  bool m_addPointMode = true;
+  bool m_addPointMode = false;
 
   /** The entity node holding the spline currently being edited, if any. */
   mdl::EntityNode* m_splineNode = nullptr;
@@ -134,8 +134,8 @@ public: // add point mode
   /**
    * While add point mode is enabled, clicking empty space appends a new point to the
    * spline; while it is disabled, clicks only select existing points. The mode is
-   * enabled automatically when the tool is activated with a new, empty spline, and
-   * disabled when an existing spline is picked up for editing.
+   * always disabled when the tool is activated and must be enabled explicitly on the
+   * tool page.
    */
   bool addPointMode() const;
   void setAddPointMode(bool addPointMode);

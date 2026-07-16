@@ -39,8 +39,8 @@ enum class MapFormat;
  * runs along the spline: the X extent of the given template bounds is mapped onto the
  * curve's arc length, and the Y / Z offsets from the bounds center are applied
  * sideways / upwards along the curve's normal and binormal. The template is repeated
- * along the curve as often as it fits, and stretched slightly so that a whole number
- * of repetitions covers the entire curve.
+ * at its natural size along the curve as often as it fits, keeping the template's
+ * proportions; only the last repetition is scaled to cover the remaining arc length.
  *
  * To keep the resulting brushes convex, each template brush is cut into slices between
  * consecutive curve samples, and each slice is deformed individually. Face materials

@@ -237,11 +237,11 @@ Result<std::vector<Brush>> createSplineBrushes(
     return Error{"Spline template contains no brushes"};
   }
 
-  // Repeat the template as often as it fits along the curve, stretching it so that a
-  // whole number of repetitions covers the entire curve.
+  // Repeat the template at its natural size as often as it fits along the curve, so
+  // that the generated brushes keep the template's proportions. Only the last
+  // repetition is scaled to cover the remaining arc length.
   const auto repetitions =
     vm::max(size_t(1), size_t(std::round(totalLength / templateLength)));
-  const auto arcScale = totalLength / (double(repetitions) * templateLength);
 
   const auto builder = BrushBuilder{mapFormat, worldBounds};
 
@@ -249,7 +249,14 @@ Result<std::vector<Brush>> createSplineBrushes(
 
   for (size_t repetition = 0; repetition < repetitions; ++repetition)
   {
-    const auto arcStart = double(repetition) * templateLength * arcScale;
+    const auto arcStart = double(repetition) * templateLength;
+    const auto tileLength =
+      repetition + 1 < repetitions ? templateLength : totalLength - arcStart;
+    const auto arcScale = tileLength / templateLength;
+    if (tileLength <= 0.0)
+    {
+      continue;
+    }
 
     for (const auto* templateBrush : templateBrushes)
     {

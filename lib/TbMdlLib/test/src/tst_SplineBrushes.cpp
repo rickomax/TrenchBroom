@@ -113,6 +113,49 @@ TEST_CASE("createSplineBrushes")
     }
   }
 
+  SECTION("repetitions keep the template's natural size")
+  {
+    // The template brush covers only the first half of the template bounds, so the
+    // generated geometry reveals where each repetition starts and how it is scaled.
+    const auto halfBrush =
+      makeCuboid(vm::bbox3d{{0, -16, -16}, {32, 16, 16}}, "some_material");
+    const auto halfBrushes = std::vector<const Brush*>{&halfBrush};
+
+    // The curve is 1.5 template lengths long: the first repetition must keep its
+    // natural size, and only the second one is scaled (by 0.5) to fill the rest.
+    const auto points = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{96, 0, 0}},
+    };
+    const auto frames = computeSplineFrames(points, 4);
+
+    const auto brushes =
+      createSplineBrushes(
+        MapFormat::Standard, worldBounds, frames, halfBrushes, templateBounds)
+      | kdl::value();
+
+    CHECK(!brushes.empty());
+
+    for (const auto& brush : brushes)
+    {
+      // First repetition: natural size, brush occupies [0, 32].
+      // Second repetition: starts at 64 with scale 0.5, brush occupies [64, 80].
+      const auto inFirst =
+        brush.bounds().min.x() >= -0.001 && brush.bounds().max.x() <= 32.001;
+      const auto inSecond =
+        brush.bounds().min.x() >= 63.999 && brush.bounds().max.x() <= 80.001;
+      CHECK((inFirst || inSecond));
+    }
+
+    auto bounds = brushes.front().bounds();
+    for (const auto& brush : brushes)
+    {
+      bounds = vm::merge(bounds, brush.bounds());
+    }
+    CHECK(bounds.min.x() == vm::approx{0.0});
+    CHECK(bounds.max.x() == vm::approx{80.0});
+  }
+
   SECTION("curved spline produces valid brushes along the curve")
   {
     const auto points = std::vector<SplinePoint>{

@@ -672,9 +672,9 @@ bool SplineTool::doActivate()
 {
   connectObservers();
 
-  // Start with add point mode enabled for a new spline; loading an existing spline
-  // from the selection disables it again.
-  m_addPointMode = true;
+  // Always start with add point mode disabled so that switching to the tool never
+  // creates points accidentally; the user enables it explicitly on the tool page.
+  m_addPointMode = false;
   loadFromSelection();
 
   splineDidChangeNotifier();

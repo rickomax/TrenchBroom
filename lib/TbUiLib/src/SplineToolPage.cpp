@@ -45,7 +45,8 @@ SplineToolPage::SplineToolPage(MapDocument& document, SplineTool& tool, QWidget*
 
 void SplineToolPage::createGui()
 {
-  m_addPoints = new QCheckBox{tr("Add Points")};
+  m_addPoints = new QPushButton{tr("Add Points")};
+  m_addPoints->setCheckable(true);
   m_addPoints->setToolTip(
     tr("While enabled, clicking empty space appends new points to the spline; "
        "disable it to select and edit points without adding new ones"));
@@ -103,7 +104,7 @@ void SplineToolPage::createGui()
 
   setLayout(layout);
 
-  connect(m_addPoints, &QCheckBox::toggled, this, [this](const bool checked) {
+  connect(m_addPoints, &QPushButton::toggled, this, [this](const bool checked) {
     if (!m_updatingControls)
     {
       m_tool.setAddPointMode(checked);

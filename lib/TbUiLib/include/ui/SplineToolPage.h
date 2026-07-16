@@ -41,7 +41,7 @@ private:
   MapDocument& m_document;
   SplineTool& m_tool;
 
-  QCheckBox* m_addPoints = nullptr;
+  QPushButton* m_addPoints = nullptr;
   QLabel* m_templateLabel = nullptr;
   QPushButton* m_linkButton = nullptr;
   QPushButton* m_unlinkButton = nullptr;
