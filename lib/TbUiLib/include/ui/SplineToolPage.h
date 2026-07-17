@@ -49,7 +49,7 @@ private:
   QDoubleSpinBox* m_scale = nullptr;
   QCheckBox* m_locked = nullptr;
   QPushButton* m_removePointButton = nullptr;
-  QPushButton* m_closed = nullptr;
+  QCheckBox* m_closed = nullptr;
   QSpinBox* m_subdivisions = nullptr;
 
   bool m_updatingControls = false;

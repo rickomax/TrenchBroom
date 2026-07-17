@@ -86,8 +86,7 @@ void SplineToolPage::createGui()
   m_removePointButton->setToolTip(tr("Remove the selected point from the spline"));
   m_removePointButton->setFocusPolicy(Qt::NoFocus);
 
-  m_closed = new QPushButton{tr("Closed")};
-  m_closed->setCheckable(true);
+  m_closed = new QCheckBox{tr("Closed")};
   m_closed->setToolTip(
     tr("Close the spline: the last point connects back to the first, and brushes "
        "are created on that segment as well"));
@@ -112,9 +111,8 @@ void SplineToolPage::createGui()
   layout->addWidget(new QLabel{tr("Scale:")});
   layout->addWidget(m_scale);
   layout->addWidget(m_locked);
-  layout->addWidget(m_removePointButton);
-  layout->addSpacing(12);
   layout->addWidget(m_closed);
+  layout->addWidget(m_removePointButton);
   layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Subdivisions:")});
   layout->addWidget(m_subdivisions);
@@ -159,7 +157,7 @@ void SplineToolPage::createGui()
   });
   connect(
     m_removePointButton, &QPushButton::clicked, this, [this]() { m_tool.removePoint(); });
-  connect(m_closed, &QPushButton::toggled, this, [this](const bool checked) {
+  connect(m_closed, &QCheckBox::toggled, this, [this](const bool checked) {
     if (!m_updatingControls)
     {
       m_tool.setClosed(checked);
