@@ -45,14 +45,14 @@ SplineToolPage::SplineToolPage(MapDocument& document, SplineTool& tool, QWidget*
 
 void SplineToolPage::createGui()
 {
-  m_addPoints = new QPushButton{tr("Add Points")};
+  m_addPoints = new QPushButton{tr("Add")};
   m_addPoints->setCheckable(true);
   m_addPoints->setToolTip(
     tr("While enabled, clicking empty space appends new points to the spline; "
        "disable it to select and edit points without adding new ones"));
 
   m_templateLabel = new QLabel{tr("<none>")};
-  m_linkButton = new QPushButton{tr("Link Selection")};
+  m_linkButton = new QPushButton{tr("Link")};
   m_linkButton->setToolTip(
     tr("Use the selected group or the selected brushes as the spline's template"));
   m_unlinkButton = new QPushButton{tr("Unlink")};
@@ -75,7 +75,8 @@ void SplineToolPage::createGui()
     tr("A locked point anchors the sweep's orientation, so a twist caused by "
        "rotating other points cannot propagate past it"));
 
-  m_removePointButton = new QPushButton{tr("Remove Point")};
+  m_removePointButton = new QPushButton{tr("Remove")};
+  m_removePointButton->setToolTip(tr("Remove the selected point from the spline"));
 
   m_rotateAll = new QDoubleSpinBox{};
   m_rotateAll->setRange(-360.0, 360.0);
