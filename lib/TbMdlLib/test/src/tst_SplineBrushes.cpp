@@ -48,6 +48,16 @@ Brush makeCuboid(const vm::bbox3d& bounds, const std::string& materialName)
   return builder.createCuboid(bounds, materialName) | kdl::value();
 }
 
+vm::bbox3d unitedBounds(const std::vector<Brush>& brushes)
+{
+  auto bounds = brushes.front().bounds();
+  for (const auto& brush : brushes)
+  {
+    bounds = vm::merge(bounds, brush.bounds());
+  }
+  return bounds;
+}
+
 } // namespace
 
 TEST_CASE("createSplineBrushes")
@@ -62,18 +72,17 @@ TEST_CASE("createSplineBrushes")
       SplinePoint{vm::vec3d{0, 0, 0}},
       SplinePoint{vm::vec3d{128, 0, 0}},
     };
-    const auto frames = computeSplineFrames(points, 4);
 
     CHECK(createSplineBrushes(
             MapFormat::Standard, worldBounds, {}, templateBrushes, templateBounds)
             .is_error());
     CHECK(
-      createSplineBrushes(MapFormat::Standard, worldBounds, frames, {}, templateBounds)
+      createSplineBrushes(MapFormat::Standard, worldBounds, points, {}, templateBounds)
         .is_error());
     CHECK(createSplineBrushes(
             MapFormat::Standard,
             worldBounds,
-            frames,
+            points,
             templateBrushes,
             vm::bbox3d{{0, 0, 0}, {0, 16, 16}})
             .is_error());
@@ -85,27 +94,22 @@ TEST_CASE("createSplineBrushes")
       SplinePoint{vm::vec3d{0, 0, 0}},
       SplinePoint{vm::vec3d{128, 0, 0}},
     };
-    const auto frames = computeSplineFrames(points, 4);
 
     const auto brushes =
       createSplineBrushes(
-        MapFormat::Standard, worldBounds, frames, templateBrushes, templateBounds)
+        MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
       | kdl::value();
 
-    CHECK(!brushes.empty());
+    // Two spans, one template copy each.
+    CHECK(brushes.size() == 2);
 
-    // The united bounds of all brushes must match the extruded template.
-    auto bounds = brushes.front().bounds();
-    for (const auto& brush : brushes)
-    {
-      bounds = vm::merge(bounds, brush.bounds());
-    }
+    const auto bounds = unitedBounds(brushes);
     CHECK(bounds.min == vm::approx{vm::vec3d{0, -16, -16}});
     CHECK(bounds.max == vm::approx{vm::vec3d{128, 16, 16}});
 
-    // All faces must use the template's material.
     for (const auto& brush : brushes)
     {
+      CHECK(brush.fullySpecified());
       for (const auto& face : brush.faces())
       {
         CHECK(face.attributes().materialName() == "some_material");
@@ -113,47 +117,62 @@ TEST_CASE("createSplineBrushes")
     }
   }
 
-  SECTION("repetitions keep the template's natural size")
+  SECTION("each segment is tiled with stretched copies")
   {
     // The template brush covers only the first half of the template bounds, so the
-    // generated geometry reveals where each repetition starts and how it is scaled.
+    // generated geometry reveals where each copy starts and how it is stretched.
     const auto halfBrush =
       makeCuboid(vm::bbox3d{{0, -16, -16}, {32, 16, 16}}, "some_material");
     const auto halfBrushes = std::vector<const Brush*>{&halfBrush};
 
-    // The curve is 1.5 template lengths long: the first repetition must keep its
-    // natural size, and only the second one is scaled (by 0.5) to fill the rest.
+    // One segment of length 96 with a forward size of 64 holds round(1.5) = 2
+    // copies, each stretched to span 48 units; the half brush fills the first half
+    // of each span.
     const auto points = std::vector<SplinePoint>{
       SplinePoint{vm::vec3d{0, 0, 0}},
       SplinePoint{vm::vec3d{96, 0, 0}},
     };
-    const auto frames = computeSplineFrames(points, 4);
 
     const auto brushes =
       createSplineBrushes(
-        MapFormat::Standard, worldBounds, frames, halfBrushes, templateBounds)
+        MapFormat::Standard, worldBounds, points, halfBrushes, templateBounds)
       | kdl::value();
 
-    CHECK(!brushes.empty());
+    REQUIRE(brushes.size() == 2);
 
-    for (const auto& brush : brushes)
-    {
-      // First repetition: natural size, brush occupies [0, 32].
-      // Second repetition: starts at 64 with scale 0.5, brush occupies [64, 80].
-      const auto inFirst =
-        brush.bounds().min.x() >= -0.001 && brush.bounds().max.x() <= 32.001;
-      const auto inSecond =
-        brush.bounds().min.x() >= 63.999 && brush.bounds().max.x() <= 80.001;
-      CHECK((inFirst || inSecond));
-    }
+    const auto inSpan = [](const Brush& brush, const double min, const double max) {
+      return brush.bounds().min.x() == vm::approx{min}
+             && brush.bounds().max.x() == vm::approx{max};
+    };
+    CHECK((inSpan(brushes[0], 0.0, 24.0) || inSpan(brushes[0], 48.0, 72.0)));
+    CHECK((inSpan(brushes[1], 0.0, 24.0) || inSpan(brushes[1], 48.0, 72.0)));
+    CHECK(brushes[0].bounds().min.x() != vm::approx{brushes[1].bounds().min.x()});
+  }
 
-    auto bounds = brushes.front().bounds();
-    for (const auto& brush : brushes)
-    {
-      bounds = vm::merge(bounds, brush.bounds());
-    }
-    CHECK(bounds.min.x() == vm::approx{0.0});
-    CHECK(bounds.max.x() == vm::approx{80.0});
+  SECTION("cross-section scale tapers the sweep")
+  {
+    const auto points = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0},
+      SplinePoint{vm::vec3d{128, 0, 0}, 0.0, 0.5},
+    };
+
+    const auto brushes =
+      createSplineBrushes(
+        MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
+      | kdl::value();
+
+    REQUIRE(brushes.size() == 2);
+
+    // The frames sit at scales 1.0, 0.75 and 0.5, so the second cell's widest
+    // cross-section is 0.75 * 16.
+    const auto& lastBrush =
+      brushes[0].bounds().min.x() < brushes[1].bounds().min.x() ? brushes[1] : brushes[0];
+    CHECK(lastBrush.bounds().max.y() == vm::approx{12.0});
+    CHECK(lastBrush.bounds().min.y() == vm::approx{-12.0});
+
+    const auto bounds = unitedBounds(brushes);
+    CHECK(bounds.max.y() == vm::approx{16.0});
+    CHECK(bounds.min.y() == vm::approx{-16.0});
   }
 
   SECTION("curved spline produces valid brushes along the curve")
@@ -163,11 +182,10 @@ TEST_CASE("createSplineBrushes")
       SplinePoint{vm::vec3d{128, 0, 0}},
       SplinePoint{vm::vec3d{256, 128, 0}},
     };
-    const auto frames = computeSplineFrames(points, 8);
 
     const auto brushes =
       createSplineBrushes(
-        MapFormat::Standard, worldBounds, frames, templateBrushes, templateBounds)
+        MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
       | kdl::value();
 
     CHECK(brushes.size() > 1);

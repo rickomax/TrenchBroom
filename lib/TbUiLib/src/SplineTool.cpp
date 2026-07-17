@@ -112,25 +112,31 @@ void SplineTool::render(
     renderService.renderLineStrip(vertices);
   }
 
-  // Visualize the roll of the selected point by rendering the coordinate frame at its
-  // position.
-  if (m_selectedIndex && m_points.size() > 1)
+  // Visualize each point's sweep frame with a reference arrow along its up
+  // direction; locked points (frame anchors) are drawn in a different color. The
+  // selected point additionally shows its right direction.
+  if (m_points.size() > 1)
   {
-    const auto frames = mdl::computeSplineFrames(m_points, m_subdivisions);
-    const auto frameIndex = *m_selectedIndex * m_subdivisions;
-    if (frameIndex < frames.size())
-    {
-      const auto& frame = frames[frameIndex];
-      const auto axisLength = 24.0;
+    const auto frames = mdl::computeNodeFrames(m_points);
+    const auto axisLength = 24.0;
 
-      renderService.setLineWidth(2.0f);
-      renderService.setForegroundColor(pref(Preferences::YAxisColor));
+    renderService.setLineWidth(2.0f);
+    for (size_t i = 0; i < frames.size() && i < m_points.size(); ++i)
+    {
+      const auto& frame = frames[i];
+      renderService.setForegroundColor(
+        m_points[i].locked ? pref(Preferences::SelectedHandleColor)
+                           : pref(Preferences::ZAxisColor));
       renderService.renderLine(
-        vm::vec3f{frame.position}, vm::vec3f{frame.position + frame.normal * axisLength});
-      renderService.setForegroundColor(pref(Preferences::ZAxisColor));
-      renderService.renderLine(
-        vm::vec3f{frame.position},
-        vm::vec3f{frame.position + frame.binormal * axisLength});
+        vm::vec3f{frame.position}, vm::vec3f{frame.position + frame.up * axisLength});
+
+      if (m_selectedIndex == i)
+      {
+        renderService.setForegroundColor(pref(Preferences::YAxisColor));
+        renderService.renderLine(
+          vm::vec3f{frame.position},
+          vm::vec3f{frame.position + frame.right * axisLength});
+      }
     }
   }
 
@@ -162,9 +168,10 @@ void SplineTool::render(
     renderService.setBackgroundColor(pref(Preferences::InfoOverlayBackgroundColor));
     renderService.renderString(
       fmt::format(
-        "Point {} | Roll {:g}{}",
+        "Point {} | Roll {:g} | Scale {:g}{}",
         *m_selectedIndex,
         point.roll,
+        point.scale,
         point.locked ? " | Locked" : ""),
       vm::vec3f{point.position});
   }
@@ -282,11 +289,6 @@ std::optional<std::tuple<vm::vec3d, vm::vec3d>> SplineTool::beginDragPoint(
   }
 
   const auto index = hit.target<size_t>();
-  if (m_points[index].locked)
-  {
-    return std::nullopt;
-  }
-
   m_selectedIndex = index;
   m_dragState = DragState{index, m_points[index]};
   splineDidChangeNotifier();
@@ -332,10 +334,28 @@ void SplineTool::setSelectedPointRoll(const double roll)
 {
   if (
     m_selectedIndex && *m_selectedIndex < m_points.size()
-    && m_points[*m_selectedIndex].roll != roll && !m_points[*m_selectedIndex].locked)
+    && m_points[*m_selectedIndex].roll != roll)
   {
     m_points[*m_selectedIndex].roll = roll;
     commitSpline("Rotate Spline Point");
+  }
+}
+
+double SplineTool::selectedPointScale() const
+{
+  return m_selectedIndex && *m_selectedIndex < m_points.size()
+           ? m_points[*m_selectedIndex].scale
+           : 1.0;
+}
+
+void SplineTool::setSelectedPointScale(const double scale)
+{
+  if (
+    m_selectedIndex && *m_selectedIndex < m_points.size() && scale > 0.0
+    && m_points[*m_selectedIndex].scale != scale)
+  {
+    m_points[*m_selectedIndex].scale = scale;
+    commitSpline("Scale Spline Point");
   }
 }
 
@@ -645,13 +665,11 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes() const
     templateBounds = vm::merge(templateBounds, brush->bounds());
   }
 
-  const auto frames = mdl::computeSplineFrames(m_points, m_subdivisions);
-
   auto& map = m_document.map();
   return mdl::createSplineBrushes(
            map.worldNode().mapFormat(),
            map.worldBounds(),
-           frames,
+           m_points,
            templateBrushes,
            templateBounds)
          | kdl::transform([](auto brushes) {

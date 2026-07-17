@@ -165,9 +165,12 @@ public: // dragging
   void endDragPoint();
   void cancelDragPoint();
 
-public: // rotation and locking
+public: // rotation, scale and locking
   double selectedPointRoll() const;
   void setSelectedPointRoll(double roll);
+
+  double selectedPointScale() const;
+  void setSelectedPointScale(double scale);
 
   bool selectedPointLocked() const;
   void toggleSelectedPointLocked();

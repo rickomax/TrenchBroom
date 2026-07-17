@@ -71,33 +71,49 @@ TEST_CASE("Spline")
     }
   }
 
-  SECTION("computeSplineFrames")
+  SECTION("buildSweepFrames")
   {
     SECTION("returns empty vector for fewer than two points")
     {
-      CHECK(computeSplineFrames({}, 8).empty());
-      CHECK(computeSplineFrames({SplinePoint{vm::vec3d{0, 0, 0}}}, 8).empty());
+      CHECK(buildSweepFrames({}, 64.0).empty());
+      CHECK(buildSweepFrames({SplinePoint{vm::vec3d{0, 0, 0}}}, 64.0).empty());
     }
 
-    SECTION("straight spline along the X axis produces identity frames")
+    SECTION("straight spline along the X axis produces upright frames")
     {
       const auto points = std::vector<SplinePoint>{
         SplinePoint{vm::vec3d{0, 0, 0}},
         SplinePoint{vm::vec3d{128, 0, 0}},
       };
 
-      const auto frames = computeSplineFrames(points, 4);
-      REQUIRE(frames.size() == 5);
+      // One segment of length 128 divided into two spans of the forward size.
+      const auto frames = buildSweepFrames(points, 64.0);
+      REQUIRE(frames.size() == 3);
+
+      CHECK(frames[0].position == vm::approx{vm::vec3d{0, 0, 0}});
+      CHECK(frames[1].position == vm::approx{vm::vec3d{64, 0, 0}});
+      CHECK(frames[2].position == vm::approx{vm::vec3d{128, 0, 0}});
 
       for (const auto& frame : frames)
       {
-        CHECK(frame.tangent == vm::approx{vm::vec3d{1, 0, 0}});
-        CHECK(frame.normal == vm::approx{vm::vec3d{0, 1, 0}});
-        CHECK(frame.binormal == vm::approx{vm::vec3d{0, 0, 1}});
+        CHECK(frame.right == vm::approx{vm::vec3d{0, 1, 0}});
+        CHECK(frame.up == vm::approx{vm::vec3d{0, 0, 1}});
+        CHECK(frame.scale == vm::approx{1.0});
       }
+    }
 
-      CHECK(frames.front().arcLength == vm::approx{0.0});
-      CHECK(frames.back().arcLength == vm::approx{128.0});
+    SECTION("each segment holds at least one span")
+    {
+      const auto points = std::vector<SplinePoint>{
+        SplinePoint{vm::vec3d{0, 0, 0}},
+        SplinePoint{vm::vec3d{16, 0, 0}},
+        SplinePoint{vm::vec3d{32, 0, 0}},
+      };
+
+      // Both segments are much shorter than the forward size, so each still gets
+      // one span.
+      const auto frames = buildSweepFrames(points, 64.0);
+      CHECK(frames.size() == 3);
     }
 
     SECTION("roll rotates the frame around the tangent")
@@ -107,18 +123,31 @@ TEST_CASE("Spline")
         SplinePoint{vm::vec3d{128, 0, 0}, 90.0},
       };
 
-      const auto frames = computeSplineFrames(points, 4);
-      REQUIRE(frames.size() == 5);
+      const auto frames = buildSweepFrames(points, 64.0);
+      REQUIRE(frames.size() == 3);
 
       for (const auto& frame : frames)
       {
-        CHECK(frame.tangent == vm::approx{vm::vec3d{1, 0, 0}});
-        CHECK(frame.normal == vm::approx{vm::vec3d{0, 0, 1}});
-        CHECK(frame.binormal == vm::approx{vm::vec3d{0, -1, 0}});
+        CHECK(frame.right == vm::approx{vm::vec3d{0, 0, 1}});
+        CHECK(frame.up == vm::approx{vm::vec3d{0, -1, 0}});
       }
     }
 
-    SECTION("frames stay continuous around a bend")
+    SECTION("scale interpolates between the control points")
+    {
+      const auto points = std::vector<SplinePoint>{
+        SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0},
+        SplinePoint{vm::vec3d{128, 0, 0}, 0.0, 0.5},
+      };
+
+      const auto frames = buildSweepFrames(points, 64.0);
+      REQUIRE(frames.size() == 3);
+      CHECK(frames[0].scale == vm::approx{1.0});
+      CHECK(frames[1].scale == vm::approx{0.75});
+      CHECK(frames[2].scale == vm::approx{0.5});
+    }
+
+    SECTION("frames stay orthonormal around a bend")
     {
       const auto points = std::vector<SplinePoint>{
         SplinePoint{vm::vec3d{0, 0, 0}},
@@ -126,35 +155,43 @@ TEST_CASE("Spline")
         SplinePoint{vm::vec3d{256, 128, 0}},
       };
 
-      const auto frames = computeSplineFrames(points, 8);
-      REQUIRE(frames.size() == 17);
+      const auto frames = buildSweepFrames(points, 32.0);
+      REQUIRE(frames.size() > 2);
 
       for (size_t i = 1; i < frames.size(); ++i)
       {
-        // Consecutive normals must not flip.
-        CHECK(vm::dot(frames[i - 1].normal, frames[i].normal) > 0.5);
+        // Consecutive ups must not flip.
+        CHECK(vm::dot(frames[i - 1].up, frames[i].up) > 0.5);
         // Frames must remain orthonormal.
-        CHECK(vm::dot(frames[i].tangent, frames[i].normal) == vm::approx{0.0});
-        CHECK(vm::length(frames[i].normal) == vm::approx{1.0});
-        CHECK(vm::length(frames[i].binormal) == vm::approx{1.0});
+        CHECK(vm::dot(frames[i].right, frames[i].up) == vm::approx{0.0});
+        CHECK(vm::length(frames[i].right) == vm::approx{1.0});
+        CHECK(vm::length(frames[i].up) == vm::approx{1.0});
       }
     }
+  }
 
-    SECTION("arc length increases monotonically")
+  SECTION("computeNodeFrames")
+  {
+    SECTION("a locked point anchors the frame to its upright orientation")
     {
-      const auto points = std::vector<SplinePoint>{
+      // The curve rises vertically and then turns horizontal. The rotation
+      // minimizing frame transports the initial up (which lies in the bend plane
+      // for a vertical start) around the bend, ending up pointing down; locking
+      // the last point pins its frame upright instead.
+      auto points = std::vector<SplinePoint>{
         SplinePoint{vm::vec3d{0, 0, 0}},
-        SplinePoint{vm::vec3d{64, 64, 32}},
-        SplinePoint{vm::vec3d{128, 0, 64}},
+        SplinePoint{vm::vec3d{0, 0, 128}},
+        SplinePoint{vm::vec3d{128, 0, 128}},
       };
 
-      const auto frames = computeSplineFrames(points, 8);
-      for (size_t i = 1; i < frames.size(); ++i)
-      {
-        CHECK(frames[i].arcLength > frames[i - 1].arcLength);
-      }
+      const auto unlockedFrames = computeNodeFrames(points);
+      REQUIRE(unlockedFrames.size() == 3);
+      CHECK(vm::dot(unlockedFrames.back().up, vm::vec3d{0, 0, 1}) < 0.5);
 
-      CHECK(splineLength(frames) == vm::approx{frames.back().arcLength});
+      points.back().locked = true;
+      const auto lockedFrames = computeNodeFrames(points);
+      REQUIRE(lockedFrames.size() == 3);
+      CHECK(lockedFrames.back().up == vm::approx{vm::vec3d{0, 0, 1}});
     }
   }
 }

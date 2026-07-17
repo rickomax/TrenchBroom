@@ -122,25 +122,37 @@ std::optional<Brush> parseTemplateBrush(
 
 std::optional<SplinePoint> parsePoint(const std::string& value)
 {
-  const auto parsed = vm::parse<double, 5>(value);
-  if (!parsed)
+  if (const auto parsed = vm::parse<double, 6>(value))
   {
-    return std::nullopt;
+    return SplinePoint{
+      vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
+      (*parsed)[3],
+      (*parsed)[4],
+      (*parsed)[5] != 0.0};
   }
-  return SplinePoint{
-    vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
-    (*parsed)[3],
-    (*parsed)[4] != 0.0};
+
+  // Older splines were written without the scale component.
+  if (const auto parsed = vm::parse<double, 5>(value))
+  {
+    return SplinePoint{
+      vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
+      (*parsed)[3],
+      1.0,
+      (*parsed)[4] != 0.0};
+  }
+
+  return std::nullopt;
 }
 
 std::string formatPoint(const SplinePoint& point)
 {
   return fmt::format(
-    "{} {} {} {} {}",
+    "{} {} {} {} {} {}",
     point.position.x(),
     point.position.y(),
     point.position.z(),
     point.roll,
+    point.scale,
     point.locked ? 1 : 0);
 }
 

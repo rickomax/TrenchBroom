@@ -31,39 +31,40 @@ namespace tb::mdl
 
 /**
  * A single control point of a spline. In addition to its position, a control point
- * carries a roll angle (in degrees) that twists the spline's coordinate frame around
- * its tangent, and a locked flag. Locked points are not affected by operations that
- * modify multiple points at once (such as rotating the spline).
+ * carries a roll angle (in degrees) that twists the sweep's frame around the curve's
+ * tangent, a cross-section scale that tapers the swept profile, and a locked flag.
+ *
+ * A locked point anchors the sweep's frame orientation: the rotation minimizing frame
+ * is not transported through it, but reset to the point's own upright frame, so a
+ * twist introduced by rotating other points cannot propagate past it.
  */
 struct SplinePoint
 {
   vm::vec3d position;
   double roll = 0.0;
+  double scale = 1.0;
   bool locked = false;
 
-  kdl_reflect_decl(SplinePoint, position, roll, locked);
+  kdl_reflect_decl(SplinePoint, position, roll, scale, locked);
 };
 
 /**
- * A coordinate frame on the spline curve. The tangent points along the curve, and the
- * normal and binormal span the plane perpendicular to it. The frames returned by
- * computeSplineFrames are continuous along the curve (computed by parallel transport)
- * with the control points' roll angles applied on top.
+ * A cross-section frame along the swept curve: a position on the curve plus a right /
+ * up basis spanning the cross-section plane, and the interpolated cross-section
+ * scale.
  */
-struct SplineFrame
+struct SweepFrame
 {
   vm::vec3d position;
-  vm::vec3d tangent;
-  vm::vec3d normal;
-  vm::vec3d binormal;
-  /** Accumulated arc length from the start of the curve to this frame. */
-  double arcLength = 0.0;
+  vm::vec3d right;
+  vm::vec3d up;
+  double scale = 1.0;
 
-  kdl_reflect_decl(SplineFrame, position, tangent, normal, binormal, arcLength);
+  kdl_reflect_decl(SweepFrame, position, right, up, scale);
 };
 
 /**
- * Evaluates a centripetal Catmull-Rom segment between p1 and p2 at parameter t in
+ * Evaluates the uniform Catmull-Rom segment between p1 and p2 at parameter t in
  * [0, 1]. p0 and p3 are the neighboring control points.
  */
 vm::vec3d evaluateSplineSegment(
@@ -74,28 +75,46 @@ vm::vec3d evaluateSplineSegment(
   double t);
 
 /**
- * Samples the Catmull-Rom spline through the given control points. Each span between
- * two consecutive control points is subdivided into the given number of steps, so the
- * result contains (points.size() - 1) * subdivisions + 1 positions. Returns an empty
- * vector if fewer than two control points are given.
+ * The point on the Catmull-Rom curve through the given control points, on the segment
+ * starting at the given control point index, at parameter t in [0, 1].
+ */
+vm::vec3d curvePoint(const std::vector<SplinePoint>& points, size_t segment, double t);
+
+/**
+ * The (normalized, analytic) tangent of the Catmull-Rom curve through the given
+ * control points, on the segment starting at the given control point index, at
+ * parameter t in [0, 1].
+ */
+vm::vec3d curveTangent(const std::vector<SplinePoint>& points, size_t segment, double t);
+
+/**
+ * Samples the Catmull-Rom spline through the given control points for display. Each
+ * span between two consecutive control points is subdivided into the given number of
+ * steps, so the result contains (points.size() - 1) * subdivisions + 1 positions.
+ * Returns an empty vector if fewer than two control points are given.
  */
 std::vector<vm::vec3d> sampleSpline(
   const std::vector<SplinePoint>& points, size_t subdivisions);
 
 /**
- * Computes continuous coordinate frames along the spline through the given control
- * points. The normal is propagated along the curve by parallel transport to avoid
- * sudden flips, and the control points' roll angles (interpolated linearly along each
- * span) are applied as a rotation around the tangent. Returns an empty vector if fewer
- * than two control points are given.
+ * Builds the ordered cross-section frames of a profile sweep along the curve. Each
+ * control point segment is divided into round(segmentLength / forwardSize) spans
+ * (at least one), so each span holds one copy of a profile of the given forward
+ * size, stretched or squished to fit its segment.
+ *
+ * The base orientation comes from a rotation minimizing frame transported across the
+ * control points; locked points anchor the transport to their own upright frame.
+ * Within each segment, the frame interpolates between its endpoint orientations, and
+ * the control points' roll angles and scales are interpolated on top.
+ *
+ * Returns an empty vector if fewer than two control points are given.
  */
-std::vector<SplineFrame> computeSplineFrames(
-  const std::vector<SplinePoint>& points, size_t subdivisions);
+std::vector<SweepFrame> buildSweepFrames(
+  const std::vector<SplinePoint>& points, double forwardSize);
 
 /**
- * Returns the total arc length of the sampled spline, i.e. the arc length of the last
- * frame.
+ * The sweep frame at each control point, for display purposes (reference arrows).
  */
-double splineLength(const std::vector<SplineFrame>& frames);
+std::vector<SweepFrame> computeNodeFrames(const std::vector<SplinePoint>& points);
 
 } // namespace tb::mdl

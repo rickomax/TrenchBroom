@@ -32,27 +32,29 @@ class Brush;
 enum class MapFormat;
 
 /**
- * Creates brushes by deforming the given template brushes along the given spline
- * frames.
+ * Creates brushes by sweeping the given template (profile) brushes along the spline
+ * through the given control points.
  *
- * The template brushes are interpreted in a local coordinate system where the X axis
- * runs along the spline: the X extent of the given template bounds is mapped onto the
- * curve's arc length, and the Y / Z offsets from the bounds center are applied
- * sideways / upwards along the curve's normal and binormal. The template is repeated
- * at its natural size along the curve as often as it fits, keeping the template's
- * proportions; only the last repetition is scaled to cover the remaining arc length.
+ * The template brushes are interpreted inside their combined bounds (the lattice),
+ * with the X axis as the sweep direction: cross-section frames are placed along the
+ * curve so that each control point segment holds round(segmentLength / latticeSizeX)
+ * copies of the template (at least one), stretched or squished to fit the segment
+ * while keeping the cross-section's proportions.
  *
- * To keep the resulting brushes convex, each template brush is cut into slices between
- * consecutive curve samples, and each slice is deformed individually. Face materials
- * and attributes are copied from the template face whose orientation matches best.
+ * Each span between two consecutive frames holds one copy of every template brush:
+ * a vertex's X position inside the lattice interpolates linearly between the span's
+ * two cross-sections, and its Y / Z offsets from the lattice center are applied along
+ * each frame's right / up direction, scaled by the frame's cross-section scale.
+ * Consecutive spans share their end cross-sections, so the swept solid is continuous.
+ * Face materials and attributes are copied from the best matching template face.
  *
- * Returns an error if the template bounds or the spline are degenerate, or if no
- * brushes could be created.
+ * Returns an error if the lattice or the spline is degenerate, or if no brushes
+ * could be created.
  */
 Result<std::vector<Brush>> createSplineBrushes(
   MapFormat mapFormat,
   const vm::bbox3d& worldBounds,
-  const std::vector<SplineFrame>& frames,
+  const std::vector<SplinePoint>& points,
   const std::vector<const Brush*>& templateBrushes,
   const vm::bbox3d& templateBounds);
 

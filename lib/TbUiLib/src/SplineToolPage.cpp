@@ -62,9 +62,18 @@ void SplineToolPage::createGui()
   m_roll->setSingleStep(15.0);
   m_roll->setToolTip(tr("Rotation of the selected point around the spline"));
 
+  m_scale = new QDoubleSpinBox{};
+  m_scale->setRange(0.01, 100.0);
+  m_scale->setSingleStep(0.1);
+  m_scale->setValue(1.0);
+  m_scale->setToolTip(
+    tr("Cross-section scale at the selected point; the swept profile tapers "
+       "between points"));
+
   m_locked = new QCheckBox{tr("Locked")};
   m_locked->setToolTip(
-    tr("Locked points are not moved or affected by rotating other points"));
+    tr("A locked point anchors the sweep's orientation, so a twist caused by "
+       "rotating other points cannot propagate past it"));
 
   m_removePointButton = new QPushButton{tr("Remove Point")};
 
@@ -92,6 +101,8 @@ void SplineToolPage::createGui()
   layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Roll:")});
   layout->addWidget(m_roll);
+  layout->addWidget(new QLabel{tr("Scale:")});
+  layout->addWidget(m_scale);
   layout->addWidget(m_locked);
   layout->addWidget(m_removePointButton);
   layout->addSpacing(12);
@@ -121,6 +132,16 @@ void SplineToolPage::createGui()
       if (!m_updatingControls)
       {
         m_tool.setSelectedPointRoll(value);
+      }
+    });
+  connect(
+    m_scale,
+    QOverload<double>::of(&QDoubleSpinBox::valueChanged),
+    this,
+    [this](const double value) {
+      if (!m_updatingControls)
+      {
+        m_tool.setSelectedPointScale(value);
       }
     });
   connect(m_locked, &QCheckBox::toggled, this, [this](const bool checked) {
@@ -170,8 +191,10 @@ void SplineToolPage::updateControls()
   m_unlinkButton->setEnabled(m_tool.hasTemplate());
 
   const auto hasSelectedPoint = m_tool.selectedPointIndex().has_value();
-  m_roll->setEnabled(hasSelectedPoint && !m_tool.selectedPointLocked());
+  m_roll->setEnabled(hasSelectedPoint);
   m_roll->setValue(m_tool.selectedPointRoll());
+  m_scale->setEnabled(hasSelectedPoint);
+  m_scale->setValue(m_tool.selectedPointScale());
   m_locked->setEnabled(hasSelectedPoint);
   m_locked->setChecked(m_tool.selectedPointLocked());
   m_removePointButton->setEnabled(m_tool.canRemovePoint());

@@ -46,6 +46,7 @@ private:
   QPushButton* m_linkButton = nullptr;
   QPushButton* m_unlinkButton = nullptr;
   QDoubleSpinBox* m_roll = nullptr;
+  QDoubleSpinBox* m_scale = nullptr;
   QCheckBox* m_locked = nullptr;
   QPushButton* m_removePointButton = nullptr;
   QDoubleSpinBox* m_rotateAll = nullptr;

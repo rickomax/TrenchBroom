@@ -40,9 +40,9 @@ TEST_CASE("SplineEntity")
 {
   const auto data = SplineEntityData{
     {
-      SplinePoint{vm::vec3d{0, 0, 0}, 0.0, false},
-      SplinePoint{vm::vec3d{64, 32, 16}, 45.0, true},
-      SplinePoint{vm::vec3d{128, 0, 0}, -90.0, false},
+      SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0, false},
+      SplinePoint{vm::vec3d{64, 32, 16}, 45.0, 2.5, true},
+      SplinePoint{vm::vec3d{128, 0, 0}, -90.0, 0.5, false},
     },
     12,
     42,
