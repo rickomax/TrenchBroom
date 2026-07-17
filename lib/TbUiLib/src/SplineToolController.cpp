@@ -205,9 +205,14 @@ private:
 
   std::unique_ptr<GestureTracker> acceptMouseDrag(const InputState& inputState) override
   {
+    // Alt switches to a vertical move and CtrlCmd toggles the snap mode; both may
+    // already be held when the drag starts.
     if (
       inputState.mouseButtons() != MouseButtons::Left
-      || inputState.modifierKeys() != ModifierKeys::None
+      || (!inputState.modifierKeysPressed(ModifierKeys::None)
+          && !inputState.modifierKeysPressed(ModifierKeys::Alt)
+          && !inputState.modifierKeysPressed(ModifierKeys::CtrlCmd)
+          && !inputState.modifierKeysPressed(ModifierKeys::CtrlCmd | ModifierKeys::Alt))
       || m_delegate->tool().addPointMode())
     {
       return nullptr;
