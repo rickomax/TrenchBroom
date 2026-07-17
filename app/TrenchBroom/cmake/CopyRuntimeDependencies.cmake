@@ -15,10 +15,6 @@
 #                    ;-separated list would be split into separate arguments by the
 #                    Visual Studio generator's command scripts
 
-# Sets the policies this script relies on (e.g. CMP0057 for if(IN_LIST)); scripts run
-# with cmake -P get no policy defaults from the including project.
-cmake_minimum_required(VERSION 3.21)
-
 if(POLICY CMP0207)
   cmake_policy(SET CMP0207 NEW)
 endif()
@@ -43,40 +39,11 @@ file(
   PRE_EXCLUDE_REGEXES "api-ms-.*" "ext-ms-.*" "hvsifiletrust.dll"
   POST_EXCLUDE_REGEXES ".*[Ss][Yy][Ss][Tt][Ee][Mm]32.*")
 
-cmake_path(ABSOLUTE_PATH TB_DEST_DIR NORMALIZE OUTPUT_VARIABLE TB_DEST_DIR_NORMALIZED)
-
-set(TB_SEARCH_DIRS_NORMALIZED "")
-foreach(TB_SEARCH_DIR ${TB_SEARCH_DIRS})
-  cmake_path(ABSOLUTE_PATH TB_SEARCH_DIR NORMALIZE)
-  list(APPEND TB_SEARCH_DIRS_NORMALIZED "${TB_SEARCH_DIR}")
-endforeach()
-
-# Returns TRUE in ${RESULT_VAR} iff the DLL at TB_DLL lives in one of the given search
-# directories. Only such DLLs may be deployed: the resolver also finds DLLs in the
-# Windows directory and on PATH, and copying those next to the executable is harmful --
-# e.g. an unrelated 32-bit DLL with a matching name found on PATH would be copied and
-# then loaded in preference to the correct system one, killing the executable with
-# error 0xc000007b (STATUS_INVALID_IMAGE_FORMAT).
-function(tb_is_in_search_dir TB_DLL RESULT_VAR)
-  cmake_path(GET TB_DLL PARENT_PATH TB_DLL_DIR)
-  cmake_path(ABSOLUTE_PATH TB_DLL_DIR NORMALIZE)
-  if(TB_DLL_DIR IN_LIST TB_SEARCH_DIRS_NORMALIZED)
-    set("${RESULT_VAR}" TRUE PARENT_SCOPE)
-  else()
-    set("${RESULT_VAR}" FALSE PARENT_SCOPE)
-  endif()
-endfunction()
-
 foreach(TB_DLL ${TB_RESOLVED_DLLS})
-  tb_is_in_search_dir("${TB_DLL}" TB_DEPLOY)
-  if(TB_DEPLOY)
-    file(COPY "${TB_DLL}" DESTINATION "${TB_DEST_DIR}")
-  endif()
+  file(COPY "${TB_DLL}" DESTINATION "${TB_DEST_DIR}")
 endforeach()
 
-# A name that resolved to multiple paths is already deployed if one of the candidates
-# is the destination directory itself (i.e. a previous run copied it); otherwise deploy
-# the first candidate that comes from a search directory, if any.
+cmake_path(ABSOLUTE_PATH TB_DEST_DIR NORMALIZE OUTPUT_VARIABLE TB_DEST_DIR_NORMALIZED)
 foreach(TB_DLL_NAME ${TB_CONFLICTING_FILENAMES})
   set(TB_ALREADY_DEPLOYED FALSE)
   foreach(TB_DLL ${TB_CONFLICTING_${TB_DLL_NAME}})
@@ -88,13 +55,8 @@ foreach(TB_DLL_NAME ${TB_CONFLICTING_FILENAMES})
     endif()
   endforeach()
   if(NOT TB_ALREADY_DEPLOYED)
-    foreach(TB_DLL ${TB_CONFLICTING_${TB_DLL_NAME}})
-      tb_is_in_search_dir("${TB_DLL}" TB_DEPLOY)
-      if(TB_DEPLOY)
-        file(COPY "${TB_DLL}" DESTINATION "${TB_DEST_DIR}")
-        break()
-      endif()
-    endforeach()
+    list(GET TB_CONFLICTING_${TB_DLL_NAME} 0 TB_DLL)
+    file(COPY "${TB_DLL}" DESTINATION "${TB_DEST_DIR}")
   endif()
 endforeach()
 
