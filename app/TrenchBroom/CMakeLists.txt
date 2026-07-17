@@ -216,7 +216,7 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND}
                     "-DTB_EXECUTABLE=$<TARGET_FILE:TrenchBroom>"
                     "-DTB_DEST_DIR=$<TARGET_FILE_DIR:TrenchBroom>"
-                    "-DTB_SEARCH_DIRS=$<TARGET_FILE_DIR:freeimage::FreeImage>;$<TARGET_FILE_DIR:assimp::assimp>;$<TARGET_FILE_DIR:freetype>;$<TARGET_FILE_DIR:tinyxml2::tinyxml2>;$<TARGET_FILE_DIR:miniz::miniz>"
+                    "-DTB_SEARCH_DIRS=$<TARGET_FILE_DIR:freeimage::FreeImage>|$<TARGET_FILE_DIR:assimp::assimp>|$<TARGET_FILE_DIR:freetype>|$<TARGET_FILE_DIR:tinyxml2::tinyxml2>|$<TARGET_FILE_DIR:miniz::miniz>"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeDependencies.cmake"
             VERBATIM)
 

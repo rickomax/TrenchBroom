@@ -11,7 +11,11 @@
 #   TB_EXECUTABLE  - the executable to resolve dependencies for
 #   TB_DEST_DIR    - the directory to copy resolved DLLs into
 #   TB_SEARCH_DIRS - directories to search for dependency DLLs (e.g. the vcpkg bin dir
-#                    for the current configuration); a ;-separated list
+#                    for the current configuration); a |-separated list, because a
+#                    ;-separated list would be split into separate arguments by the
+#                    Visual Studio generator's command scripts
+
+string(REPLACE "|" ";" TB_SEARCH_DIRS "${TB_SEARCH_DIRS}")
 
 # The regexes are a workaround for https://gitlab.kitware.com/cmake/cmake/-/issues/22431
 file(
