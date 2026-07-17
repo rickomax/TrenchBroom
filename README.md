@@ -1,4 +1,4 @@
-# TrenchBroom
+# TrenchBroom - Spline Tool
 
 [![TrenchBroom Icon](app/TrenchBroom/resources/graphics/images/AppIcon.png)](https://www.youtube.com/watch?v=shcAvnYp9ow)
 
