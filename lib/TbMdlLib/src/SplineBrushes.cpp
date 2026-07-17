@@ -149,7 +149,10 @@ Result<std::vector<Brush>> createSplineBrushes(
       deformedPoints.reserve(templateBrush->vertexCount());
       for (const auto& vertex : templateBrush->vertexPositions())
       {
-        deformedPoints.push_back(ffdDeform(vertex, templateBounds, a, b));
+        // Snap the deformed vertices to integer coordinates. Adjacent spans compute
+        // identical positions for their shared cross section, so both round the same
+        // way and snapping cannot open gaps between them.
+        deformedPoints.push_back(vm::round(ffdDeform(vertex, templateBounds, a, b)));
       }
 
       const auto materialName =

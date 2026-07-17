@@ -196,6 +196,30 @@ TEST_CASE("createSplineBrushes")
       CHECK(worldBounds.contains(brush.bounds()));
     }
   }
+
+  SECTION("vertices are snapped to integer coordinates")
+  {
+    const auto points = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}, 30.0},
+      SplinePoint{vm::vec3d{100, 30, 10}, 45.0},
+      SplinePoint{vm::vec3d{250, 130, 50}},
+    };
+
+    const auto brushes =
+      createSplineBrushes(
+        MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
+      | kdl::value();
+
+    CHECK(!brushes.empty());
+
+    for (const auto& brush : brushes)
+    {
+      for (const auto& vertex : brush.vertexPositions())
+      {
+        CHECK(vertex == vm::round(vertex));
+      }
+    }
+  }
 }
 
 } // namespace tb::mdl
