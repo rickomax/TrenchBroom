@@ -202,19 +202,23 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy "${TB_RESOURCE_DIR}/win32/icons/DocIcon.ico"    "${CMAKE_CURRENT_BINARY_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy "${TB_RESOURCE_DIR}/win32/icons/WindowIcon.ico" "${CMAKE_CURRENT_BINARY_DIR}")
 
-    # Copy DLLs to app directory. Use $<TARGET_RUNTIME_DLLS> so that the whole
-    # transitive runtime-DLL closure is deployed, not just our direct dependencies:
-    # freeimage in particular pulls in tiff, zlib, openexr, imath, libjpeg-turbo,
-    # libpng, openjpeg, jxrlib, libraw and libwebp, none of which were copied by the
-    # previous hand-maintained list (assimp, freeimage, freetype, tinyxml2, miniz).
-    # The generator expression also resolves the correct Debug/Release variant of
-    # each DLL. COMMAND_EXPAND_LISTS turns the semicolon-separated list into separate
-    # arguments. The list is non-empty here because Windows builds link the vcpkg
-    # dependencies dynamically.
+    # Copy the whole transitive runtime-DLL closure into the build output directory so
+    # that TrenchBroom can be run in place from the build tree. A hand-maintained list
+    # (assimp, freeimage, freetype, tinyxml2, miniz) is not enough: freeimage pulls in
+    # tiff, zlib, openexr, imath, libjpeg-turbo, libpng, openjpeg, jxrlib, libraw and
+    # libwebp, and some of these (e.g. libraw / rawd.dll) are imported deep inside
+    # freeimage.dll rather than linked by TrenchBroom, so even $<TARGET_RUNTIME_DLLS>
+    # misses them. Resolve the closure from the actual PE import tables instead, the
+    # same way the install / CPack step does. The vcpkg bin directory for the current
+    # configuration (Debug or Release) is derived from a dependency's imported
+    # location and passed as a search directory.
     add_custom_command(TARGET TrenchBroom POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_RUNTIME_DLLS:TrenchBroom>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND_EXPAND_LISTS
-    )
+            COMMAND ${CMAKE_COMMAND}
+                    "-DTB_EXECUTABLE=$<TARGET_FILE:TrenchBroom>"
+                    "-DTB_DEST_DIR=$<TARGET_FILE_DIR:TrenchBroom>"
+                    "-DTB_SEARCH_DIRS=$<TARGET_FILE_DIR:freeimage::FreeImage>;$<TARGET_FILE_DIR:assimp::assimp>;$<TARGET_FILE_DIR:freetype>;$<TARGET_FILE_DIR:tinyxml2::tinyxml2>;$<TARGET_FILE_DIR:miniz::miniz>"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeDependencies.cmake"
+            VERBATIM)
 
     # Run windeployqt which copies the Qt dlls into the deployable folder, along with necessary runtime dlls by the compiler
     # Only copy translations on release builds, as deploying them takes significantly longer
