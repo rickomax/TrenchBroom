@@ -42,6 +42,9 @@ namespace SplinePropertyKeys
 constexpr auto PointPrefix = "_spline_point_";
 /** Number of curve samples between two control points. */
 constexpr auto Subdivisions = "_spline_subdivisions";
+/** Present with value "1" if the spline is closed (the last point connects back to
+ * the first). */
+constexpr auto Closed = "_spline_closed";
 /** Persistent ID of the group whose brushes serve as the deformation template. */
 constexpr auto TemplateGroupId = "_spline_template_group";
 /** Per brush property holding a snapshot of a template brush; the index is appended,
@@ -69,8 +72,9 @@ struct SplineEntityData
   std::vector<SplinePoint> points;
   size_t subdivisions = SplineDefaultSubdivisions;
   std::optional<IdType> templateGroupId;
+  bool closed = false;
 
-  kdl_reflect_decl(SplineEntityData, points, subdivisions, templateGroupId);
+  kdl_reflect_decl(SplineEntityData, points, subdivisions, templateGroupId, closed);
 };
 
 /**

@@ -36,11 +36,30 @@ namespace
 /** Number of dense samples used to measure a segment's arc length. */
 constexpr size_t SegmentLengthSamples = 24;
 
-vm::vec3d controlPoint(const std::vector<SplinePoint>& points, const std::ptrdiff_t index)
+vm::vec3d controlPoint(
+  const std::vector<SplinePoint>& points, const std::ptrdiff_t index, const bool closed)
 {
-  const auto clamped =
-    vm::clamp(index, std::ptrdiff_t(0), std::ptrdiff_t(points.size()) - 1);
+  const auto n = std::ptrdiff_t(points.size());
+  if (closed)
+  {
+    return points[size_t(((index % n) + n) % n)].position;
+  }
+  const auto clamped = vm::clamp(index, std::ptrdiff_t(0), n - 1);
   return points[size_t(clamped)].position;
+}
+
+/** The number of curve segments: a closed spline has one segment per control point,
+ * an open one has one less. */
+size_t segmentCount(const std::vector<SplinePoint>& points, const bool closed)
+{
+  return closed ? points.size() : points.size() - 1;
+}
+
+/** The control point index following the given one, wrapping around if closed. */
+size_t nextPointIndex(
+  const std::vector<SplinePoint>& points, const size_t index, const bool closed)
+{
+  return closed ? (index + 1) % points.size() : vm::min(index + 1, points.size() - 1);
 }
 
 /**
@@ -98,7 +117,8 @@ vm::vec3d doubleReflectUp(
  * to its own upright frame and the transport continues from there, so a twist cannot
  * propagate past it.
  */
-std::vector<vm::vec3d> computeBaseNodeUps(const std::vector<SplinePoint>& points)
+std::vector<vm::vec3d> computeBaseNodeUps(
+  const std::vector<SplinePoint>& points, const bool closed)
 {
   const auto n = points.size();
   auto ups = std::vector<vm::vec3d>{};
@@ -109,7 +129,8 @@ std::vector<vm::vec3d> computeBaseNodeUps(const std::vector<SplinePoint>& points
   for (size_t i = 0; i < n; ++i)
   {
     tangents.push_back(
-      i < n - 1 ? curveTangent(points, i, 0.0) : curveTangent(points, i - 1, 1.0));
+      closed || i < n - 1 ? curveTangent(points, i, 0.0, closed)
+                          : curveTangent(points, i - 1, 1.0, closed));
   }
 
   ups[0] = orthonormalUp(chooseInitialUp(tangents[0]), tangents[0]);
@@ -146,19 +167,25 @@ vm::vec3d slerpDirection(const vm::vec3d& a, const vm::vec3d& b, const double t)
 
 /** Per point roll interpolated linearly across the given control point segment. */
 double rollAt(
-  const std::vector<SplinePoint>& points, const size_t segment, const double t)
+  const std::vector<SplinePoint>& points,
+  const size_t segment,
+  const double t,
+  const bool closed)
 {
   const auto a = points[segment].roll;
-  const auto b = points[vm::min(segment + 1, points.size() - 1)].roll;
+  const auto b = points[nextPointIndex(points, segment, closed)].roll;
   return vm::mix(a, b, t);
 }
 
 /** Per point scale interpolated linearly across the given control point segment. */
 double scaleAt(
-  const std::vector<SplinePoint>& points, const size_t segment, const double t)
+  const std::vector<SplinePoint>& points,
+  const size_t segment,
+  const double t,
+  const bool closed)
 {
   const auto a = points[segment].scale;
-  const auto b = points[vm::min(segment + 1, points.size() - 1)].scale;
+  const auto b = points[nextPointIndex(points, segment, closed)].scale;
   return vm::mix(a, b, t);
 }
 
@@ -171,12 +198,14 @@ SweepFrame sweepFrameAt(
   const std::vector<SplinePoint>& points,
   const std::vector<vm::vec3d>& nodeUps,
   const size_t segment,
-  const double t)
+  const double t,
+  const bool closed)
 {
-  const auto position = curvePoint(points, segment, t);
-  const auto tangent = curveTangent(points, segment, t);
+  const auto position = curvePoint(points, segment, t, closed);
+  const auto tangent = curveTangent(points, segment, t, closed);
 
-  auto up = slerpDirection(nodeUps[segment], nodeUps[segment + 1], t);
+  auto up = slerpDirection(
+    nodeUps[segment], nodeUps[nextPointIndex(points, segment, closed)], t);
   auto right = vm::cross(up, tangent);
   if (vm::squared_length(right) < 1e-8)
   {
@@ -186,7 +215,7 @@ SweepFrame sweepFrameAt(
   right = vm::normalize(right);
   up = vm::normalize(vm::cross(tangent, right));
 
-  const auto roll = rollAt(points, segment, t);
+  const auto roll = rollAt(points, segment, t, closed);
   if (vm::abs(roll) > 1e-4)
   {
     const auto rotation = vm::quatd{tangent, vm::to_radians(roll)};
@@ -194,18 +223,19 @@ SweepFrame sweepFrameAt(
     up = rotation * up;
   }
 
-  return SweepFrame{position, right, up, scaleAt(points, segment, t)};
+  return SweepFrame{position, right, up, scaleAt(points, segment, t, closed)};
 }
 
 /** Measures the arc length of a control point segment by dense sampling. */
-double segmentLength(const std::vector<SplinePoint>& points, const size_t segment)
+double segmentLength(
+  const std::vector<SplinePoint>& points, const size_t segment, const bool closed)
 {
   auto length = 0.0;
-  auto previous = curvePoint(points, segment, 0.0);
+  auto previous = curvePoint(points, segment, 0.0, closed);
   for (size_t s = 1; s <= SegmentLengthSamples; ++s)
   {
     const auto point =
-      curvePoint(points, segment, double(s) / double(SegmentLengthSamples));
+      curvePoint(points, segment, double(s) / double(SegmentLengthSamples), closed);
     length += vm::length(point - previous);
     previous = point;
   }
@@ -232,23 +262,29 @@ vm::vec3d evaluateSplineSegment(
 }
 
 vm::vec3d curvePoint(
-  const std::vector<SplinePoint>& points, const size_t segment, const double t)
+  const std::vector<SplinePoint>& points,
+  const size_t segment,
+  const double t,
+  const bool closed)
 {
   return evaluateSplineSegment(
-    controlPoint(points, std::ptrdiff_t(segment) - 1),
-    controlPoint(points, std::ptrdiff_t(segment)),
-    controlPoint(points, std::ptrdiff_t(segment) + 1),
-    controlPoint(points, std::ptrdiff_t(segment) + 2),
+    controlPoint(points, std::ptrdiff_t(segment) - 1, closed),
+    controlPoint(points, std::ptrdiff_t(segment), closed),
+    controlPoint(points, std::ptrdiff_t(segment) + 1, closed),
+    controlPoint(points, std::ptrdiff_t(segment) + 2, closed),
     t);
 }
 
 vm::vec3d curveTangent(
-  const std::vector<SplinePoint>& points, const size_t segment, const double t)
+  const std::vector<SplinePoint>& points,
+  const size_t segment,
+  const double t,
+  const bool closed)
 {
-  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1);
-  const auto p1 = controlPoint(points, std::ptrdiff_t(segment));
-  const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1);
-  const auto p3 = controlPoint(points, std::ptrdiff_t(segment) + 2);
+  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
+  const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
+  const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
+  const auto p3 = controlPoint(points, std::ptrdiff_t(segment) + 2, closed);
 
   const auto t2 = t * t;
   const auto d = ((p2 - p0) + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * (2.0 * t)
@@ -258,30 +294,33 @@ vm::vec3d curveTangent(
 }
 
 std::vector<vm::vec3d> sampleSpline(
-  const std::vector<SplinePoint>& points, const size_t subdivisions)
+  const std::vector<SplinePoint>& points, const size_t subdivisions, const bool closed)
 {
   if (points.size() < 2 || subdivisions == 0)
   {
     return {};
   }
 
-  auto result = std::vector<vm::vec3d>{};
-  result.reserve((points.size() - 1) * subdivisions + 1);
+  const auto segments = segmentCount(points, closed);
 
-  for (size_t segment = 0; segment < points.size() - 1; ++segment)
+  auto result = std::vector<vm::vec3d>{};
+  result.reserve(segments * subdivisions + 1);
+
+  for (size_t segment = 0; segment < segments; ++segment)
   {
     for (size_t step = 0; step < subdivisions; ++step)
     {
-      result.push_back(curvePoint(points, segment, double(step) / double(subdivisions)));
+      result.push_back(
+        curvePoint(points, segment, double(step) / double(subdivisions), closed));
     }
   }
-  result.push_back(points.back().position);
+  result.push_back(closed ? points.front().position : points.back().position);
 
   return result;
 }
 
 std::vector<SweepFrame> buildSweepFrames(
-  const std::vector<SplinePoint>& points, const double forwardSize)
+  const std::vector<SplinePoint>& points, const double forwardSize, const bool closed)
 {
   auto frames = std::vector<SweepFrame>{};
   if (points.size() < 2 || forwardSize <= 0.0)
@@ -289,23 +328,24 @@ std::vector<SweepFrame> buildSweepFrames(
     return frames;
   }
 
-  const auto nodeUps = computeBaseNodeUps(points);
+  const auto nodeUps = computeBaseNodeUps(points, closed);
 
-  frames.push_back(sweepFrameAt(points, nodeUps, 0, 0.0));
-  for (size_t segment = 0; segment < points.size() - 1; ++segment)
+  frames.push_back(sweepFrameAt(points, nodeUps, 0, 0.0, closed));
+  for (size_t segment = 0; segment < segmentCount(points, closed); ++segment)
   {
-    const auto length = segmentLength(points, segment);
+    const auto length = segmentLength(points, segment, closed);
     const auto spanCount = vm::max(size_t(1), size_t(std::llround(length / forwardSize)));
     for (size_t k = 1; k <= spanCount; ++k)
     {
       frames.push_back(
-        sweepFrameAt(points, nodeUps, segment, double(k) / double(spanCount)));
+        sweepFrameAt(points, nodeUps, segment, double(k) / double(spanCount), closed));
     }
   }
   return frames;
 }
 
-std::vector<SweepFrame> computeNodeFrames(const std::vector<SplinePoint>& points)
+std::vector<SweepFrame> computeNodeFrames(
+  const std::vector<SplinePoint>& points, const bool closed)
 {
   auto frames = std::vector<SweepFrame>{};
   if (points.size() < 2)
@@ -313,12 +353,13 @@ std::vector<SweepFrame> computeNodeFrames(const std::vector<SplinePoint>& points
     return frames;
   }
 
-  const auto nodeUps = computeBaseNodeUps(points);
+  const auto nodeUps = computeBaseNodeUps(points, closed);
   for (size_t i = 0; i < points.size(); ++i)
   {
     frames.push_back(
-      i < points.size() - 1 ? sweepFrameAt(points, nodeUps, i, 0.0)
-                            : sweepFrameAt(points, nodeUps, points.size() - 2, 1.0));
+      closed || i < points.size() - 1
+        ? sweepFrameAt(points, nodeUps, i, 0.0, closed)
+        : sweepFrameAt(points, nodeUps, points.size() - 2, 1.0, closed));
   }
   return frames;
 }

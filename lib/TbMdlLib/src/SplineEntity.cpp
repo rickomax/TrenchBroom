@@ -203,6 +203,11 @@ std::optional<SplineEntityData> parseSplineEntity(const Entity& entity)
     }
   }
 
+  if (const auto* closed = entity.property(SplinePropertyKeys::Closed))
+  {
+    data.closed = *closed != "0";
+  }
+
   return data;
 }
 
@@ -221,6 +226,7 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   }
   result.removeProperty(SplinePropertyKeys::Subdivisions);
   result.removeProperty(SplinePropertyKeys::TemplateGroupId);
+  result.removeProperty(SplinePropertyKeys::Closed);
 
   result.addOrUpdateProperty(EntityPropertyKeys::Classname, SplineEntityClassname);
 
@@ -236,6 +242,11 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   {
     result.addOrUpdateProperty(
       SplinePropertyKeys::TemplateGroupId, kdl::str_to_string(*data.templateGroupId));
+  }
+
+  if (data.closed)
+  {
+    result.addOrUpdateProperty(SplinePropertyKeys::Closed, "1");
   }
 
   return result;

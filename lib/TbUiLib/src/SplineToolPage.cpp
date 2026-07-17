@@ -86,14 +86,12 @@ void SplineToolPage::createGui()
   m_removePointButton->setToolTip(tr("Remove the selected point from the spline"));
   m_removePointButton->setFocusPolicy(Qt::NoFocus);
 
-  m_rotateAll = new QDoubleSpinBox{};
-  m_rotateAll->setRange(-360.0, 360.0);
-  m_rotateAll->setSingleStep(15.0);
-  m_rotateAll->setValue(15.0);
-  m_rotateAllButton = new QPushButton{tr("Twist")};
-  m_rotateAllButton->setToolTip(
-    tr("Add the given angle to the rotation of all unlocked points"));
-  m_rotateAllButton->setFocusPolicy(Qt::NoFocus);
+  m_closed = new QPushButton{tr("Closed")};
+  m_closed->setCheckable(true);
+  m_closed->setToolTip(
+    tr("Close the spline: the last point connects back to the first, and brushes "
+       "are created on that segment as well"));
+  m_closed->setFocusPolicy(Qt::NoFocus);
 
   m_subdivisions = new QSpinBox{};
   m_subdivisions->setRange(1, 64);
@@ -116,8 +114,7 @@ void SplineToolPage::createGui()
   layout->addWidget(m_locked);
   layout->addWidget(m_removePointButton);
   layout->addSpacing(12);
-  layout->addWidget(m_rotateAll);
-  layout->addWidget(m_rotateAllButton);
+  layout->addWidget(m_closed);
   layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Subdivisions:")});
   layout->addWidget(m_subdivisions);
@@ -162,8 +159,11 @@ void SplineToolPage::createGui()
   });
   connect(
     m_removePointButton, &QPushButton::clicked, this, [this]() { m_tool.removePoint(); });
-  connect(m_rotateAllButton, &QPushButton::clicked, this, [this]() {
-    m_tool.rotateUnlockedPoints(m_rotateAll->value());
+  connect(m_closed, &QPushButton::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setClosed(checked);
+    }
   });
   connect(
     m_subdivisions,
@@ -208,7 +208,8 @@ void SplineToolPage::updateControls()
   m_locked->setEnabled(hasSelectedPoint);
   m_locked->setChecked(m_tool.selectedPointLocked());
   m_removePointButton->setEnabled(m_tool.canRemovePoint());
-  m_rotateAllButton->setEnabled(m_tool.hasPoints());
+  m_closed->setEnabled(m_tool.hasPoints());
+  m_closed->setChecked(m_tool.closed());
 
   m_subdivisions->setValue(int(m_tool.subdivisions()));
 

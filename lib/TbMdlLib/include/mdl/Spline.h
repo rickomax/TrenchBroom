@@ -76,31 +76,38 @@ vm::vec3d evaluateSplineSegment(
 
 /**
  * The point on the Catmull-Rom curve through the given control points, on the segment
- * starting at the given control point index, at parameter t in [0, 1].
+ * starting at the given control point index, at parameter t in [0, 1]. If closed is
+ * true, the curve wraps around: the last control point connects back to the first,
+ * and neighboring control points are looked up modulo the point count.
  */
-vm::vec3d curvePoint(const std::vector<SplinePoint>& points, size_t segment, double t);
+vm::vec3d curvePoint(
+  const std::vector<SplinePoint>& points, size_t segment, double t, bool closed = false);
 
 /**
  * The (normalized, analytic) tangent of the Catmull-Rom curve through the given
  * control points, on the segment starting at the given control point index, at
- * parameter t in [0, 1].
+ * parameter t in [0, 1]. See curvePoint for the meaning of closed.
  */
-vm::vec3d curveTangent(const std::vector<SplinePoint>& points, size_t segment, double t);
+vm::vec3d curveTangent(
+  const std::vector<SplinePoint>& points, size_t segment, double t, bool closed = false);
 
 /**
  * Samples the Catmull-Rom spline through the given control points for display. Each
  * span between two consecutive control points is subdivided into the given number of
- * steps, so the result contains (points.size() - 1) * subdivisions + 1 positions.
- * Returns an empty vector if fewer than two control points are given.
+ * steps. For an open spline, the result contains (points.size() - 1) * subdivisions +
+ * 1 positions; a closed spline additionally contains the segment from the last point
+ * back to the first, ending on the first point's position. Returns an empty vector if
+ * fewer than two control points are given.
  */
 std::vector<vm::vec3d> sampleSpline(
-  const std::vector<SplinePoint>& points, size_t subdivisions);
+  const std::vector<SplinePoint>& points, size_t subdivisions, bool closed = false);
 
 /**
  * Builds the ordered cross-section frames of a profile sweep along the curve. Each
  * control point segment is divided into round(segmentLength / forwardSize) spans
  * (at least one), so each span holds one copy of a profile of the given forward
- * size, stretched or squished to fit its segment.
+ * size, stretched or squished to fit its segment. A closed spline also sweeps the
+ * segment from the last control point back to the first.
  *
  * The base orientation comes from a rotation minimizing frame transported across the
  * control points; locked points anchor the transport to their own upright frame.
@@ -110,11 +117,12 @@ std::vector<vm::vec3d> sampleSpline(
  * Returns an empty vector if fewer than two control points are given.
  */
 std::vector<SweepFrame> buildSweepFrames(
-  const std::vector<SplinePoint>& points, double forwardSize);
+  const std::vector<SplinePoint>& points, double forwardSize, bool closed = false);
 
 /**
  * The sweep frame at each control point, for display purposes (reference arrows).
  */
-std::vector<SweepFrame> computeNodeFrames(const std::vector<SplinePoint>& points);
+std::vector<SweepFrame> computeNodeFrames(
+  const std::vector<SplinePoint>& points, bool closed = false);
 
 } // namespace tb::mdl

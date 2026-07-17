@@ -69,6 +69,26 @@ TEST_CASE("Spline")
       CHECK(samples[1] == vm::approx{vm::vec3d{64, 0, 0}});
       CHECK(samples[2] == vm::approx{vm::vec3d{128, 0, 0}});
     }
+
+    SECTION("a closed spline wraps back around to the first point")
+    {
+      const auto points = std::vector<SplinePoint>{
+        SplinePoint{vm::vec3d{0, 0, 0}},
+        SplinePoint{vm::vec3d{128, 0, 0}},
+        SplinePoint{vm::vec3d{128, 128, 0}},
+        SplinePoint{vm::vec3d{0, 128, 0}},
+      };
+
+      const auto samples = sampleSpline(points, 4, true);
+      REQUIRE(samples.size() == 4 * 4 + 1);
+
+      // One segment per control point, ending back on the first point.
+      CHECK(samples.front() == vm::approx{points.front().position});
+      CHECK(samples[4] == vm::approx{points[1].position});
+      CHECK(samples[8] == vm::approx{points[2].position});
+      CHECK(samples[12] == vm::approx{points[3].position});
+      CHECK(samples.back() == vm::approx{points.front().position});
+    }
   }
 
   SECTION("buildSweepFrames")
@@ -167,6 +187,25 @@ TEST_CASE("Spline")
         CHECK(vm::length(frames[i].right) == vm::approx{1.0});
         CHECK(vm::length(frames[i].up) == vm::approx{1.0});
       }
+    }
+
+    SECTION("a closed spline's sweep returns to its starting frame")
+    {
+      const auto points = std::vector<SplinePoint>{
+        SplinePoint{vm::vec3d{0, 0, 0}},
+        SplinePoint{vm::vec3d{256, 0, 0}},
+        SplinePoint{vm::vec3d{256, 256, 0}},
+        SplinePoint{vm::vec3d{0, 256, 0}},
+      };
+
+      const auto frames = buildSweepFrames(points, 64.0, true);
+      REQUIRE(frames.size() > 4);
+
+      // The loop must close seamlessly: the last frame coincides with the first.
+      CHECK(frames.back().position == vm::approx{frames.front().position});
+      CHECK(frames.back().right == vm::approx{frames.front().right});
+      CHECK(frames.back().up == vm::approx{frames.front().up});
+      CHECK(frames.back().scale == vm::approx{frames.front().scale});
     }
   }
 

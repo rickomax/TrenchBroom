@@ -109,7 +109,8 @@ Result<std::vector<Brush>> createSplineBrushes(
   const vm::bbox3d& worldBounds,
   const std::vector<SplinePoint>& points,
   const std::vector<const Brush*>& templateBrushes,
-  const vm::bbox3d& templateBounds)
+  const vm::bbox3d& templateBounds,
+  const bool closed)
 {
   if (templateBounds.size().x() <= 0.0)
   {
@@ -127,7 +128,7 @@ Result<std::vector<Brush>> createSplineBrushes(
   }
 
   const auto forwardSize = vm::max(1.0, templateBounds.size().x());
-  const auto frames = buildSweepFrames(points, forwardSize);
+  const auto frames = buildSweepFrames(points, forwardSize, closed);
   if (frames.size() < 2)
   {
     return Error{"Spline has zero length"};

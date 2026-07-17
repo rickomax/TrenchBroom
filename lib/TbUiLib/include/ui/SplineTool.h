@@ -89,6 +89,9 @@ private:
   std::vector<mdl::SplinePoint> m_points;
   size_t m_subdivisions = mdl::SplineDefaultSubdivisions;
 
+  /** Whether the spline is closed, i.e. the last point connects back to the first. */
+  bool m_closed = false;
+
   /** The template is either a group (referenced by its persistent ID) or a snapshot
    * of individually linked brushes; at most one of these is set. */
   std::optional<mdl::IdType> m_templateGroupId;
@@ -102,7 +105,7 @@ private:
 
   /** All other splines in the map, so they can be shown and picked up while the tool
    * is active. Refreshed whenever the document changes. */
-  std::vector<std::pair<mdl::EntityNode*, std::vector<mdl::SplinePoint>>> m_otherSplines;
+  std::vector<std::pair<mdl::EntityNode*, mdl::SplineEntityData>> m_otherSplines;
 
   std::optional<size_t> m_selectedIndex;
 
@@ -193,8 +196,11 @@ public: // rotation, scale and locking
   bool selectedPointLocked() const;
   void toggleSelectedPointLocked();
 
-  /** Adds the given roll delta to all points that are not locked. */
-  void rotateUnlockedPoints(double deltaRoll);
+public: // closing
+  /** Whether the spline is closed, i.e. the last point connects back to the first
+   * and brushes are created on that segment as well. */
+  bool closed() const;
+  void setClosed(bool closed);
 
 public: // template group linkage
   size_t subdivisions() const;

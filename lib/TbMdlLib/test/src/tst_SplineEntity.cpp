@@ -69,6 +69,24 @@ TEST_CASE("SplineEntity")
     CHECK(parseSplineEntity(Entity{}) == std::nullopt);
   }
 
+  SECTION("the closed flag round-trips")
+  {
+    auto closedData = data;
+    closedData.closed = true;
+
+    const auto entity = writeSplineEntity(Entity{}, closedData);
+    CHECK(entity.property(SplinePropertyKeys::Closed) != nullptr);
+
+    const auto parsed = parseSplineEntity(entity);
+    REQUIRE(parsed.has_value());
+    CHECK(parsed->closed);
+
+    // Reopening the spline removes the property again.
+    const auto reopened = writeSplineEntity(entity, data);
+    CHECK(reopened.property(SplinePropertyKeys::Closed) == nullptr);
+    CHECK(!parseSplineEntity(reopened)->closed);
+  }
+
   SECTION("writeSplineEntity removes stale point properties")
   {
     const auto entity = writeSplineEntity(Entity{}, data);

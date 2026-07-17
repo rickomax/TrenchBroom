@@ -48,6 +48,9 @@ enum class MapFormat;
  * Consecutive spans share their end cross-sections, so the swept solid is continuous.
  * Face materials and attributes are copied from the best matching template face.
  *
+ * If closed is true, the spline wraps around: the segment from the last control point
+ * back to the first is swept as well.
+ *
  * Returns an error if the lattice or the spline is degenerate, or if no brushes
  * could be created.
  */
@@ -56,6 +59,7 @@ Result<std::vector<Brush>> createSplineBrushes(
   const vm::bbox3d& worldBounds,
   const std::vector<SplinePoint>& points,
   const std::vector<const Brush*>& templateBrushes,
-  const vm::bbox3d& templateBounds);
+  const vm::bbox3d& templateBounds,
+  bool closed = false);
 
 } // namespace tb::mdl

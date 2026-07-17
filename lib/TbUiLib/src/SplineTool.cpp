@@ -101,13 +101,13 @@ void SplineTool::pick(
     }
   }
 
-  for (const auto& [entityNode, points] : m_otherSplines)
+  for (const auto& [entityNode, data] : m_otherSplines)
   {
-    for (size_t i = 0; i < points.size(); ++i)
+    for (size_t i = 0; i < data.points.size(); ++i)
     {
       if (
         const auto distance =
-          camera.pickPointHandle(pickRay, points[i].position, handleRadius))
+          camera.pickPointHandle(pickRay, data.points[i].position, handleRadius))
       {
         const auto hitPoint = vm::point_at_distance(pickRay, *distance);
         pickResult.addHit(
@@ -127,11 +127,12 @@ void SplineTool::render(
   renderService.setShowOccludedObjects();
 
   // Draw all other splines so they can be picked up for editing.
-  for (const auto& [entityNode, points] : m_otherSplines)
+  for (const auto& [entityNode, data] : m_otherSplines)
   {
-    if (points.size() > 1)
+    if (data.points.size() > 1)
     {
-      const auto samples = mdl::sampleSpline(points, m_subdivisions);
+      const auto samples =
+        mdl::sampleSpline(data.points, data.subdivisions, data.closed);
       const auto vertices =
         samples
         | std::views::transform([](const auto& point) { return vm::vec3f{point}; })
@@ -143,7 +144,7 @@ void SplineTool::render(
     }
 
     renderService.setForegroundColor(pref(Preferences::OccludedHandleColor));
-    for (const auto& point : points)
+    for (const auto& point : data.points)
     {
       renderService.renderHandle(vm::vec3f{point.position});
     }
@@ -157,7 +158,7 @@ void SplineTool::render(
 
   if (m_points.size() > 1)
   {
-    const auto samples = mdl::sampleSpline(m_points, m_subdivisions);
+    const auto samples = mdl::sampleSpline(m_points, m_subdivisions, m_closed);
     const auto vertices =
       samples | std::views::transform([](const auto& point) { return vm::vec3f{point}; })
       | kdl::ranges::to<std::vector>();
@@ -172,7 +173,7 @@ void SplineTool::render(
   // selected point additionally shows its right direction.
   if (m_points.size() > 1)
   {
-    const auto frames = mdl::computeNodeFrames(m_points);
+    const auto frames = mdl::computeNodeFrames(m_points, m_closed);
     const auto axisLength = 24.0;
 
     renderService.setLineWidth(2.0f);
@@ -243,11 +244,11 @@ void SplineTool::renderHighlight(
     const auto* points = &m_points;
     if (entityNode != m_splineNode)
     {
-      for (const auto& [otherNode, otherPoints] : m_otherSplines)
+      for (const auto& [otherNode, otherData] : m_otherSplines)
       {
         if (otherNode == entityNode)
         {
-          points = &otherPoints;
+          points = &otherData.points;
           break;
         }
       }
@@ -513,21 +514,17 @@ void SplineTool::toggleSelectedPointLocked()
   }
 }
 
-void SplineTool::rotateUnlockedPoints(const double deltaRoll)
+bool SplineTool::closed() const
 {
-  auto changed = false;
-  for (auto& point : m_points)
-  {
-    if (!point.locked)
-    {
-      point.roll += deltaRoll;
-      changed = true;
-    }
-  }
+  return m_closed;
+}
 
-  if (changed)
+void SplineTool::setClosed(const bool closed)
+{
+  if (closed != m_closed)
   {
-    commitSpline("Rotate Spline Points");
+    m_closed = closed;
+    commitSpline(closed ? "Close Spline" : "Open Spline");
   }
 }
 
@@ -667,7 +664,7 @@ void SplineTool::refreshOtherSplines()
       {
         if (const auto data = mdl::parseSplineEntity(entityNode.entity()))
         {
-          m_otherSplines.emplace_back(&entityNode, data->points);
+          m_otherSplines.emplace_back(&entityNode, *data);
         }
       }
     },
@@ -702,6 +699,7 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
     m_points = data->points;
     m_subdivisions = data->subdivisions;
     m_templateGroupId = data->templateGroupId;
+    m_closed = data->closed;
     m_templateBrushes = mdl::parseSplineTemplateBrushes(
       splineNode->entity(), map.worldNode().mapFormat(), map.worldBounds());
     m_selectedIndex = std::nullopt;
@@ -722,6 +720,7 @@ void SplineTool::clearSpline()
   m_splineNode = nullptr;
   m_points.clear();
   m_subdivisions = mdl::SplineDefaultSubdivisions;
+  m_closed = false;
   m_templateGroupId = std::nullopt;
   m_templateBrushes.clear();
   m_selectedIndex = std::nullopt;
@@ -750,7 +749,8 @@ void SplineTool::commitSpline(const std::string& commandName)
     return;
   }
 
-  const auto data = mdl::SplineEntityData{m_points, m_subdivisions, m_templateGroupId};
+  const auto data =
+    mdl::SplineEntityData{m_points, m_subdivisions, m_templateGroupId, m_closed};
   auto entity = mdl::writeSplineTemplateBrushes(
     mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data),
     m_templateBrushes);
@@ -839,7 +839,8 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes() const
            map.worldBounds(),
            m_points,
            templateBrushes,
-           templateBounds)
+           templateBounds,
+           m_closed)
          | kdl::transform([](auto brushes) {
              return brushes | std::views::transform([](auto& brush) {
                       return static_cast<mdl::Node*>(
