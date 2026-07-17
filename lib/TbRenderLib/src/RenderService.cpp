@@ -105,6 +105,11 @@ void RenderService::setLineWidth(const float lineWidth)
   m_lineWidth = lineWidth;
 }
 
+void RenderService::setPointHandleScale(const float scale)
+{
+  m_pointHandleRenderer = std::make_unique<PointHandleRenderer>(scale);
+}
+
 void RenderService::setShowOccludedObjects()
 {
   m_occlusionPolicy = PrimitiveRendererOcclusionPolicy::Show;

@@ -30,6 +30,7 @@
 #include "mdl/PickResult.h"
 #include "ui/HandleDragTracker.h"
 #include "ui/InputState.h"
+#include "ui/MoveHandleDragTracker.h"
 #include "ui/SplineTool.h"
 
 #include "vm/intersection.h"
@@ -65,11 +66,6 @@ public:
 
   virtual std::optional<vm::vec3d> newPointPosition(
     const InputState& inputState) const = 0;
-
-  virtual HandlePositionProposer makeHandlePositionProposer(
-    const InputState& inputState,
-    const vm::vec3d& initialHandlePosition,
-    const vm::vec3d& handleOffset) const = 0;
 
   void renderFeedback(
     const InputState& inputState,
@@ -115,18 +111,6 @@ public:
     }
     return std::nullopt;
   }
-
-  HandlePositionProposer makeHandlePositionProposer(
-    const InputState& inputState,
-    const vm::vec3d& initialHandlePosition,
-    const vm::vec3d& handleOffset) const override
-  {
-    return ui::makeHandlePositionProposer(
-      makePlaneHandlePicker(
-        vm::plane3d{initialHandlePosition, vm::vec3d{inputState.camera().direction()}},
-        handleOffset),
-      makeAbsoluteHandleSnapper(m_tool.grid()));
-  }
 };
 
 class PartDelegate3D : public PartDelegateBase
@@ -154,17 +138,6 @@ public:
     }
     return std::nullopt;
   }
-
-  HandlePositionProposer makeHandlePositionProposer(
-    const InputState&,
-    const vm::vec3d& initialHandlePosition,
-    const vm::vec3d& handleOffset) const override
-  {
-    return ui::makeHandlePositionProposer(
-      makePlaneHandlePicker(
-        vm::plane3d{initialHandlePosition, vm::vec3d{0, 0, 1}}, handleOffset),
-      makeAbsoluteHandleSnapper(m_tool.grid()));
-  }
 };
 
 class PartBase
@@ -181,39 +154,40 @@ public:
   virtual ~PartBase() = default;
 };
 
-class MoveSplinePointDragDelegate : public HandleDragTrackerDelegate
+/**
+ * Implements the usual move semantics for dragging a spline point: dragging on a
+ * horizontal plane in the 3D view, with the Alt key switching to a vertical move and
+ * Shift constricting the move to one axis, and dragging on the view plane in the 2D
+ * views.
+ */
+class MoveSplinePointDragDelegate : public MoveHandleDragTrackerDelegate
 {
 private:
-  PartDelegateBase& m_delegate;
+  SplineTool& m_tool;
 
 public:
-  explicit MoveSplinePointDragDelegate(PartDelegateBase& delegate)
-    : m_delegate{delegate}
+  explicit MoveSplinePointDragDelegate(SplineTool& tool)
+    : m_tool{tool}
   {
   }
 
-  HandlePositionProposer start(
-    const InputState& inputState,
-    const vm::vec3d& initialHandlePosition,
-    const vm::vec3d& handleOffset) override
-  {
-    return m_delegate.makeHandlePositionProposer(
-      inputState, initialHandlePosition, handleOffset);
-  }
-
-  DragStatus update(
+  DragStatus move(
     const InputState&, const DragState&, const vm::vec3d& proposedHandlePosition) override
   {
-    return m_delegate.tool().dragPoint(proposedHandlePosition) ? DragStatus::Continue
-                                                               : DragStatus::Deny;
+    return m_tool.dragPoint(proposedHandlePosition) ? DragStatus::Continue
+                                                    : DragStatus::Deny;
   }
 
-  void end(const InputState&, const DragState&) override
+  void end(const InputState&, const DragState&) override { m_tool.endDragPoint(); }
+
+  void cancel(const DragState&) override { m_tool.cancelDragPoint(); }
+
+  DragHandleSnapper makeDragHandleSnapper(
+    const InputState&, const SnapMode snapMode) const override
   {
-    m_delegate.tool().endDragPoint();
+    return snapMode == SnapMode::Relative ? makeRelativeHandleSnapper(m_tool.grid())
+                                          : makeAbsoluteHandleSnapper(m_tool.grid());
   }
-
-  void cancel(const DragState&) override { m_delegate.tool().cancelDragPoint(); }
 };
 
 class MoveSplinePointPart : public ToolController, protected PartBase
@@ -247,8 +221,8 @@ private:
     }
 
     const auto [initialHandlePosition, hitPoint] = *initialHandlePositionAndHitPoint;
-    return createHandleDragTracker(
-      MoveSplinePointDragDelegate{*m_delegate},
+    return createMoveHandleDragTracker(
+      MoveSplinePointDragDelegate{m_delegate->tool()},
       inputState,
       initialHandlePosition,
       hitPoint);

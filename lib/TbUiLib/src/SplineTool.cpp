@@ -58,6 +58,12 @@
 namespace tb::ui
 {
 
+namespace
+{
+/** Spline point handles are drawn and picked larger than regular point handles. */
+constexpr auto SplinePointHandleScale = 5.0;
+} // namespace
+
 const mdl::HitType::Type SplineTool::PointHitType = mdl::HitType::freeType();
 
 SplineTool::SplineTool(MapDocument& document)
@@ -80,11 +86,14 @@ void SplineTool::pick(
   // uncommitted spline) and the point index.
   using Target = std::pair<mdl::EntityNode*, size_t>;
 
+  const auto handleRadius =
+    SplinePointHandleScale * double(pref(Preferences::HandleRadius));
+
   for (size_t i = 0; i < m_points.size(); ++i)
   {
     if (
-      const auto distance = camera.pickPointHandle(
-        pickRay, m_points[i].position, double(pref(Preferences::HandleRadius))))
+      const auto distance =
+        camera.pickPointHandle(pickRay, m_points[i].position, handleRadius))
     {
       const auto hitPoint = vm::point_at_distance(pickRay, *distance);
       pickResult.addHit(
@@ -97,8 +106,8 @@ void SplineTool::pick(
     for (size_t i = 0; i < points.size(); ++i)
     {
       if (
-        const auto distance = camera.pickPointHandle(
-          pickRay, points[i].position, double(pref(Preferences::HandleRadius))))
+        const auto distance =
+          camera.pickPointHandle(pickRay, points[i].position, handleRadius))
       {
         const auto hitPoint = vm::point_at_distance(pickRay, *distance);
         pickResult.addHit(
@@ -114,6 +123,7 @@ void SplineTool::render(
   const mdl::PickResult& pickResult)
 {
   auto renderService = render::RenderService{renderContext, renderBatch};
+  renderService.setPointHandleScale(float(SplinePointHandleScale));
   renderService.setShowOccludedObjects();
 
   // Draw all other splines so they can be picked up for editing.
@@ -256,6 +266,7 @@ void SplineTool::renderFeedback(
   const vm::vec3d& point) const
 {
   auto renderService = render::RenderService{renderContext, renderBatch};
+  renderService.setPointHandleScale(float(SplinePointHandleScale));
   renderService.setShowOccludedObjects();
   renderService.setForegroundColor(pref(Preferences::HandleColor));
   renderService.renderHandle(vm::vec3f{point});

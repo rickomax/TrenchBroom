@@ -49,7 +49,11 @@ private:
   Circle m_highlight;
 
 public:
-  PointHandleRenderer();
+  /**
+   * Creates a point handle renderer whose handles have the preference handle radius
+   * multiplied by the given scale.
+   */
+  explicit PointHandleRenderer(float radiusScale = 1.0f);
 
   void addPoint(const Color& color, const vm::vec3f& position);
   void addHighlight(const Color& color, const vm::vec3f& position);
