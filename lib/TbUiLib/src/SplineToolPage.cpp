@@ -82,7 +82,7 @@ void SplineToolPage::createGui()
   m_rotateAll->setRange(-360.0, 360.0);
   m_rotateAll->setSingleStep(15.0);
   m_rotateAll->setValue(15.0);
-  m_rotateAllButton = new QPushButton{tr("Rotate Unlocked")};
+  m_rotateAllButton = new QPushButton{tr("Twist")};
   m_rotateAllButton->setToolTip(
     tr("Add the given angle to the rotation of all unlocked points"));
 
