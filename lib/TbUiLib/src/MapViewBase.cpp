@@ -226,7 +226,11 @@ void MapViewBase::selectionDidChange(const mdl::SelectionChange&)
 void MapViewBase::toolChanged(Tool&)
 {
   updatePickResult();
-  updateActionStates();
+  // Defer the action state update: when a new document is loaded while a tool is
+  // active, the tool is deactivated by MapViewToolBox before createActions() has
+  // rebuilt m_shortcuts, so updating synchronously here would dereference dangling
+  // pointers to the previous document's cached tag / entity definition actions.
+  updateActionStatesDelayed();
   update();
 }
 
