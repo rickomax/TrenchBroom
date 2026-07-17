@@ -137,7 +137,18 @@ Result<std::vector<Brush>> createSplineBrushes(
 
   auto brushes = std::vector<Brush>{};
 
-  // One copy of every template brush per span between two consecutive frames.
+  // One copy of every template brush per span between two consecutive frames. Each
+  // template brush is decomposed into tetrahedra before deforming: a tetrahedron is a
+  // simplex, so its four deformed corners always form a valid convex brush, whereas
+  // deforming a larger convex brush as a whole can make its vertex set non-convex on
+  // curved spans, and the convex hull would then shave off vertices and distort the
+  // shape. The decomposition fans out from the brush's vertex centroid: every face is
+  // triangulated, and each triangle forms a tetrahedron with the centroid.
+  //
+  // All deformed vertices are snapped to integer coordinates. Adjacent spans compute
+  // identical positions for their shared cross section, and tetrahedra sharing a face
+  // or edge share its deformed vertices, so everything rounds consistently and
+  // snapping cannot open gaps.
   for (size_t i = 0; i < frames.size() - 1; ++i)
   {
     const auto& a = frames[i];
@@ -145,29 +156,50 @@ Result<std::vector<Brush>> createSplineBrushes(
 
     for (const auto* templateBrush : templateBrushes)
     {
-      auto deformedPoints = std::vector<vm::vec3d>{};
-      deformedPoints.reserve(templateBrush->vertexCount());
-      for (const auto& vertex : templateBrush->vertexPositions())
+      const auto vertices = templateBrush->vertexPositions();
+      auto apex = vm::vec3d{};
+      for (const auto& vertex : vertices)
       {
-        // Snap the deformed vertices to integer coordinates. Adjacent spans compute
-        // identical positions for their shared cross section, so both round the same
-        // way and snapping cannot open gaps between them.
-        deformedPoints.push_back(vm::round(ffdDeform(vertex, templateBounds, a, b)));
+        apex = apex + vertex;
       }
+      apex = apex / double(vertices.size());
+      const auto deformedApex = vm::round(ffdDeform(apex, templateBounds, a, b));
 
       const auto materialName =
         !templateBrush->faces().empty()
           ? templateBrush->faces().front().attributes().materialName()
           : "";
 
-      builder.createBrush(deformedPoints, materialName)
-        | kdl::transform([&](Brush brush) {
-            copyFaceAttributes(brush, *templateBrush, a, b);
-            brushes.push_back(std::move(brush));
-          })
-        | kdl::transform_error([](const auto&) {
-            // Skip degenerate cells, e.g. where the deformation collapsed the brush.
-          });
+      for (const auto& face : templateBrush->faces())
+      {
+        const auto faceVertices = face.vertexPositions();
+        auto deformedFaceVertices = std::vector<vm::vec3d>{};
+        deformedFaceVertices.reserve(faceVertices.size());
+        for (const auto& vertex : faceVertices)
+        {
+          deformedFaceVertices.push_back(
+            vm::round(ffdDeform(vertex, templateBounds, a, b)));
+        }
+
+        for (size_t j = 1; j + 1 < deformedFaceVertices.size(); ++j)
+        {
+          builder.createBrush(
+            std::vector<vm::vec3d>{
+              deformedApex,
+              deformedFaceVertices[0],
+              deformedFaceVertices[j],
+              deformedFaceVertices[j + 1]},
+            materialName)
+            | kdl::transform([&](Brush brush) {
+                copyFaceAttributes(brush, *templateBrush, a, b);
+                brushes.push_back(std::move(brush));
+              })
+            | kdl::transform_error([](const auto&) {
+                // Skip degenerate tetrahedra, e.g. where the deformation or the
+                // rounding collapsed the cell.
+              });
+        }
+      }
     }
   }
 

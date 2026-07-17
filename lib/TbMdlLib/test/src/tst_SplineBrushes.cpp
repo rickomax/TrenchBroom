@@ -100,8 +100,9 @@ TEST_CASE("createSplineBrushes")
         MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
       | kdl::value();
 
-    // Two spans, one template copy each.
-    CHECK(brushes.size() == 2);
+    // Two spans, one template copy each; every copy is decomposed into tetrahedra
+    // (two per quad face of the cuboid).
+    CHECK(brushes.size() == 2 * 12);
 
     const auto bounds = unitedBounds(brushes);
     CHECK(bounds.min == vm::approx{vm::vec3d{0, -16, -16}});
@@ -138,15 +139,29 @@ TEST_CASE("createSplineBrushes")
         MapFormat::Standard, worldBounds, points, halfBrushes, templateBounds)
       | kdl::value();
 
-    REQUIRE(brushes.size() == 2);
+    REQUIRE(!brushes.empty());
 
-    const auto inSpan = [](const Brush& brush, const double min, const double max) {
-      return brush.bounds().min.x() == vm::approx{min}
-             && brush.bounds().max.x() == vm::approx{max};
-    };
-    CHECK((inSpan(brushes[0], 0.0, 24.0) || inSpan(brushes[0], 48.0, 72.0)));
-    CHECK((inSpan(brushes[1], 0.0, 24.0) || inSpan(brushes[1], 48.0, 72.0)));
-    CHECK(brushes[0].bounds().min.x() != vm::approx{brushes[1].bounds().min.x()});
+    // Each copy is decomposed into tetrahedra, so instead of comparing individual
+    // brushes, partition them by span and compare the united bounds per span.
+    auto firstCopy = std::vector<Brush>{};
+    auto secondCopy = std::vector<Brush>{};
+    for (const auto& brush : brushes)
+    {
+      if (brush.bounds().max.x() <= 24.0)
+      {
+        firstCopy.push_back(brush);
+      }
+      else
+      {
+        REQUIRE(brush.bounds().min.x() >= 48.0);
+        secondCopy.push_back(brush);
+      }
+    }
+
+    REQUIRE(!firstCopy.empty());
+    REQUIRE(!secondCopy.empty());
+    CHECK(unitedBounds(firstCopy) == vm::bbox3d{{0, -16, -16}, {24, 16, 16}});
+    CHECK(unitedBounds(secondCopy) == vm::bbox3d{{48, -16, -16}, {72, 16, 16}});
   }
 
   SECTION("cross-section scale tapers the sweep")
@@ -161,14 +176,22 @@ TEST_CASE("createSplineBrushes")
         MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
       | kdl::value();
 
-    REQUIRE(brushes.size() == 2);
+    REQUIRE(!brushes.empty());
 
     // The frames sit at scales 1.0, 0.75 and 0.5, so the second cell's widest
-    // cross-section is 0.75 * 16.
-    const auto& lastBrush =
-      brushes[0].bounds().min.x() < brushes[1].bounds().min.x() ? brushes[1] : brushes[0];
-    CHECK(lastBrush.bounds().max.y() == vm::approx{12.0});
-    CHECK(lastBrush.bounds().min.y() == vm::approx{-12.0});
+    // cross-section is 0.75 * 16. The cell consists of the tetrahedra beyond x = 64.
+    auto secondCell = std::vector<Brush>{};
+    for (const auto& brush : brushes)
+    {
+      if (brush.bounds().min.x() >= 64.0)
+      {
+        secondCell.push_back(brush);
+      }
+    }
+    REQUIRE(!secondCell.empty());
+    const auto secondCellBounds = unitedBounds(secondCell);
+    CHECK(secondCellBounds.max.y() == vm::approx{12.0});
+    CHECK(secondCellBounds.min.y() == vm::approx{-12.0});
 
     const auto bounds = unitedBounds(brushes);
     CHECK(bounds.max.y() == vm::approx{16.0});
