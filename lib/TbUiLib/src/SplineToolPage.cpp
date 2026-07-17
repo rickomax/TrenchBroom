@@ -47,6 +47,10 @@ void SplineToolPage::createGui()
 {
   m_addPoints = new QPushButton{tr("Add")};
   m_addPoints->setCheckable(true);
+  // Don't take focus when clicked: focusing a widget outside the map views deactivates
+  // them, causing the next click in a map view to be swallowed as the activation click
+  // instead of adding a point.
+  m_addPoints->setFocusPolicy(Qt::NoFocus);
   m_addPoints->setToolTip(
     tr("While enabled, clicking empty space appends new points to the spline; "
        "disable it to select and edit points without adding new ones"));
@@ -55,7 +59,9 @@ void SplineToolPage::createGui()
   m_linkButton = new QPushButton{tr("Link")};
   m_linkButton->setToolTip(
     tr("Use the selected group or the selected brushes as the spline's template"));
+  m_linkButton->setFocusPolicy(Qt::NoFocus);
   m_unlinkButton = new QPushButton{tr("Unlink")};
+  m_unlinkButton->setFocusPolicy(Qt::NoFocus);
 
   m_roll = new QDoubleSpinBox{};
   m_roll->setRange(-360.0, 360.0);
@@ -71,12 +77,14 @@ void SplineToolPage::createGui()
        "between points"));
 
   m_locked = new QCheckBox{tr("Locked")};
+  m_locked->setFocusPolicy(Qt::NoFocus);
   m_locked->setToolTip(
     tr("A locked point anchors the sweep's orientation, so a twist caused by "
        "rotating other points cannot propagate past it"));
 
   m_removePointButton = new QPushButton{tr("Remove")};
   m_removePointButton->setToolTip(tr("Remove the selected point from the spline"));
+  m_removePointButton->setFocusPolicy(Qt::NoFocus);
 
   m_rotateAll = new QDoubleSpinBox{};
   m_rotateAll->setRange(-360.0, 360.0);
@@ -85,6 +93,7 @@ void SplineToolPage::createGui()
   m_rotateAllButton = new QPushButton{tr("Twist")};
   m_rotateAllButton->setToolTip(
     tr("Add the given angle to the rotation of all unlocked points"));
+  m_rotateAllButton->setFocusPolicy(Qt::NoFocus);
 
   m_subdivisions = new QSpinBox{};
   m_subdivisions->setRange(1, 64);
