@@ -202,13 +202,18 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy "${TB_RESOURCE_DIR}/win32/icons/DocIcon.ico"    "${CMAKE_CURRENT_BINARY_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy "${TB_RESOURCE_DIR}/win32/icons/WindowIcon.ico" "${CMAKE_CURRENT_BINARY_DIR}")
 
-    # Copy DLLs to app directory
+    # Copy DLLs to app directory. Use $<TARGET_RUNTIME_DLLS> so that the whole
+    # transitive runtime-DLL closure is deployed, not just our direct dependencies:
+    # freeimage in particular pulls in tiff, zlib, openexr, imath, libjpeg-turbo,
+    # libpng, openjpeg, jxrlib, libraw and libwebp, none of which were copied by the
+    # previous hand-maintained list (assimp, freeimage, freetype, tinyxml2, miniz).
+    # The generator expression also resolves the correct Debug/Release variant of
+    # each DLL. COMMAND_EXPAND_LISTS turns the semicolon-separated list into separate
+    # arguments. The list is non-empty here because Windows builds link the vcpkg
+    # dependencies dynamically.
     add_custom_command(TARGET TrenchBroom POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:assimp::assimp>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:freeimage::FreeImage>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:freetype>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:tinyxml2::tinyxml2>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:miniz::miniz>" "$<TARGET_FILE_DIR:TrenchBroom>"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_RUNTIME_DLLS:TrenchBroom>" "$<TARGET_FILE_DIR:TrenchBroom>"
+            COMMAND_EXPAND_LISTS
     )
 
     # Run windeployqt which copies the Qt dlls into the deployable folder, along with necessary runtime dlls by the compiler
