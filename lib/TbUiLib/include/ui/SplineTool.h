@@ -33,6 +33,7 @@
 #include <optional>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace tb
@@ -57,6 +58,7 @@ namespace render
 {
 class RenderBatch;
 class RenderContext;
+class RenderService;
 } // namespace render
 
 namespace ui
@@ -98,6 +100,10 @@ private:
   /** The entity node holding the spline currently being edited, if any. */
   mdl::EntityNode* m_splineNode = nullptr;
 
+  /** All other splines in the map, so they can be shown and picked up while the tool
+   * is active. Refreshed whenever the document changes. */
+  std::vector<std::pair<mdl::EntityNode*, std::vector<mdl::SplinePoint>>> m_otherSplines;
+
   std::optional<size_t> m_selectedIndex;
 
   struct DragState
@@ -130,6 +136,10 @@ public:
     render::RenderBatch& renderBatch,
     const vm::vec3d& point) const;
 
+private:
+  void renderHighlight(
+    render::RenderService& renderService, const mdl::PickResult& pickResult) const;
+
 public: // add point mode
   /**
    * While add point mode is enabled, clicking empty space appends a new point to the
@@ -155,6 +165,14 @@ public: // point management
 
   /** Selects the point hit by the given pick result. Returns whether a point was hit. */
   bool selectPoint(const mdl::PickResult& pickResult);
+
+  /**
+   * Picks up the spline whose generated geometry is hit by the given pick result for
+   * editing. Since generated brushes cannot be selected, this is how an existing
+   * spline is chosen while the tool is active. Returns whether a different spline
+   * was hit and loaded.
+   */
+  bool selectSpline(const mdl::PickResult& pickResult);
   void deselectPoint();
   std::optional<size_t> selectedPointIndex() const;
 
@@ -203,6 +221,7 @@ private:
   void loadFromSelection();
   void loadSplineNode(mdl::EntityNode* splineNode);
   void clearSpline();
+  void refreshOtherSplines();
 
   /**
    * Writes the current spline state to the document by replacing the spline entity

@@ -233,7 +233,8 @@ private:
   {
     if (
       inputState.mouseButtons() != MouseButtons::Left
-      || inputState.modifierKeys() != ModifierKeys::None)
+      || inputState.modifierKeys() != ModifierKeys::None
+      || m_delegate->tool().addPointMode())
     {
       return nullptr;
     }
@@ -278,13 +279,10 @@ private:
       return false;
     }
 
-    // Clicking an existing point selects it; clicking elsewhere appends a new point,
-    // but only while add point mode is enabled.
-    if (m_delegate->tool().selectPoint(inputState.pickResult()))
-    {
-      return true;
-    }
-
+    // While add point mode is enabled, every click appends a new point; selection is
+    // disabled. Otherwise, clicking a point selects it (picking up its spline if it
+    // belongs to a different one), and clicking a spline's generated geometry picks
+    // up that spline for editing.
     if (m_delegate->tool().addPointMode())
     {
       if (const auto position = m_delegate->newPointPosition(inputState))
@@ -292,15 +290,24 @@ private:
         m_delegate->tool().addPoint(*position);
         return true;
       }
+      return false;
     }
-    return false;
+
+    if (m_delegate->tool().selectPoint(inputState.pickResult()))
+    {
+      return true;
+    }
+
+    return m_delegate->tool().selectSpline(inputState.pickResult());
   }
 
   bool mouseDoubleClick(const InputState& inputState) override
   {
-    // Double clicking a point toggles its locked state.
+    // Double clicking a point toggles its locked state (not in add point mode, where
+    // clicks append points).
     if (
-      inputState.mouseButtonsPressed(MouseButtons::Left)
+      !m_delegate->tool().addPointMode()
+      && inputState.mouseButtonsPressed(MouseButtons::Left)
       && m_delegate->tool().selectPoint(inputState.pickResult()))
     {
       m_delegate->tool().toggleSelectedPointLocked();

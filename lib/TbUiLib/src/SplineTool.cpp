@@ -29,6 +29,7 @@
 #include "mdl/EntityNode.h"
 #include "mdl/GroupNode.h"
 #include "mdl/Hit.h"
+#include "mdl/HitAdapter.h"
 #include "mdl/HitFilter.h"
 #include "mdl/LayerNode.h"
 #include "mdl/Map.h"
@@ -75,6 +76,10 @@ const mdl::Grid& SplineTool::grid() const
 void SplineTool::pick(
   const vm::ray3d& pickRay, const gl::Camera& camera, mdl::PickResult& pickResult)
 {
+  // The hit target identifies the spline (by its entity node, null for a new,
+  // uncommitted spline) and the point index.
+  using Target = std::pair<mdl::EntityNode*, size_t>;
+
   for (size_t i = 0; i < m_points.size(); ++i)
   {
     if (
@@ -82,7 +87,23 @@ void SplineTool::pick(
         pickRay, m_points[i].position, double(pref(Preferences::HandleRadius))))
     {
       const auto hitPoint = vm::point_at_distance(pickRay, *distance);
-      pickResult.addHit(mdl::Hit{PointHitType, *distance, hitPoint, i});
+      pickResult.addHit(
+        mdl::Hit{PointHitType, *distance, hitPoint, Target{m_splineNode, i}});
+    }
+  }
+
+  for (const auto& [entityNode, points] : m_otherSplines)
+  {
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+      if (
+        const auto distance = camera.pickPointHandle(
+          pickRay, points[i].position, double(pref(Preferences::HandleRadius))))
+      {
+        const auto hitPoint = vm::point_at_distance(pickRay, *distance);
+        pickResult.addHit(
+          mdl::Hit{PointHitType, *distance, hitPoint, Target{entityNode, i}});
+      }
     }
   }
 }
@@ -92,13 +113,37 @@ void SplineTool::render(
   render::RenderBatch& renderBatch,
   const mdl::PickResult& pickResult)
 {
-  if (m_points.empty())
-  {
-    return;
-  }
-
   auto renderService = render::RenderService{renderContext, renderBatch};
   renderService.setShowOccludedObjects();
+
+  // Draw all other splines so they can be picked up for editing.
+  for (const auto& [entityNode, points] : m_otherSplines)
+  {
+    if (points.size() > 1)
+    {
+      const auto samples = mdl::sampleSpline(points, m_subdivisions);
+      const auto vertices =
+        samples
+        | std::views::transform([](const auto& point) { return vm::vec3f{point}; })
+        | kdl::ranges::to<std::vector>();
+
+      renderService.setForegroundColor(pref(Preferences::SplineLineColor));
+      renderService.setLineWidth(1.0f);
+      renderService.renderLineStrip(vertices);
+    }
+
+    renderService.setForegroundColor(pref(Preferences::OccludedHandleColor));
+    for (const auto& point : points)
+    {
+      renderService.renderHandle(vm::vec3f{point.position});
+    }
+  }
+
+  if (m_points.empty())
+  {
+    renderHighlight(renderService, pickResult);
+    return;
+  }
 
   if (m_points.size() > 1)
   {
@@ -151,14 +196,7 @@ void SplineTool::render(
     renderService.renderHandle(vm::vec3f{point.position});
   }
 
-  using namespace mdl::HitFilters;
-  const auto& hit = pickResult.first(type(PointHitType));
-  if (hit.isMatch())
-  {
-    const auto index = hit.target<size_t>();
-    renderService.setForegroundColor(pref(Preferences::SelectedHandleColor));
-    renderService.renderHandleHighlight(vm::vec3f{m_points[index].position});
-  }
+  renderHighlight(renderService, pickResult);
 
   if (m_selectedIndex && *m_selectedIndex < m_points.size())
   {
@@ -174,6 +212,41 @@ void SplineTool::render(
         point.scale,
         point.locked ? " | Locked" : ""),
       vm::vec3f{point.position});
+  }
+}
+
+void SplineTool::renderHighlight(
+  render::RenderService& renderService, const mdl::PickResult& pickResult) const
+{
+  // Highlight the hovered point; while add point mode is active, clicks add points
+  // instead of selecting, so no highlight is shown.
+  if (m_addPointMode)
+  {
+    return;
+  }
+
+  using namespace mdl::HitFilters;
+  const auto& hit = pickResult.first(type(PointHitType));
+  if (hit.isMatch())
+  {
+    const auto [entityNode, index] = hit.target<std::pair<mdl::EntityNode*, size_t>>();
+    const auto* points = &m_points;
+    if (entityNode != m_splineNode)
+    {
+      for (const auto& [otherNode, otherPoints] : m_otherSplines)
+      {
+        if (otherNode == entityNode)
+        {
+          points = &otherPoints;
+          break;
+        }
+      }
+    }
+    if (index < points->size())
+    {
+      renderService.setForegroundColor(pref(Preferences::SelectedHandleColor));
+      renderService.renderHandleHighlight(vm::vec3f{(*points)[index].position});
+    }
   }
 }
 
@@ -259,10 +332,49 @@ bool SplineTool::selectPoint(const mdl::PickResult& pickResult)
     return false;
   }
 
-  m_selectedIndex = hit.target<size_t>();
+  // Hitting another spline's point picks up that spline for editing first.
+  const auto [entityNode, index] = hit.target<std::pair<mdl::EntityNode*, size_t>>();
+  if (entityNode != m_splineNode)
+  {
+    if (!entityNode)
+    {
+      return false;
+    }
+    loadSplineNode(entityNode);
+  }
+
+  if (index >= m_points.size())
+  {
+    return false;
+  }
+
+  m_selectedIndex = index;
   refreshViews();
   splineDidChangeNotifier();
   return true;
+}
+
+bool SplineTool::selectSpline(const mdl::PickResult& pickResult)
+{
+  using namespace mdl::HitFilters;
+
+  const auto& hit = pickResult.first(type(mdl::BrushNode::BrushHitType));
+  if (const auto faceHandle = mdl::hitToFaceHandle(hit))
+  {
+    for (auto* candidate = static_cast<mdl::Node*>(faceHandle->node());
+         candidate != nullptr;
+         candidate = candidate->parent())
+    {
+      if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(candidate);
+          entityNode && entityNode != m_splineNode
+          && mdl::isSplineEntity(entityNode->entity()))
+      {
+        loadSplineNode(entityNode);
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 void SplineTool::deselectPoint()
@@ -288,7 +400,22 @@ std::optional<std::tuple<vm::vec3d, vm::vec3d>> SplineTool::beginDragPoint(
     return std::nullopt;
   }
 
-  const auto index = hit.target<size_t>();
+  // Hitting another spline's point picks up that spline for editing first.
+  const auto [entityNode, index] = hit.target<std::pair<mdl::EntityNode*, size_t>>();
+  if (entityNode != m_splineNode)
+  {
+    if (!entityNode)
+    {
+      return std::nullopt;
+    }
+    loadSplineNode(entityNode);
+  }
+
+  if (index >= m_points.size())
+  {
+    return std::nullopt;
+  }
+
   m_selectedIndex = index;
   m_dragState = DragState{index, m_points[index]};
   splineDidChangeNotifier();
@@ -510,6 +637,33 @@ mdl::GroupNode* SplineTool::selectedGroup() const
   return groups.size() == 1 ? groups.front() : nullptr;
 }
 
+void SplineTool::refreshOtherSplines()
+{
+  m_otherSplines.clear();
+
+  m_document.map().worldNode().accept(kdl::overload(
+    [](auto&& thisLambda, mdl::WorldNode& worldNode) {
+      worldNode.visitChildren(thisLambda);
+    },
+    [](auto&& thisLambda, mdl::LayerNode& layerNode) {
+      layerNode.visitChildren(thisLambda);
+    },
+    [](auto&& thisLambda, mdl::GroupNode& groupNode) {
+      groupNode.visitChildren(thisLambda);
+    },
+    [&](mdl::EntityNode& entityNode) {
+      if (&entityNode != m_splineNode && mdl::isSplineEntity(entityNode.entity()))
+      {
+        if (const auto data = mdl::parseSplineEntity(entityNode.entity()))
+        {
+          m_otherSplines.emplace_back(&entityNode, data->points);
+        }
+      }
+    },
+    [](mdl::BrushNode&) {},
+    [](mdl::PatchNode&) {}));
+}
+
 void SplineTool::loadFromSelection()
 {
   for (auto* node : m_document.map().selection().nodes)
@@ -546,6 +700,7 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
     // add point mode to prevent accidentally appending new points.
     m_addPointMode = false;
 
+    refreshOtherSplines();
     refreshViews();
     splineDidChangeNotifier();
   }
@@ -560,6 +715,7 @@ void SplineTool::clearSpline()
   m_templateBrushes.clear();
   m_selectedIndex = std::nullopt;
   m_dragState = std::nullopt;
+  refreshOtherSplines();
   refreshViews();
   splineDidChangeNotifier();
 }
@@ -620,6 +776,7 @@ void SplineTool::commitSpline(const std::string& commandName)
     transaction.commit();
   }
 
+  refreshOtherSplines();
   refreshViews();
   splineDidChangeNotifier();
 }
@@ -694,6 +851,7 @@ bool SplineTool::doActivate()
   // creates points accidentally; the user enables it explicitly on the tool page.
   m_addPointMode = false;
   loadFromSelection();
+  refreshOtherSplines();
 
   splineDidChangeNotifier();
   return true;
@@ -703,6 +861,7 @@ bool SplineTool::doDeactivate()
 {
   m_notifierConnection.disconnect();
   clearSpline();
+  m_otherSplines.clear();
   return true;
 }
 
@@ -726,7 +885,14 @@ void SplineTool::connectObservers()
 
 void SplineTool::nodesWereAdded(const std::vector<mdl::Node*>& nodes)
 {
-  if (m_ignoreNotifications || m_splineNode != nullptr)
+  if (m_ignoreNotifications)
+  {
+    return;
+  }
+
+  refreshOtherSplines();
+
+  if (m_splineNode != nullptr)
   {
     return;
   }
@@ -745,25 +911,33 @@ void SplineTool::nodesWereAdded(const std::vector<mdl::Node*>& nodes)
 
 void SplineTool::nodesWereRemoved(const std::vector<mdl::Node*>& nodes)
 {
-  if (m_ignoreNotifications || !m_splineNode)
+  if (m_ignoreNotifications)
   {
     return;
   }
 
-  if (std::ranges::find(nodes, m_splineNode) != nodes.end())
+  if (m_splineNode && std::ranges::find(nodes, m_splineNode) != nodes.end())
   {
     clearSpline();
+  }
+  else
+  {
+    refreshOtherSplines();
   }
 }
 
 void SplineTool::nodesDidChange(const std::vector<mdl::Node*>& nodes)
 {
-  if (m_ignoreNotifications || !m_splineNode)
+  if (m_ignoreNotifications)
   {
     return;
   }
 
-  if (std::ranges::find(nodes, static_cast<mdl::Node*>(m_splineNode)) != nodes.end())
+  refreshOtherSplines();
+
+  if (
+    m_splineNode
+    && std::ranges::find(nodes, static_cast<mdl::Node*>(m_splineNode)) != nodes.end())
   {
     loadSplineNode(m_splineNode);
   }
