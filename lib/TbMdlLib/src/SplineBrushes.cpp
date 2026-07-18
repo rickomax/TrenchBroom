@@ -22,9 +22,11 @@
 #include "mdl/Brush.h"
 #include "mdl/BrushBuilder.h"
 #include "mdl/BrushFace.h"
+#include "mdl/UVCoordSystem.h"
 
 #include "kd/result.h"
 
+#include "vm/mat.h"
 #include "vm/scalar.h"
 #include "vm/vec.h"
 #include "vm/vec_ext.h"
@@ -60,34 +62,85 @@ vm::vec3d ffdDeform(
 }
 
 /**
- * Copies the attributes of the best matching template face onto each face of the
- * given brush. Faces are matched by comparing the deformed face's normal, transformed
- * back into template space using the span's frames, with the template faces' normals.
+ * The affine approximation of the free-form deformation over one span, mapping
+ * template (lattice) space into the world. The X axis follows the span between the two
+ * frame positions, and the cross-section axes are the averaged, scaled right / up
+ * directions of the two frames. Used to realign the template faces' UVs onto the
+ * deformed geometry via the regular alignment lock.
  */
-void copyFaceAttributes(
-  Brush& brush, const Brush& templateBrush, const SweepFrame& a, const SweepFrame& b)
+vm::mat4x4d spanUVTransform(
+  const vm::bbox3d& lattice, const SweepFrame& a, const SweepFrame& b)
 {
-  const auto direction = b.position - a.position;
-  const auto tangent = vm::squared_length(direction) > 0.0
-                         ? vm::normalize(direction)
-                         : vm::normalize(vm::cross(a.right, a.up));
-  const auto right = vm::normalize(a.right + b.right);
-  const auto up = vm::normalize(a.up + b.up);
+  const auto sx = vm::max(1e-4, lattice.size().x());
+  auto xAxis = (b.position - a.position) / sx;
+  if (vm::squared_length(xAxis) < 1e-10)
+  {
+    // Degenerate span: fall back to the frame's forward direction.
+    xAxis = vm::cross(a.right, a.up);
+  }
+  const auto yAxis = (a.right * a.scale + b.right * b.scale) * 0.5;
+  const auto zAxis = (a.up * a.scale + b.up * b.scale) * 0.5;
 
+  const auto origin =
+    vm::vec3d{lattice.min.x(), lattice.center().y(), lattice.center().z()};
+  const auto translation =
+    a.position - xAxis * origin.x() - yAxis * origin.y() - zAxis * origin.z();
+
+  return vm::mat4x4d{
+    xAxis.x(),
+    yAxis.x(),
+    zAxis.x(),
+    translation.x(),
+    xAxis.y(),
+    yAxis.y(),
+    zAxis.y(),
+    translation.y(),
+    xAxis.z(),
+    yAxis.z(),
+    zAxis.z(),
+    translation.z(),
+    0.0,
+    0.0,
+    0.0,
+    1.0};
+}
+
+/**
+ * Returns copies of the template brush's faces, transformed into the span's world
+ * space with alignment lock, so each copy carries the template's UVs realigned to the
+ * deformed geometry. Faces whose transformation fails are returned untransformed.
+ */
+std::vector<BrushFace> transformTemplateFaces(
+  const Brush& templateBrush, const vm::mat4x4d& transform)
+{
+  auto faces = std::vector<BrushFace>{};
+  faces.reserve(templateBrush.faceCount());
+  for (const auto& face : templateBrush.faces())
+  {
+    auto copy = face;
+    if (copy.transform(transform, true).is_error())
+    {
+      copy = face;
+    }
+    faces.push_back(std::move(copy));
+  }
+  return faces;
+}
+
+/**
+ * Copies the attributes and the UV alignment of the best matching transformed
+ * template face onto each face of the given brush. Faces are matched by normal in
+ * world space, since the template faces have already been transformed into the span.
+ */
+void copyFaceAttributes(Brush& brush, const std::vector<BrushFace>& templateFaces)
+{
   for (auto& face : brush.faces())
   {
-    // Transform the world space normal back into template space, where the span's
-    // tangent, right and up correspond to the +X, +Y and +Z axes.
-    const auto localNormal = vm::vec3d{
-      vm::dot(face.normal(), tangent),
-      vm::dot(face.normal(), right),
-      vm::dot(face.normal(), up)};
-
     const BrushFace* bestMatch = nullptr;
     auto bestDot = -2.0;
-    for (const auto& templateFace : templateBrush.faces())
+    for (const auto& templateFace : templateFaces)
     {
-      const auto d = vm::dot(localNormal, templateFace.normal());
+      const auto d = vm::dot(face.normal(), templateFace.normal());
       if (d > bestDot)
       {
         bestDot = d;
@@ -97,7 +150,15 @@ void copyFaceAttributes(
 
     if (bestMatch)
     {
-      face.setAttributes(*bestMatch);
+      face.setAttributes(bestMatch->attributes());
+      if (const auto snapshot = bestMatch->takeUVCoordSystemSnapshot())
+      {
+        // Wrap the source face's UV coordinate system onto this face's plane; for UV
+        // coordinate systems without a snapshot (paraxial), the attributes realigned
+        // by the transformation above already carry the alignment.
+        face.copyUVCoordSystemFromFace(
+          *snapshot, bestMatch->attributes(), bestMatch->boundary(), WrapStyle::Projection);
+      }
     }
   }
 }
@@ -155,6 +216,8 @@ Result<std::vector<Brush>> createSplineBrushes(
     const auto& a = frames[i];
     const auto& b = frames[i + 1];
 
+    const auto uvTransform = spanUVTransform(templateBounds, a, b);
+
     for (const auto* templateBrush : templateBrushes)
     {
       const auto vertices = templateBrush->vertexPositions();
@@ -165,6 +228,8 @@ Result<std::vector<Brush>> createSplineBrushes(
       }
       apex = apex / double(vertices.size());
       const auto deformedApex = vm::round(ffdDeform(apex, templateBounds, a, b));
+
+      const auto templateFaces = transformTemplateFaces(*templateBrush, uvTransform);
 
       const auto materialName =
         !templateBrush->faces().empty()
@@ -192,7 +257,7 @@ Result<std::vector<Brush>> createSplineBrushes(
               deformedFaceVertices[j + 1]},
             materialName)
             | kdl::transform([&](Brush brush) {
-                copyFaceAttributes(brush, *templateBrush, a, b);
+                copyFaceAttributes(brush, templateFaces);
                 brushes.push_back(std::move(brush));
               })
             | kdl::transform_error([](const auto&) {

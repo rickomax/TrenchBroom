@@ -220,6 +220,57 @@ TEST_CASE("createSplineBrushes")
     }
   }
 
+  SECTION("face UV attributes carry over to the generated brushes")
+  {
+    // Note: offsets cannot be verified here because the test faces have no loaded
+    // material, so the alignment lock wraps them modulo a 1x1 texture size.
+    auto uvTemplate = makeCuboid(templateBounds, "some_material");
+    for (auto& face : uvTemplate.faces())
+    {
+      auto attributes = face.attributes();
+      attributes.setScale(vm::vec2f{2.0f, 2.0f});
+      attributes.setRotation(30.0f);
+      face.setAttributes(attributes);
+    }
+    const auto uvTemplates = std::vector<const Brush*>{&uvTemplate};
+
+    // A straight sweep at the template's natural size deforms with the identity
+    // transform, so the template's UV attributes must arrive unchanged on the
+    // generated faces that correspond to template faces (the axis aligned ones; the
+    // tetrahedra's interior faces are invisible).
+    const auto points = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{128, 0, 0}},
+    };
+
+    const auto brushes =
+      createSplineBrushes(
+        MapFormat::Standard, worldBounds, points, uvTemplates, templateBounds)
+      | kdl::value();
+
+    REQUIRE(!brushes.empty());
+
+    auto checkedFaces = 0;
+    for (const auto& brush : brushes)
+    {
+      for (const auto& face : brush.faces())
+      {
+        const auto& normal = face.normal();
+        const auto axisAligned = vm::abs(normal.x()) > 0.999
+                                 || vm::abs(normal.y()) > 0.999
+                                 || vm::abs(normal.z()) > 0.999;
+        if (axisAligned)
+        {
+          CHECK(face.attributes().scale() == vm::vec2f{2.0f, 2.0f});
+          CHECK(face.attributes().rotation() == 30.0f);
+          CHECK(face.attributes().materialName() == "some_material");
+          ++checkedFaces;
+        }
+      }
+    }
+    CHECK(checkedFaces > 0);
+  }
+
   SECTION("vertices are snapped to integer coordinates")
   {
     const auto points = std::vector<SplinePoint>{
