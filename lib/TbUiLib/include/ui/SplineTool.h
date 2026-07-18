@@ -157,9 +157,15 @@ public: // point management
   bool hasPoints() const;
   const std::vector<mdl::SplinePoint>& points() const;
 
-  /** Returns the position new points are created relative to: the last point, if any. */
+  /** Returns the position new points are created relative to: the selected point if
+   * one between two other points is selected, otherwise the last point, if any. */
   std::optional<vm::vec3d> lastPointPosition() const;
 
+  /**
+   * Adds a new point to the spline. If a point between two other points is selected,
+   * the new point is inserted between the selected point and the next one; otherwise
+   * it is appended after the last point. The new point becomes the selected point.
+   */
   void addPoint(const vm::vec3d& point);
 
   bool canRemovePoint() const;
@@ -220,7 +226,18 @@ public: // template group linkage
   /** A user facing description of the linked template. */
   std::string templateName() const;
 
+  /** Whether the spline has generated brushes that can be broken out. */
+  bool canBreakSpline() const;
+  /**
+   * Duplicates the spline's generated brushes as standard, editable brushes and
+   * unlinks the template, so the spline stops generating geometry and the user can
+   * edit the copies.
+   */
+  void breakSpline();
+
 private:
+  size_t addPointAnchorIndex() const;
+
   mdl::GroupNode* findTemplateGroup() const;
   mdl::GroupNode* selectedGroup() const;
 

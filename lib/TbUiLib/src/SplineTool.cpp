@@ -275,7 +275,8 @@ void SplineTool::renderFeedback(
   if (!m_points.empty())
   {
     renderService.setForegroundColor(pref(Preferences::SplineLineColor));
-    renderService.renderLine(vm::vec3f{m_points.back().position}, vm::vec3f{point});
+    renderService.renderLine(
+      vm::vec3f{m_points[addPointAnchorIndex()].position}, vm::vec3f{point});
   }
 }
 
@@ -306,13 +307,24 @@ const std::vector<mdl::SplinePoint>& SplineTool::points() const
 
 std::optional<vm::vec3d> SplineTool::lastPointPosition() const
 {
-  return !m_points.empty() ? std::optional{m_points.back().position} : std::nullopt;
+  return !m_points.empty() ? std::optional{m_points[addPointAnchorIndex()].position}
+                           : std::nullopt;
+}
+
+size_t SplineTool::addPointAnchorIndex() const
+{
+  // If a point between two other points is selected, new points are inserted after
+  // it; otherwise they are appended after the last point.
+  return m_selectedIndex && *m_selectedIndex + 1 < m_points.size() ? *m_selectedIndex
+                                                                   : m_points.size() - 1;
 }
 
 void SplineTool::addPoint(const vm::vec3d& point)
 {
-  m_points.push_back(mdl::SplinePoint{point});
-  m_selectedIndex = m_points.size() - 1;
+  const auto index = m_points.empty() ? 0 : addPointAnchorIndex() + 1;
+  m_points.insert(
+    m_points.begin() + std::ptrdiff_t(index), mdl::SplinePoint{point});
+  m_selectedIndex = index;
   commitSpline("Add Spline Point");
 }
 
@@ -589,6 +601,47 @@ void SplineTool::unlinkTemplate()
     m_templateBrushes.clear();
     commitSpline("Unlink Spline Template");
   }
+}
+
+bool SplineTool::canBreakSpline() const
+{
+  return m_splineNode != nullptr && !m_splineNode->children().empty();
+}
+
+void SplineTool::breakSpline()
+{
+  if (!canBreakSpline())
+  {
+    return;
+  }
+
+  auto& map = m_document.map();
+
+  // Duplicate the generated brushes as standard brushes outside the spline entity, so
+  // they stay behind as editable geometry when the spline lets go of them.
+  auto duplicates = std::vector<mdl::Node*>{};
+  for (auto* child : m_splineNode->children())
+  {
+    if (const auto* brushNode = dynamic_cast<mdl::BrushNode*>(child))
+    {
+      duplicates.push_back(new mdl::BrushNode{brushNode->brush()});
+    }
+  }
+
+  auto* parent = m_splineNode->parent();
+
+  auto transaction = mdl::Transaction{map, "Break Spline"};
+  if (addNodes(map, {{parent, duplicates}}).empty())
+  {
+    transaction.cancel();
+    return;
+  }
+
+  // Unlink the template so the spline stops generating brushes.
+  m_templateGroupId = std::nullopt;
+  m_templateBrushes.clear();
+  commitSpline("Break Spline");
+  transaction.commit();
 }
 
 std::string SplineTool::templateName() const

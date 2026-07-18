@@ -45,6 +45,7 @@ private:
   QLabel* m_templateLabel = nullptr;
   QPushButton* m_linkButton = nullptr;
   QPushButton* m_unlinkButton = nullptr;
+  QPushButton* m_breakButton = nullptr;
   QDoubleSpinBox* m_roll = nullptr;
   QDoubleSpinBox* m_scale = nullptr;
   QCheckBox* m_locked = nullptr;

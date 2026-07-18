@@ -62,6 +62,11 @@ void SplineToolPage::createGui()
   m_linkButton->setFocusPolicy(Qt::NoFocus);
   m_unlinkButton = new QPushButton{tr("Unlink")};
   m_unlinkButton->setFocusPolicy(Qt::NoFocus);
+  m_breakButton = new QPushButton{tr("Break")};
+  m_breakButton->setToolTip(
+    tr("Duplicate the generated brushes as standard, editable brushes and unlink "
+       "the spline's template"));
+  m_breakButton->setFocusPolicy(Qt::NoFocus);
 
   m_roll = new QDoubleSpinBox{};
   m_roll->setRange(-360.0, 360.0);
@@ -105,6 +110,7 @@ void SplineToolPage::createGui()
   layout->addWidget(m_templateLabel);
   layout->addWidget(m_linkButton);
   layout->addWidget(m_unlinkButton);
+  layout->addWidget(m_breakButton);
   layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Roll:")});
   layout->addWidget(m_roll);
@@ -129,6 +135,8 @@ void SplineToolPage::createGui()
   connect(m_linkButton, &QPushButton::clicked, this, [this]() { m_tool.linkTemplate(); });
   connect(
     m_unlinkButton, &QPushButton::clicked, this, [this]() { m_tool.unlinkTemplate(); });
+  connect(
+    m_breakButton, &QPushButton::clicked, this, [this]() { m_tool.breakSpline(); });
   connect(
     m_roll,
     QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -197,6 +205,7 @@ void SplineToolPage::updateControls()
 
   m_linkButton->setEnabled(m_tool.canLinkTemplate());
   m_unlinkButton->setEnabled(m_tool.hasTemplate());
+  m_breakButton->setEnabled(m_tool.canBreakSpline());
 
   const auto hasSelectedPoint = m_tool.selectedPointIndex().has_value();
   m_roll->setEnabled(hasSelectedPoint);
