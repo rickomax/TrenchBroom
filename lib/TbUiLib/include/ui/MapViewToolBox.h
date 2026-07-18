@@ -173,6 +173,7 @@ public: // tools
   bool anyModalToolActive() const;
 
   void moveNodeHandles(const vm::vec3d& delta);
+  void moveSplinePoint(const vm::vec3d& delta);
 
 private: // Tool related methods
   void createTools(QStackedLayout* bookCtrl);

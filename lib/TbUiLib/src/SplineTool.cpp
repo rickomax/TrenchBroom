@@ -526,6 +526,15 @@ void SplineTool::toggleSelectedPointLocked()
   }
 }
 
+void SplineTool::moveSelectedPoint(const vm::vec3d& delta)
+{
+  if (m_selectedIndex && *m_selectedIndex < m_points.size())
+  {
+    m_points[*m_selectedIndex].position = m_points[*m_selectedIndex].position + delta;
+    commitSpline("Move Spline Point");
+  }
+}
+
 bool SplineTool::closed() const
 {
   return m_closed;

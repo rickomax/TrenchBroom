@@ -369,6 +369,10 @@ void MapViewBase::move(const vm::direction direction)
   {
     moveNodeHandles(direction);
   }
+  else if ((actionContext() & ActionContext::SplineTool) != 0)
+  {
+    moveSplinePoint(direction);
+  }
   else if ((actionContext() & ActionContext::NodeSelection) != 0)
   {
     moveObjects(direction);
@@ -390,6 +394,14 @@ void MapViewBase::moveNodeHandles(const vm::direction direction)
   const auto& grid = map.grid();
   const auto delta = moveDirection(direction) * double(grid.actualSize());
   m_toolBox.moveNodeHandles(delta);
+}
+
+void MapViewBase::moveSplinePoint(const vm::direction direction)
+{
+  const auto& map = m_document.map();
+  const auto& grid = map.grid();
+  const auto delta = moveDirection(direction) * double(grid.actualSize());
+  m_toolBox.moveSplinePoint(delta);
 }
 
 void MapViewBase::moveObjects(const vm::direction direction)

@@ -185,6 +185,10 @@ public: // point management
   void deselectPoint();
   std::optional<size_t> selectedPointIndex() const;
 
+  /** Moves the selected point by the given delta, e.g. when a keyboard move action is
+   * triggered. Does nothing if no point is selected. */
+  void moveSelectedPoint(const vm::vec3d& delta);
+
 public: // dragging
   std::optional<std::tuple<vm::vec3d, vm::vec3d>> beginDragPoint(
     const mdl::PickResult& pickResult);

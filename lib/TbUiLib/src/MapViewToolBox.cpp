@@ -452,6 +452,13 @@ void MapViewToolBox::moveNodeHandles(const vm::vec3d& delta)
   }
 }
 
+void MapViewToolBox::moveSplinePoint(const vm::vec3d& delta)
+{
+  contract_pre(splineToolActive());
+
+  splineTool().moveSelectedPoint(delta);
+}
+
 void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
 {
   m_clipTool = std::make_unique<ClipTool>(m_document);
