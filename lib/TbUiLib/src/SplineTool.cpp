@@ -518,6 +518,11 @@ std::optional<std::tuple<vm::vec3d, vm::vec3d>> SplineTool::beginDragPoint(
   return {{initialPosition, hit.hitPoint()}};
 }
 
+bool SplineTool::draggingTangentHandle() const
+{
+  return m_dragState && m_dragState->part != SplineHandlePart::Point;
+}
+
 bool SplineTool::dragPoint(const vm::vec3d& newPosition)
 {
   if (!m_dragState)

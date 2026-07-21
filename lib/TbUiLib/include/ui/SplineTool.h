@@ -207,6 +207,8 @@ public: // point management
 public: // dragging
   std::optional<std::tuple<vm::vec3d, vm::vec3d>> beginDragPoint(
     const mdl::PickResult& pickResult);
+  /** Whether the current drag moves a tangent handle rather than a control point. */
+  bool draggingTangentHandle() const;
   bool dragPoint(const vm::vec3d& newPosition);
   void endDragPoint();
   void cancelDragPoint();

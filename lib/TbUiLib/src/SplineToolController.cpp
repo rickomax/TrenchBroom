@@ -185,8 +185,19 @@ public:
   DragHandleSnapper makeDragHandleSnapper(
     const InputState&, const SnapMode snapMode) const override
   {
-    return snapMode == SnapMode::Relative ? makeRelativeHandleSnapper(m_tool.grid())
-                                          : makeAbsoluteHandleSnapper(m_tool.grid());
+    // Control points sit on the grid, so their drags snap the movement delta;
+    // tangent handles start at arbitrary offsets, so a relative snap would keep them
+    // off the grid forever -- snap their positions absolutely instead (with the
+    // usual modifier still toggling to the other mode).
+    auto effectiveSnapMode = snapMode;
+    if (m_tool.draggingTangentHandle())
+    {
+      effectiveSnapMode =
+        snapMode == SnapMode::Relative ? SnapMode::Absolute : SnapMode::Relative;
+    }
+    return effectiveSnapMode == SnapMode::Relative
+             ? makeRelativeHandleSnapper(m_tool.grid())
+             : makeAbsoluteHandleSnapper(m_tool.grid());
   }
 };
 
