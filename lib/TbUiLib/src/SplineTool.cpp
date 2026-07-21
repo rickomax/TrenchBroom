@@ -103,26 +103,32 @@ void SplineTool::pick(
     }
   }
 
-  if (tangentHandlesVisible())
+  if (m_tangentEditMode)
   {
-    const auto& point = m_points[*m_selectedIndex];
-    const auto handles = std::array<std::pair<SplineHandlePart, vm::vec3d>, 2>{
-      std::pair{
-        SplineHandlePart::TangentIn,
-        point.position + mdl::tangentInOffset(m_points, *m_selectedIndex, m_closed)},
-      std::pair{
-        SplineHandlePart::TangentOut,
-        point.position + mdl::tangentOutOffset(m_points, *m_selectedIndex, m_closed)},
-    };
-    for (const auto& [part, position] : handles)
+    for (size_t i = 0; i < m_points.size(); ++i)
     {
-      if (
-        const auto distance = camera.pickPointHandle(pickRay, position, handleRadius))
+      if (m_points[i].autoTangent)
       {
-        const auto hitPoint = vm::point_at_distance(pickRay, *distance);
-        pickResult.addHit(mdl::Hit{
-          PointHitType, *distance, hitPoint,
-          Target{m_splineNode, *m_selectedIndex, part}});
+        continue;
+      }
+      const auto& point = m_points[i];
+      const auto handles = std::array<std::pair<SplineHandlePart, vm::vec3d>, 2>{
+        std::pair{
+          SplineHandlePart::TangentIn,
+          point.position + mdl::tangentInOffset(m_points, i, m_closed)},
+        std::pair{
+          SplineHandlePart::TangentOut,
+          point.position + mdl::tangentOutOffset(m_points, i, m_closed)},
+      };
+      for (const auto& [part, position] : handles)
+      {
+        if (
+          const auto distance = camera.pickPointHandle(pickRay, position, handleRadius))
+        {
+          const auto hitPoint = vm::point_at_distance(pickRay, *distance);
+          pickResult.addHit(
+            mdl::Hit{PointHitType, *distance, hitPoint, Target{m_splineNode, i, part}});
+        }
       }
     }
   }
@@ -234,22 +240,32 @@ void SplineTool::render(
     renderService.renderHandle(vm::vec3f{point.position});
   }
 
-  // In tangent edit mode, show the selected point's tangent handles connected to
-  // the point.
-  if (tangentHandlesVisible())
+  // In tangent edit mode, show the tangent handles of every point with manual
+  // tangents, connected to their points; the selected point's handles are drawn in
+  // the full tangent color, all others darker.
+  if (m_tangentEditMode)
   {
-    const auto& point = m_points[*m_selectedIndex];
-    const auto inPosition =
-      point.position + mdl::tangentInOffset(m_points, *m_selectedIndex, m_closed);
-    const auto outPosition =
-      point.position + mdl::tangentOutOffset(m_points, *m_selectedIndex, m_closed);
-
-    renderService.setForegroundColor(pref(Preferences::SplineTangentHandleColor));
     renderService.setLineWidth(1.0f);
-    renderService.renderLine(vm::vec3f{point.position}, vm::vec3f{inPosition});
-    renderService.renderLine(vm::vec3f{point.position}, vm::vec3f{outPosition});
-    renderService.renderHandle(vm::vec3f{inPosition});
-    renderService.renderHandle(vm::vec3f{outPosition});
+    for (size_t i = 0; i < m_points.size(); ++i)
+    {
+      if (m_points[i].autoTangent)
+      {
+        continue;
+      }
+      const auto& point = m_points[i];
+      const auto inPosition =
+        point.position + mdl::tangentInOffset(m_points, i, m_closed);
+      const auto outPosition =
+        point.position + mdl::tangentOutOffset(m_points, i, m_closed);
+
+      renderService.setForegroundColor(
+        m_selectedIndex == i ? pref(Preferences::SplineTangentHandleColor)
+                             : pref(Preferences::SplineInactiveTangentHandleColor));
+      renderService.renderLine(vm::vec3f{point.position}, vm::vec3f{inPosition});
+      renderService.renderLine(vm::vec3f{point.position}, vm::vec3f{outPosition});
+      renderService.renderHandle(vm::vec3f{inPosition});
+      renderService.renderHandle(vm::vec3f{outPosition});
+    }
   }
 
   renderHighlight(renderService, pickResult);
