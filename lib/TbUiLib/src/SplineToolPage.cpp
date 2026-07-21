@@ -119,7 +119,6 @@ void SplineToolPage::createGui()
   layout->addWidget(m_templateLabel);
   layout->addWidget(m_linkButton);
   layout->addWidget(m_unlinkButton);
-  layout->addWidget(m_breakButton);
   layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Roll:")});
   layout->addWidget(m_roll);
@@ -133,6 +132,7 @@ void SplineToolPage::createGui()
   layout->addWidget(m_lockTwist);
   layout->addWidget(m_closed);
   layout->addWidget(m_removePointButton);
+  layout->addWidget(m_breakButton);
   layout->addStretch();
 
   setLayout(layout);

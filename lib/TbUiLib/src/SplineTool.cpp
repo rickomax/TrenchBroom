@@ -229,9 +229,8 @@ void SplineTool::render(
     const auto& point = m_points[i];
 
     renderService.setForegroundColor(
-      m_selectedIndex == i                    ? pref(Preferences::SelectedHandleColor)
-      : point.locks != mdl::SplineLock::None ? pref(Preferences::SplineLockedHandleColor)
-                                             : pref(Preferences::HandleColor));
+      m_selectedIndex == i ? pref(Preferences::SelectedHandleColor)
+                           : pref(Preferences::HandleColor));
     renderService.renderHandle(vm::vec3f{point.position});
   }
 
