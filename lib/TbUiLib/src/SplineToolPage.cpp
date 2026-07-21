@@ -84,8 +84,9 @@ void SplineToolPage::createGui()
   m_locked = new QCheckBox{tr("Locked")};
   m_locked->setFocusPolicy(Qt::NoFocus);
   m_locked->setToolTip(
-    tr("A locked point anchors the sweep's orientation, so a twist caused by "
-       "rotating other points cannot propagate past it"));
+    tr("A locked point anchors the sweep's orientation and the curve's shape: twists "
+       "and slopes caused by points beyond it cannot propagate past it, so the curve "
+       "between two locked points is shaped only by the points between them"));
 
   m_removePointButton = new QPushButton{tr("Remove")};
   m_removePointButton->setToolTip(tr("Remove the selected point from the spline"));
