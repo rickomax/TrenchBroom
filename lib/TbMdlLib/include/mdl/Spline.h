@@ -36,11 +36,14 @@ namespace tb::mdl
  * transported through the point, but reset to the point's own upright frame, so a
  * twist introduced by rotating other points cannot propagate past it.
  *
- * XY, XZ and YZ lock the curve's shape in the respective plane: on a segment whose
- * two endpoints both lock a plane, the corresponding coordinates interpolate linearly
- * between the two points, so the curve is a straight line when viewed onto that plane
- * and points outside the segment cannot bend it there. The remaining coordinates keep
- * their regular smooth curve shape.
+ * XY, XZ and YZ lock the curve to the respective plane: the point's tangent is
+ * flattened into the plane (its component along the plane's normal is zeroed), and
+ * both segments touching the point share the flattened tangent, so neighboring
+ * segments level smoothly into the plane. On a segment whose two endpoints both lock
+ * a plane, the coordinate along the plane's normal interpolates linearly (constant
+ * when the endpoints coincide), so the segment stays in the plane and points outside
+ * of it cannot bend it out -- while the remaining coordinates keep their cubic,
+ * smooth curve shape.
  */
 namespace SplineLock
 {

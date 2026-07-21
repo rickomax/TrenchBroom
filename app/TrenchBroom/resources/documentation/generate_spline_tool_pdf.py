@@ -150,11 +150,11 @@ story.append(control_table([
              "degrees. The twist blends smoothly between points."),
     ("Scale", "Scales the cross-section at this point. Values taper the profile "
               "between points (e.g. 1.0 &rarr; 0.5 makes a cone-like narrowing)."),
-    ("Lock XY / XZ / YZ", "Locks the curve's shape in the given plane at this point: a "
-               "segment whose two end points both lock a plane is a straight line in "
-               "that plane, unaffected by any other points. Lock all three planes for "
-               "a fully straight segment; points with any lock are drawn in a "
-               "different color."),
+    ("Lock XY / XZ / YZ", "Locks the curve to the given plane at this point: the point's "
+               "tangent is flattened into the plane, so neighboring segments level "
+               "smoothly into it, and a segment whose two end points share the lock "
+               "stays entirely in the plane while still curving smoothly within it. "
+               "Points with any lock are drawn in a different color."),
     ("Lock Twist", "Anchors the sweep's orientation at this point. A twist introduced "
                "by rolling other points cannot propagate past it, so lock a point's "
                "twist to &ldquo;pin&rdquo; the geometry's up direction there. "

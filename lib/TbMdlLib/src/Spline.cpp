@@ -63,23 +63,49 @@ size_t nextPointIndex(
   return closed ? (index + 1) % points.size() : vm::min(index + 1, points.size() - 1);
 }
 
-/** The plane locks in effect on the given segment: those locked by both endpoints. */
-SplineLock::Type segmentLocks(
-  const std::vector<SplinePoint>& points, const size_t segment, const bool closed)
+/**
+ * The (unnormalized) Hermite tangent belonging to the given control point: the
+ * automatic Catmull-Rom tangent, flattened into every plane the point locks by
+ * zeroing the component along the plane's normal. The tangent belongs to the point,
+ * so both segments touching the point share it and the curve stays C1 continuous:
+ * a ramp approaching a plane locked point gradually levels into the plane.
+ */
+vm::vec3d nodeTangentVector(
+  const std::vector<SplinePoint>& points, const size_t index, const bool closed)
 {
-  return points[segment].locks & points[nextPointIndex(points, segment, closed)].locks;
+  const auto i = std::ptrdiff_t(index);
+  auto tangent =
+    (controlPoint(points, i + 1, closed) - controlPoint(points, i - 1, closed)) * 0.5;
+
+  const auto locks = points[index].locks;
+  if (locks & SplineLock::XY)
+  {
+    tangent[2] = 0.0;
+  }
+  if (locks & SplineLock::XZ)
+  {
+    tangent[1] = 0.0;
+  }
+  if (locks & SplineLock::YZ)
+  {
+    tangent[0] = 0.0;
+  }
+  return tangent;
 }
 
-/** Per axis: whether the axis interpolates linearly on the given segment because a
- * plane containing it is locked by both endpoints. */
-std::array<bool, 3> linearAxes(
+/** Per axis: whether the axis is constrained on the given segment because both
+ * endpoints lock a plane whose normal is that axis. The constrained coordinate
+ * interpolates linearly between the endpoints (it is constant when they coincide),
+ * keeping the segment inside the locked plane without numerical drift. */
+std::array<bool, 3> constrainedAxes(
   const std::vector<SplinePoint>& points, const size_t segment, const bool closed)
 {
-  const auto locks = segmentLocks(points, segment, closed);
+  const auto locks =
+    points[segment].locks & points[nextPointIndex(points, segment, closed)].locks;
   return {
-    (locks & (SplineLock::XY | SplineLock::XZ)) != 0u,
-    (locks & (SplineLock::XY | SplineLock::YZ)) != 0u,
-    (locks & (SplineLock::XZ | SplineLock::YZ)) != 0u,
+    (locks & SplineLock::YZ) != 0u,
+    (locks & SplineLock::XZ) != 0u,
+    (locks & SplineLock::XY) != 0u,
   };
 }
 
@@ -288,22 +314,31 @@ vm::vec3d curvePoint(
   const double t,
   const bool closed)
 {
-  const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
-  const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
+  // The curve is evaluated as a cubic Hermite segment. With the automatic Catmull-Rom
+  // tangents this is identical to the uniform Catmull-Rom curve; plane locked points
+  // contribute their flattened tangents instead (see nodeTangentVector), so the
+  // segment stays cubic and smooth rather than degrading to a straight chord.
+  const auto next = nextPointIndex(points, segment, closed);
+  const auto p1 = points[segment].position;
+  const auto p2 = points[next].position;
+  const auto m1 = nodeTangentVector(points, segment, closed);
+  const auto m2 = nodeTangentVector(points, next, closed);
 
-  auto result = evaluateSplineSegment(
-    controlPoint(points, std::ptrdiff_t(segment) - 1, closed),
-    p1,
-    p2,
-    controlPoint(points, std::ptrdiff_t(segment) + 2, closed),
-    t);
+  const auto t2 = t * t;
+  const auto t3 = t2 * t;
+  const auto h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+  const auto h10 = t3 - 2.0 * t2 + t;
+  const auto h01 = -2.0 * t3 + 3.0 * t2;
+  const auto h11 = t3 - t2;
 
-  // Axes locked by both endpoints interpolate linearly, so the curve is straight in
-  // the locked planes and points outside the segment cannot bend it there.
-  const auto linear = linearAxes(points, segment, closed);
+  auto result = p1 * h00 + m1 * h10 + p2 * h01 + m2 * h11;
+
+  // Coordinates constrained by a plane lock on both endpoints interpolate linearly,
+  // preventing any drift out of the locked plane.
+  const auto constrained = constrainedAxes(points, segment, closed);
   for (size_t axis = 0; axis < 3; ++axis)
   {
-    if (linear[axis])
+    if (constrained[axis])
     {
       result[axis] = vm::mix(p1[axis], p2[axis], t);
     }
@@ -317,21 +352,26 @@ vm::vec3d curveTangent(
   const double t,
   const bool closed)
 {
-  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
-  const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
-  const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
-  const auto p3 = controlPoint(points, std::ptrdiff_t(segment) + 2, closed);
+  const auto next = nextPointIndex(points, segment, closed);
+  const auto p1 = points[segment].position;
+  const auto p2 = points[next].position;
+  const auto m1 = nodeTangentVector(points, segment, closed);
+  const auto m2 = nodeTangentVector(points, next, closed);
 
   const auto t2 = t * t;
-  auto d = ((p2 - p0) + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * (2.0 * t)
-            + (p1 * 3.0 - p0 - p2 * 3.0 + p3) * (3.0 * t2))
-           * 0.5;
+  const auto h00 = 6.0 * t2 - 6.0 * t;
+  const auto h10 = 3.0 * t2 - 4.0 * t + 1.0;
+  const auto h01 = -6.0 * t2 + 6.0 * t;
+  const auto h11 = 3.0 * t2 - 2.0 * t;
 
-  // On locked axes, the derivative of the linear interpolation replaces the curve's.
-  const auto linear = linearAxes(points, segment, closed);
+  auto d = p1 * h00 + m1 * h10 + p2 * h01 + m2 * h11;
+
+  // On constrained coordinates, the derivative of the linear interpolation replaces
+  // the curve's.
+  const auto constrained = constrainedAxes(points, segment, closed);
   for (size_t axis = 0; axis < 3; ++axis)
   {
-    if (linear[axis])
+    if (constrained[axis])
     {
       d[axis] = p2[axis] - p1[axis];
     }

@@ -89,9 +89,9 @@ void SplineToolPage::createGui()
     return checkBox;
   };
   const auto planeToolTip = tr(
-    "Lock the curve's shape in this plane at the selected point: a segment whose two "
-    "end points both lock a plane is a straight line in that plane, unaffected by "
-    "any other points");
+    "Lock the curve to this plane at the selected point: the point's tangent is "
+    "flattened into the plane, and a segment whose two end points share the lock "
+    "stays entirely in the plane while still curving smoothly within it");
   m_lockXY = createLockCheckBox(tr("XY"), planeToolTip);
   m_lockXZ = createLockCheckBox(tr("XZ"), planeToolTip);
   m_lockYZ = createLockCheckBox(tr("YZ"), planeToolTip);
