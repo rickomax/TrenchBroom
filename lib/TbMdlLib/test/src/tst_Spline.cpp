@@ -70,6 +70,47 @@ TEST_CASE("Spline")
       CHECK(samples[2] == vm::approx{vm::vec3d{128, 0, 0}});
     }
 
+    SECTION("a segment between two locked points is a straight line")
+    {
+      // Two locked points on a straight, level line, with lifted end points: the
+      // locked segment must stay on the line, while the outer segments keep their
+      // regular smooth curve shape.
+      const auto points = std::vector<SplinePoint>{
+        SplinePoint{vm::vec3d{-64, 0, 512}},
+        SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0, true},
+        SplinePoint{vm::vec3d{128, 0, 0}, 0.0, 1.0, true},
+        SplinePoint{vm::vec3d{192, 0, 512}},
+      };
+
+      const auto subdivisions = size_t{8};
+      const auto samples = sampleSpline(points, subdivisions);
+      REQUIRE(samples.size() == 3 * subdivisions + 1);
+
+      // The samples of the middle segment lie between indices 8 and 16 and must lie
+      // on the line between the two locked points.
+      for (size_t i = subdivisions; i <= 2 * subdivisions; ++i)
+      {
+        CHECK(samples[i].y() == vm::approx{0.0});
+        CHECK(samples[i].z() == vm::approx{0.0});
+        CHECK(samples[i].x() >= -0.001);
+        CHECK(samples[i].x() <= 128.001);
+      }
+
+      // The outer segments are not affected by the locks: they sample exactly like
+      // the same spline without any locked points.
+      auto unlockedPoints = points;
+      for (auto& point : unlockedPoints)
+      {
+        point.locked = false;
+      }
+      for (size_t i = 0; i < subdivisions; ++i)
+      {
+        const auto t = double(i) / double(subdivisions);
+        CHECK(curvePoint(points, 0, t) == vm::approx{curvePoint(unlockedPoints, 0, t)});
+        CHECK(curvePoint(points, 2, t) == vm::approx{curvePoint(unlockedPoints, 2, t)});
+      }
+    }
+
     SECTION("a closed spline wraps back around to the first point")
     {
       const auto points = std::vector<SplinePoint>{

@@ -62,6 +62,16 @@ size_t nextPointIndex(
   return closed ? (index + 1) % points.size() : vm::min(index + 1, points.size() - 1);
 }
 
+/** Whether both endpoints of the given segment are locked. Such a segment is a
+ * straight line between its two points, unaffected by any other points, while all
+ * other segments keep their regular smooth curve shape. */
+bool isLockedSegment(
+  const std::vector<SplinePoint>& points, const size_t segment, const bool closed)
+{
+  return points[segment].locked
+         && points[nextPointIndex(points, segment, closed)].locked;
+}
+
 /**
  * Chooses an initial up direction for the given tangent: upright unless the tangent
  * is nearly vertical, in which case the X axis is used as the reference instead.
@@ -267,10 +277,20 @@ vm::vec3d curvePoint(
   const double t,
   const bool closed)
 {
+  const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
+  const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
+
+  // A segment between two locked points is a straight line, unaffected by any other
+  // points.
+  if (isLockedSegment(points, segment, closed))
+  {
+    return vm::mix(p1, p2, vm::vec3d::fill(t));
+  }
+
   return evaluateSplineSegment(
     controlPoint(points, std::ptrdiff_t(segment) - 1, closed),
-    controlPoint(points, std::ptrdiff_t(segment), closed),
-    controlPoint(points, std::ptrdiff_t(segment) + 1, closed),
+    p1,
+    p2,
     controlPoint(points, std::ptrdiff_t(segment) + 2, closed),
     t);
 }
@@ -281,9 +301,19 @@ vm::vec3d curveTangent(
   const double t,
   const bool closed)
 {
-  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
   const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
   const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
+
+  // A segment between two locked points is a straight line, unaffected by any other
+  // points.
+  if (isLockedSegment(points, segment, closed))
+  {
+    const auto direction = p2 - p1;
+    return vm::squared_length(direction) > 1e-10 ? vm::normalize(direction)
+                                                 : vm::vec3d{1, 0, 0};
+  }
+
+  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
   const auto p3 = controlPoint(points, std::ptrdiff_t(segment) + 2, closed);
 
   const auto t2 = t * t;

@@ -37,6 +37,10 @@ namespace tb::mdl
  * A locked point anchors the sweep's frame orientation: the rotation minimizing frame
  * is not transported through it, but reset to the point's own upright frame, so a
  * twist introduced by rotating other points cannot propagate past it.
+ *
+ * A segment whose two endpoints are both locked is a straight line between them,
+ * unaffected by any other points, while all other segments keep their regular smooth
+ * curve shape.
  */
 struct SplinePoint
 {

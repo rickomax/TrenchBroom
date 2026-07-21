@@ -152,8 +152,9 @@ story.append(control_table([
               "between points (e.g. 1.0 &rarr; 0.5 makes a cone-like narrowing)."),
     ("Locked", "Anchors the sweep's orientation at this point. A twist introduced by "
                "rolling other points cannot propagate past a locked point, so lock a "
-               "point to &ldquo;pin&rdquo; the geometry's up direction there. Locked "
-               "points are drawn in a different color."),
+               "point to &ldquo;pin&rdquo; the geometry's up direction there. A segment "
+               "between <b>two</b> locked points is a straight line, unaffected by any "
+               "other points. Locked points are drawn in a different color."),
 ]))
 story.append(Paragraph(
     "Each point also shows a short reference arrow pointing along its &ldquo;up&rdquo; "
