@@ -26,6 +26,7 @@
 #include "vm/vec_ext.h"
 #include "vm/vec_io.h" // IWYU pragma: keep
 
+#include <array>
 #include <cmath>
 
 namespace tb::mdl
@@ -62,14 +63,24 @@ size_t nextPointIndex(
   return closed ? (index + 1) % points.size() : vm::min(index + 1, points.size() - 1);
 }
 
-/** Whether both endpoints of the given segment are locked. Such a segment is a
- * straight line between its two points, unaffected by any other points, while all
- * other segments keep their regular smooth curve shape. */
-bool isLockedSegment(
+/** The plane locks in effect on the given segment: those locked by both endpoints. */
+SplineLock::Type segmentLocks(
   const std::vector<SplinePoint>& points, const size_t segment, const bool closed)
 {
-  return points[segment].locked
-         && points[nextPointIndex(points, segment, closed)].locked;
+  return points[segment].locks & points[nextPointIndex(points, segment, closed)].locks;
+}
+
+/** Per axis: whether the axis interpolates linearly on the given segment because a
+ * plane containing it is locked by both endpoints. */
+std::array<bool, 3> linearAxes(
+  const std::vector<SplinePoint>& points, const size_t segment, const bool closed)
+{
+  const auto locks = segmentLocks(points, segment, closed);
+  return {
+    (locks & (SplineLock::XY | SplineLock::XZ)) != 0u,
+    (locks & (SplineLock::XY | SplineLock::YZ)) != 0u,
+    (locks & (SplineLock::XZ | SplineLock::YZ)) != 0u,
+  };
 }
 
 /**
@@ -146,7 +157,7 @@ std::vector<vm::vec3d> computeBaseNodeUps(
   ups[0] = orthonormalUp(chooseInitialUp(tangents[0]), tangents[0]);
   for (size_t i = 1; i < n; ++i)
   {
-    const auto up = points[i].locked ? chooseInitialUp(tangents[i])
+    const auto up = (points[i].locks & SplineLock::Twist) != 0u ? chooseInitialUp(tangents[i])
                                      : doubleReflectUp(
                                          ups[i - 1],
                                          tangents[i - 1],
@@ -280,19 +291,24 @@ vm::vec3d curvePoint(
   const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
   const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
 
-  // A segment between two locked points is a straight line, unaffected by any other
-  // points.
-  if (isLockedSegment(points, segment, closed))
-  {
-    return vm::mix(p1, p2, vm::vec3d::fill(t));
-  }
-
-  return evaluateSplineSegment(
+  auto result = evaluateSplineSegment(
     controlPoint(points, std::ptrdiff_t(segment) - 1, closed),
     p1,
     p2,
     controlPoint(points, std::ptrdiff_t(segment) + 2, closed),
     t);
+
+  // Axes locked by both endpoints interpolate linearly, so the curve is straight in
+  // the locked planes and points outside the segment cannot bend it there.
+  const auto linear = linearAxes(points, segment, closed);
+  for (size_t axis = 0; axis < 3; ++axis)
+  {
+    if (linear[axis])
+    {
+      result[axis] = vm::mix(p1[axis], p2[axis], t);
+    }
+  }
+  return result;
 }
 
 vm::vec3d curveTangent(
@@ -301,25 +317,26 @@ vm::vec3d curveTangent(
   const double t,
   const bool closed)
 {
+  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
   const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
   const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
-
-  // A segment between two locked points is a straight line, unaffected by any other
-  // points.
-  if (isLockedSegment(points, segment, closed))
-  {
-    const auto direction = p2 - p1;
-    return vm::squared_length(direction) > 1e-10 ? vm::normalize(direction)
-                                                 : vm::vec3d{1, 0, 0};
-  }
-
-  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
   const auto p3 = controlPoint(points, std::ptrdiff_t(segment) + 2, closed);
 
   const auto t2 = t * t;
-  const auto d = ((p2 - p0) + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * (2.0 * t)
-                  + (p1 * 3.0 - p0 - p2 * 3.0 + p3) * (3.0 * t2))
-                 * 0.5;
+  auto d = ((p2 - p0) + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * (2.0 * t)
+            + (p1 * 3.0 - p0 - p2 * 3.0 + p3) * (3.0 * t2))
+           * 0.5;
+
+  // On locked axes, the derivative of the linear interpolation replaces the curve's.
+  const auto linear = linearAxes(points, segment, closed);
+  for (size_t axis = 0; axis < 3; ++axis)
+  {
+    if (linear[axis])
+    {
+      d[axis] = p2[axis] - p1[axis];
+    }
+  }
+
   return vm::squared_length(d) > 1e-10 ? vm::normalize(d) : vm::vec3d{1, 0, 0};
 }
 

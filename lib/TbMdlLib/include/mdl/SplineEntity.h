@@ -38,7 +38,7 @@ enum class MapFormat;
 namespace SplinePropertyKeys
 {
 /** Per point property; the index is appended, e.g. "_spline_point_0". The value has
- * the form "x y z roll scale locked". */
+ * the form "x y z roll scale locks", where locks is a bit mask (see SplineLock). */
 constexpr auto PointPrefix = "_spline_point_";
 /** Number of curve samples between two control points. */
 constexpr auto Subdivisions = "_spline_subdivisions";

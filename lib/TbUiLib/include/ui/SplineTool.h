@@ -203,8 +203,9 @@ public: // rotation, scale and locking
   double selectedPointScale() const;
   void setSelectedPointScale(double scale);
 
-  bool selectedPointLocked() const;
-  void toggleSelectedPointLocked();
+  bool selectedPointLock(mdl::SplineLock::Type lock) const;
+  void setSelectedPointLock(mdl::SplineLock::Type lock, bool set);
+  void toggleSelectedPointLock(mdl::SplineLock::Type lock);
 
 public: // closing
   /** Whether the spline is closed, i.e. the last point connects back to the first

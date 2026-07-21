@@ -181,8 +181,9 @@ void SplineTool::render(
     {
       const auto& frame = frames[i];
       renderService.setForegroundColor(
-        m_points[i].locked ? pref(Preferences::SelectedHandleColor)
-                           : pref(Preferences::ZAxisColor));
+        m_points[i].locks != mdl::SplineLock::None
+          ? pref(Preferences::SelectedHandleColor)
+          : pref(Preferences::ZAxisColor));
       renderService.renderLine(
         vm::vec3f{frame.position}, vm::vec3f{frame.position + frame.up * axisLength});
 
@@ -201,9 +202,9 @@ void SplineTool::render(
     const auto& point = m_points[i];
 
     renderService.setForegroundColor(
-      m_selectedIndex == i ? pref(Preferences::SelectedHandleColor)
-      : point.locked       ? pref(Preferences::SplineLockedHandleColor)
-                           : pref(Preferences::HandleColor));
+      m_selectedIndex == i                    ? pref(Preferences::SelectedHandleColor)
+      : point.locks != mdl::SplineLock::None ? pref(Preferences::SplineLockedHandleColor)
+                                             : pref(Preferences::HandleColor));
     renderService.renderHandle(vm::vec3f{point.position});
   }
 
@@ -221,7 +222,7 @@ void SplineTool::render(
         *m_selectedIndex,
         point.roll,
         point.scale,
-        point.locked ? " | Locked" : ""),
+        point.locks != mdl::SplineLock::None ? " | Locked" : ""),
       vm::vec3f{point.position});
   }
 }
@@ -510,20 +511,27 @@ void SplineTool::setSelectedPointScale(const double scale)
   }
 }
 
-bool SplineTool::selectedPointLocked() const
+bool SplineTool::selectedPointLock(const mdl::SplineLock::Type lock) const
 {
   return m_selectedIndex && *m_selectedIndex < m_points.size()
-         && m_points[*m_selectedIndex].locked;
+         && (m_points[*m_selectedIndex].locks & lock) != 0u;
 }
 
-void SplineTool::toggleSelectedPointLocked()
+void SplineTool::setSelectedPointLock(const mdl::SplineLock::Type lock, const bool set)
 {
-  if (m_selectedIndex && *m_selectedIndex < m_points.size())
+  if (
+    m_selectedIndex && *m_selectedIndex < m_points.size()
+    && selectedPointLock(lock) != set)
   {
-    m_points[*m_selectedIndex].locked = !m_points[*m_selectedIndex].locked;
-    commitSpline(
-      m_points[*m_selectedIndex].locked ? "Lock Spline Point" : "Unlock Spline Point");
+    auto& locks = m_points[*m_selectedIndex].locks;
+    locks = set ? (locks | lock) : (locks & ~lock);
+    commitSpline(set ? "Lock Spline Point" : "Unlock Spline Point");
   }
+}
+
+void SplineTool::toggleSelectedPointLock(const mdl::SplineLock::Type lock)
+{
+  setSelectedPointLock(lock, !selectedPointLock(lock));
 }
 
 void SplineTool::moveSelectedPoint(const vm::vec3d& delta)

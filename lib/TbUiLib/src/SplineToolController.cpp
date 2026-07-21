@@ -282,14 +282,14 @@ private:
 
   bool mouseDoubleClick(const InputState& inputState) override
   {
-    // Double clicking a point toggles its locked state (not in add point mode, where
+    // Double clicking a point toggles its twist lock (not in add point mode, where
     // clicks append points).
     if (
       !m_delegate->tool().addPointMode()
       && inputState.mouseButtonsPressed(MouseButtons::Left)
       && m_delegate->tool().selectPoint(inputState.pickResult()))
     {
-      m_delegate->tool().toggleSelectedPointLocked();
+      m_delegate->tool().toggleSelectedPointLock(mdl::SplineLock::Twist);
       return true;
     }
     return false;

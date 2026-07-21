@@ -27,7 +27,6 @@ class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
 class QPushButton;
-class QSpinBox;
 
 namespace tb::ui
 {
@@ -48,10 +47,12 @@ private:
   QPushButton* m_breakButton = nullptr;
   QDoubleSpinBox* m_roll = nullptr;
   QDoubleSpinBox* m_scale = nullptr;
-  QCheckBox* m_locked = nullptr;
+  QCheckBox* m_lockXY = nullptr;
+  QCheckBox* m_lockXZ = nullptr;
+  QCheckBox* m_lockYZ = nullptr;
+  QCheckBox* m_lockTwist = nullptr;
   QPushButton* m_removePointButton = nullptr;
   QCheckBox* m_closed = nullptr;
-  QSpinBox* m_subdivisions = nullptr;
 
   bool m_updatingControls = false;
 

@@ -70,15 +70,15 @@ TEST_CASE("Spline")
       CHECK(samples[2] == vm::approx{vm::vec3d{128, 0, 0}});
     }
 
-    SECTION("a segment between two locked points is a straight line")
+    SECTION("a segment between two plane locked points is straight in those planes")
     {
-      // Two locked points on a straight, level line, with lifted end points: the
-      // locked segment must stay on the line, while the outer segments keep their
-      // regular smooth curve shape.
+      // Two XY + XZ locked points on a straight, level line, with lifted end points:
+      // the locked segment must stay on the line, while the outer segments keep
+      // their regular smooth curve shape.
       const auto points = std::vector<SplinePoint>{
         SplinePoint{vm::vec3d{-64, 0, 512}},
-        SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0, true},
-        SplinePoint{vm::vec3d{128, 0, 0}, 0.0, 1.0, true},
+        SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0, SplineLock::XY | SplineLock::XZ},
+        SplinePoint{vm::vec3d{128, 0, 0}, 0.0, 1.0, SplineLock::XY | SplineLock::XZ},
         SplinePoint{vm::vec3d{192, 0, 512}},
       };
 
@@ -101,7 +101,7 @@ TEST_CASE("Spline")
       auto unlockedPoints = points;
       for (auto& point : unlockedPoints)
       {
-        point.locked = false;
+        point.locks = SplineLock::None;
       }
       for (size_t i = 0; i < subdivisions; ++i)
       {
@@ -268,7 +268,7 @@ TEST_CASE("Spline")
       REQUIRE(unlockedFrames.size() == 3);
       CHECK(vm::dot(unlockedFrames.back().up, vm::vec3d{0, 0, 1}) < 0.5);
 
-      points.back().locked = true;
+      points.back().locks = SplineLock::Twist;
       const auto lockedFrames = computeNodeFrames(points);
       REQUIRE(lockedFrames.size() == 3);
       CHECK(lockedFrames.back().up == vm::approx{vm::vec3d{0, 0, 1}});

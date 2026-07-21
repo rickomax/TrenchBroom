@@ -141,7 +141,7 @@ story.append(bullets([
     "next point you add is inserted right after it instead of at the end &mdash; handy "
     "for refining a section of the curve.",
     "<b>Remove</b> deletes the selected point (or the last one if none is selected).",
-    "<b>Double-click</b> a point to toggle its Locked state quickly.",
+    "<b>Double-click</b> a point to toggle its Twist lock quickly.",
 ]))
 
 story.append(Paragraph("Per-point shape", h2))
@@ -150,11 +150,15 @@ story.append(control_table([
              "degrees. The twist blends smoothly between points."),
     ("Scale", "Scales the cross-section at this point. Values taper the profile "
               "between points (e.g. 1.0 &rarr; 0.5 makes a cone-like narrowing)."),
-    ("Locked", "Anchors the sweep's orientation at this point. A twist introduced by "
-               "rolling other points cannot propagate past a locked point, so lock a "
-               "point to &ldquo;pin&rdquo; the geometry's up direction there. A segment "
-               "between <b>two</b> locked points is a straight line, unaffected by any "
-               "other points. Locked points are drawn in a different color."),
+    ("Lock XY / XZ / YZ", "Locks the curve's shape in the given plane at this point: a "
+               "segment whose two end points both lock a plane is a straight line in "
+               "that plane, unaffected by any other points. Lock all three planes for "
+               "a fully straight segment; points with any lock are drawn in a "
+               "different color."),
+    ("Lock Twist", "Anchors the sweep's orientation at this point. A twist introduced "
+               "by rolling other points cannot propagate past it, so lock a point's "
+               "twist to &ldquo;pin&rdquo; the geometry's up direction there. "
+               "Double-clicking a point toggles this lock."),
 ]))
 story.append(Paragraph(
     "Each point also shows a short reference arrow pointing along its &ldquo;up&rdquo; "
@@ -192,9 +196,6 @@ story.append(control_table([
     ("Closed", "Connects the last point back to the first, forming a loop. Brushes are "
                "generated on the closing segment too, and the seam is sealed. Great for "
                "rings, arches and racetracks."),
-    ("Subdivisions", "How finely the curve is sampled between control points. Higher "
-                     "values give a smoother curve (and more brushes); lower values are "
-                     "coarser and cheaper."),
     ("View Options", "Standard TrenchBroom view options for the viewport."),
 ]))
 story.append(Paragraph(

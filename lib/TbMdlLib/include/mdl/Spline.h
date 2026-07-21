@@ -30,26 +30,42 @@ namespace tb::mdl
 {
 
 /**
- * A single control point of a spline. In addition to its position, a control point
- * carries a roll angle (in degrees) that twists the sweep's frame around the curve's
- * tangent, a cross-section scale that tapers the swept profile, and a locked flag.
+ * Per control point lock flags.
  *
- * A locked point anchors the sweep's frame orientation: the rotation minimizing frame
- * is not transported through it, but reset to the point's own upright frame, so a
+ * Twist anchors the sweep's frame orientation: the rotation minimizing frame is not
+ * transported through the point, but reset to the point's own upright frame, so a
  * twist introduced by rotating other points cannot propagate past it.
  *
- * A segment whose two endpoints are both locked is a straight line between them,
- * unaffected by any other points, while all other segments keep their regular smooth
- * curve shape.
+ * XY, XZ and YZ lock the curve's shape in the respective plane: on a segment whose
+ * two endpoints both lock a plane, the corresponding coordinates interpolate linearly
+ * between the two points, so the curve is a straight line when viewed onto that plane
+ * and points outside the segment cannot bend it there. The remaining coordinates keep
+ * their regular smooth curve shape.
+ */
+namespace SplineLock
+{
+using Type = unsigned;
+constexpr Type None = 0u;
+constexpr Type Twist = 1u << 0u;
+constexpr Type XY = 1u << 1u;
+constexpr Type XZ = 1u << 2u;
+constexpr Type YZ = 1u << 3u;
+} // namespace SplineLock
+
+/**
+ * A single control point of a spline. In addition to its position, a control point
+ * carries a roll angle (in degrees) that twists the sweep's frame around the curve's
+ * tangent, a cross-section scale that tapers the swept profile, and a set of lock
+ * flags (see SplineLock).
  */
 struct SplinePoint
 {
   vm::vec3d position;
   double roll = 0.0;
   double scale = 1.0;
-  bool locked = false;
+  SplineLock::Type locks = SplineLock::None;
 
-  kdl_reflect_decl(SplinePoint, position, roll, scale, locked);
+  kdl_reflect_decl(SplinePoint, position, roll, scale, locks);
 };
 
 /**

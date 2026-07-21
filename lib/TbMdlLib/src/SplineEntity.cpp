@@ -122,13 +122,15 @@ std::optional<Brush> parseTemplateBrush(
 
 std::optional<SplinePoint> parsePoint(const std::string& value)
 {
+  // The last component holds the lock flags (see SplineLock). Older splines wrote a
+  // boolean locked flag in its place, whose value 1 coincides with the Twist lock.
   if (const auto parsed = vm::parse<double, 6>(value))
   {
     return SplinePoint{
       vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
       (*parsed)[3],
       (*parsed)[4],
-      (*parsed)[5] != 0.0};
+      SplineLock::Type((*parsed)[5])};
   }
 
   // Older splines were written without the scale component.
@@ -138,7 +140,7 @@ std::optional<SplinePoint> parsePoint(const std::string& value)
       vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
       (*parsed)[3],
       1.0,
-      (*parsed)[4] != 0.0};
+      (*parsed)[4] != 0.0 ? SplineLock::Twist : SplineLock::None};
   }
 
   return std::nullopt;
@@ -153,7 +155,7 @@ std::string formatPoint(const SplinePoint& point)
     point.position.z(),
     point.roll,
     point.scale,
-    point.locked ? 1 : 0);
+    point.locks);
 }
 
 } // namespace

@@ -24,7 +24,8 @@
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QPushButton>
-#include <QSpinBox>
+
+#include <utility>
 
 #include "mdl/Map.h"
 #include "ui/MapDocument.h"
@@ -81,12 +82,23 @@ void SplineToolPage::createGui()
     tr("Cross-section scale at the selected point; the swept profile tapers "
        "between points"));
 
-  m_locked = new QCheckBox{tr("Locked")};
-  m_locked->setFocusPolicy(Qt::NoFocus);
-  m_locked->setToolTip(
-    tr("A locked point anchors the sweep's orientation, so a twist caused by "
-       "rotating other points cannot propagate past it. A segment between two "
-       "locked points is a straight line, unaffected by any other points"));
+  const auto createLockCheckBox = [this](const QString& label, const QString& toolTip) {
+    auto* checkBox = new QCheckBox{label};
+    checkBox->setFocusPolicy(Qt::NoFocus);
+    checkBox->setToolTip(toolTip);
+    return checkBox;
+  };
+  const auto planeToolTip = tr(
+    "Lock the curve's shape in this plane at the selected point: a segment whose two "
+    "end points both lock a plane is a straight line in that plane, unaffected by "
+    "any other points");
+  m_lockXY = createLockCheckBox(tr("XY"), planeToolTip);
+  m_lockXZ = createLockCheckBox(tr("XZ"), planeToolTip);
+  m_lockYZ = createLockCheckBox(tr("YZ"), planeToolTip);
+  m_lockTwist = createLockCheckBox(
+    tr("Twist"),
+    tr("Anchor the sweep's orientation at the selected point, so a twist caused by "
+       "rotating other points cannot propagate past it"));
 
   m_removePointButton = new QPushButton{tr("Remove")};
   m_removePointButton->setToolTip(tr("Remove the selected point from the spline"));
@@ -97,10 +109,6 @@ void SplineToolPage::createGui()
     tr("Close the spline: the last point connects back to the first, and brushes "
        "are created on that segment as well"));
   m_closed->setFocusPolicy(Qt::NoFocus);
-
-  m_subdivisions = new QSpinBox{};
-  m_subdivisions->setRange(1, 64);
-  m_subdivisions->setToolTip(tr("Number of curve segments between two points"));
 
   auto* layout = new QHBoxLayout{};
   layout->setContentsMargins(0, 0, 0, 0);
@@ -117,12 +125,13 @@ void SplineToolPage::createGui()
   layout->addWidget(m_roll);
   layout->addWidget(new QLabel{tr("Scale:")});
   layout->addWidget(m_scale);
-  layout->addWidget(m_locked);
+  layout->addWidget(new QLabel{tr("Lock:")});
+  layout->addWidget(m_lockXY);
+  layout->addWidget(m_lockXZ);
+  layout->addWidget(m_lockYZ);
+  layout->addWidget(m_lockTwist);
   layout->addWidget(m_closed);
   layout->addWidget(m_removePointButton);
-  layout->addSpacing(12);
-  layout->addWidget(new QLabel{tr("Subdivisions:")});
-  layout->addWidget(m_subdivisions);
   layout->addStretch();
 
   setLayout(layout);
@@ -158,12 +167,19 @@ void SplineToolPage::createGui()
         m_tool.setSelectedPointScale(value);
       }
     });
-  connect(m_locked, &QCheckBox::toggled, this, [this](const bool checked) {
-    if (!m_updatingControls && checked != m_tool.selectedPointLocked())
-    {
-      m_tool.toggleSelectedPointLocked();
-    }
-  });
+  const auto connectLockCheckBox = [this](QCheckBox* checkBox,
+                                          const mdl::SplineLock::Type lock) {
+    connect(checkBox, &QCheckBox::toggled, this, [this, lock](const bool checked) {
+      if (!m_updatingControls)
+      {
+        m_tool.setSelectedPointLock(lock, checked);
+      }
+    });
+  };
+  connectLockCheckBox(m_lockXY, mdl::SplineLock::XY);
+  connectLockCheckBox(m_lockXZ, mdl::SplineLock::XZ);
+  connectLockCheckBox(m_lockYZ, mdl::SplineLock::YZ);
+  connectLockCheckBox(m_lockTwist, mdl::SplineLock::Twist);
   connect(
     m_removePointButton, &QPushButton::clicked, this, [this]() { m_tool.removePoint(); });
   connect(m_closed, &QCheckBox::toggled, this, [this](const bool checked) {
@@ -172,16 +188,6 @@ void SplineToolPage::createGui()
       m_tool.setClosed(checked);
     }
   });
-  connect(
-    m_subdivisions,
-    QOverload<int>::of(&QSpinBox::valueChanged),
-    this,
-    [this](const int value) {
-      if (!m_updatingControls && value > 0)
-      {
-        m_tool.setSubdivisions(size_t(value));
-      }
-    });
 }
 
 void SplineToolPage::connectObservers()
@@ -213,13 +219,19 @@ void SplineToolPage::updateControls()
   m_roll->setValue(m_tool.selectedPointRoll());
   m_scale->setEnabled(hasSelectedPoint);
   m_scale->setValue(m_tool.selectedPointScale());
-  m_locked->setEnabled(hasSelectedPoint);
-  m_locked->setChecked(m_tool.selectedPointLocked());
+  for (const auto& [checkBox, lock] : {
+         std::pair{m_lockXY, mdl::SplineLock::XY},
+         std::pair{m_lockXZ, mdl::SplineLock::XZ},
+         std::pair{m_lockYZ, mdl::SplineLock::YZ},
+         std::pair{m_lockTwist, mdl::SplineLock::Twist},
+       })
+  {
+    checkBox->setEnabled(hasSelectedPoint);
+    checkBox->setChecked(m_tool.selectedPointLock(lock));
+  }
   m_removePointButton->setEnabled(m_tool.canRemovePoint());
   m_closed->setEnabled(m_tool.hasPoints());
   m_closed->setChecked(m_tool.closed());
-
-  m_subdivisions->setValue(int(m_tool.subdivisions()));
 
   m_updatingControls = false;
 }
