@@ -70,32 +70,6 @@ TEST_CASE("Spline")
       CHECK(samples[2] == vm::approx{vm::vec3d{128, 0, 0}});
     }
 
-    SECTION("outside points cannot shape the segment between two locked points")
-    {
-      // Two locked points on a straight, level line, with highly elevated points
-      // outside of them: the locked segment must stay on the line, without any slope
-      // leaking in from the elevated neighbors.
-      const auto points = std::vector<SplinePoint>{
-        SplinePoint{vm::vec3d{-64, 0, 512}},
-        SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0, true},
-        SplinePoint{vm::vec3d{128, 0, 0}, 0.0, 1.0, true},
-        SplinePoint{vm::vec3d{192, 0, 512}},
-      };
-
-      const auto subdivisions = size_t{8};
-      const auto samples = sampleSpline(points, subdivisions);
-      REQUIRE(samples.size() == 3 * subdivisions + 1);
-
-      // The samples of the middle segment lie between indices 8 and 16.
-      for (size_t i = subdivisions; i <= 2 * subdivisions; ++i)
-      {
-        CHECK(samples[i].y() == vm::approx{0.0});
-        CHECK(samples[i].z() == vm::approx{0.0});
-        CHECK(samples[i].x() >= -0.001);
-        CHECK(samples[i].x() <= 128.001);
-      }
-    }
-
     SECTION("a closed spline wraps back around to the first point")
     {
       const auto points = std::vector<SplinePoint>{

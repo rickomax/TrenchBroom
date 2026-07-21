@@ -62,32 +62,6 @@ size_t nextPointIndex(
   return closed ? (index + 1) % points.size() : vm::min(index + 1, points.size() - 1);
 }
 
-/** The four Catmull-Rom control positions of the given curve segment. A locked
- * endpoint blocks shape influence from crossing it: the outer neighbor beyond a locked
- * endpoint is replaced by the endpoint itself, so the curve between two locked points
- * is unaffected by the points outside of them (and is a straight line if only bounded
- * by them). */
-struct SegmentControlPoints
-{
-  vm::vec3d p0;
-  vm::vec3d p1;
-  vm::vec3d p2;
-  vm::vec3d p3;
-};
-
-SegmentControlPoints segmentControlPoints(
-  const std::vector<SplinePoint>& points, const size_t segment, const bool closed)
-{
-  const auto next = nextPointIndex(points, segment, closed);
-  const auto p1 = points[segment].position;
-  const auto p2 = points[next].position;
-  const auto p0 =
-    points[segment].locked ? p1 : controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
-  const auto p3 =
-    points[next].locked ? p2 : controlPoint(points, std::ptrdiff_t(segment) + 2, closed);
-  return {p0, p1, p2, p3};
-}
-
 /**
  * Chooses an initial up direction for the given tangent: upright unless the tangent
  * is nearly vertical, in which case the X axis is used as the reference instead.
@@ -293,8 +267,12 @@ vm::vec3d curvePoint(
   const double t,
   const bool closed)
 {
-  const auto [p0, p1, p2, p3] = segmentControlPoints(points, segment, closed);
-  return evaluateSplineSegment(p0, p1, p2, p3, t);
+  return evaluateSplineSegment(
+    controlPoint(points, std::ptrdiff_t(segment) - 1, closed),
+    controlPoint(points, std::ptrdiff_t(segment), closed),
+    controlPoint(points, std::ptrdiff_t(segment) + 1, closed),
+    controlPoint(points, std::ptrdiff_t(segment) + 2, closed),
+    t);
 }
 
 vm::vec3d curveTangent(
@@ -303,7 +281,10 @@ vm::vec3d curveTangent(
   const double t,
   const bool closed)
 {
-  const auto [p0, p1, p2, p3] = segmentControlPoints(points, segment, closed);
+  const auto p0 = controlPoint(points, std::ptrdiff_t(segment) - 1, closed);
+  const auto p1 = controlPoint(points, std::ptrdiff_t(segment), closed);
+  const auto p2 = controlPoint(points, std::ptrdiff_t(segment) + 1, closed);
+  const auto p3 = controlPoint(points, std::ptrdiff_t(segment) + 2, closed);
 
   const auto t2 = t * t;
   const auto d = ((p2 - p0) + (p0 * 2.0 - p1 * 5.0 + p2 * 4.0 - p3) * (2.0 * t)
