@@ -65,6 +65,15 @@ namespace ui
 {
 class MapDocument;
 
+/** The parts of a spline control point that can be picked and dragged: the point
+ * itself, and its two tangent handles (visible in tangent edit mode). */
+enum class SplineHandlePart
+{
+  Point,
+  TangentIn,
+  TangentOut,
+};
+
 /**
  * A tool for creating and editing splines. A spline is a curve through a sequence of
  * control points; each point can be moved, rotated (rolled around the curve) and
@@ -100,6 +109,9 @@ private:
   /** Whether clicking empty space appends new points. */
   bool m_addPointMode = false;
 
+  /** Whether the selected point's tangent handles are shown and editable. */
+  bool m_tangentEditMode = false;
+
   /** The entity node holding the spline currently being edited, if any. */
   mdl::EntityNode* m_splineNode = nullptr;
 
@@ -108,10 +120,13 @@ private:
   std::vector<std::pair<mdl::EntityNode*, mdl::SplineEntityData>> m_otherSplines;
 
   std::optional<size_t> m_selectedIndex;
+  /** Which handle of the selected point is selected (for keyboard moves). */
+  SplineHandlePart m_selectedPart = SplineHandlePart::Point;
 
   struct DragState
   {
     size_t index;
+    SplineHandlePart part;
     mdl::SplinePoint originalPoint;
   };
   std::optional<DragState> m_dragState;
@@ -206,6 +221,24 @@ public: // rotation, scale and locking
   bool selectedPointLock(mdl::SplineLock::Type lock) const;
   void setSelectedPointLock(mdl::SplineLock::Type lock, bool set);
   void toggleSelectedPointLock(mdl::SplineLock::Type lock);
+
+public: // tangent editing
+  /** Whether the selected point's tangents follow the curve automatically. */
+  bool selectedPointAutoTangent() const;
+  /** Switching to manual tangents initializes the handles from the current automatic
+   * tangents, so the curve does not change until a handle is moved. */
+  void setSelectedPointAutoTangent(bool autoTangent);
+
+  /** While tangent edit mode is active, the selected point's tangent handles are
+   * shown and can be picked and dragged like control points. */
+  bool tangentEditMode() const;
+  void setTangentEditMode(bool tangentEditMode);
+
+private:
+  /** Whether the tangent handles of the selected point are currently visible. */
+  bool tangentHandlesVisible() const;
+
+public:
 
 public: // closing
   /** Whether the spline is closed, i.e. the last point connects back to the first

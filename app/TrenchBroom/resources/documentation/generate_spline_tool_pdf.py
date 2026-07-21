@@ -142,6 +142,8 @@ story.append(bullets([
     "for refining a section of the curve.",
     "<b>Remove</b> deletes the selected point (or the last one if none is selected).",
     "<b>Double-click</b> a point to toggle its Twist lock quickly.",
+    "Use <b>Tangent &rarr; Auto/Edit</b> to shape the curve by hand where the "
+    "automatic tangents do not give the shape you want.",
 ]))
 
 story.append(Paragraph("Per-point shape", h2))
@@ -150,11 +152,15 @@ story.append(control_table([
              "degrees. The twist blends smoothly between points."),
     ("Scale", "Scales the cross-section at this point. Values taper the profile "
               "between points (e.g. 1.0 &rarr; 0.5 makes a cone-like narrowing)."),
-    ("Lock XY / XZ / YZ", "Locks the curve to the given plane at this point: the point's "
-               "tangent is flattened into the plane, so neighboring segments level "
-               "smoothly into it, and a segment whose two end points share the lock "
-               "stays entirely in the plane while still curving smoothly within it. "
-               "Points with any lock are drawn in a different color."),
+    ("Tangent: Auto", "While enabled (the default), the point's curve tangents follow "
+               "the spline automatically. Disable it to shape the curve by hand with "
+               "the point's own in and out tangents; the handles start where the "
+               "automatic tangents were, so the curve does not change until you move "
+               "them."),
+    ("Tangent: Edit", "Shows the selected point's two tangent handles (green, connected "
+               "to the point). Drag them exactly like control points &mdash; grid "
+               "snapping, Alt for vertical moves, arrow keys &mdash; to shape how the "
+               "curve leaves and arrives at the point. Available when Auto is off."),
     ("Lock Twist", "Anchors the sweep's orientation at this point. A twist introduced "
                "by rolling other points cannot propagate past it, so lock a point's "
                "twist to &ldquo;pin&rdquo; the geometry's up direction there. "

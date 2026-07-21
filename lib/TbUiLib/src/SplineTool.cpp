@@ -53,6 +53,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <array>
 #include <ranges>
 
 namespace tb::ui
@@ -83,8 +84,8 @@ void SplineTool::pick(
   const vm::ray3d& pickRay, const gl::Camera& camera, mdl::PickResult& pickResult)
 {
   // The hit target identifies the spline (by its entity node, null for a new,
-  // uncommitted spline) and the point index.
-  using Target = std::pair<mdl::EntityNode*, size_t>;
+  // uncommitted spline), the point index and the picked handle part.
+  using Target = std::tuple<mdl::EntityNode*, size_t, SplineHandlePart>;
 
   const auto handleRadius =
     SplinePointHandleScale * double(pref(Preferences::HandleRadius));
@@ -96,8 +97,33 @@ void SplineTool::pick(
         camera.pickPointHandle(pickRay, m_points[i].position, handleRadius))
     {
       const auto hitPoint = vm::point_at_distance(pickRay, *distance);
-      pickResult.addHit(
-        mdl::Hit{PointHitType, *distance, hitPoint, Target{m_splineNode, i}});
+      pickResult.addHit(mdl::Hit{
+        PointHitType, *distance, hitPoint,
+        Target{m_splineNode, i, SplineHandlePart::Point}});
+    }
+  }
+
+  if (tangentHandlesVisible())
+  {
+    const auto& point = m_points[*m_selectedIndex];
+    const auto handles = std::array<std::pair<SplineHandlePart, vm::vec3d>, 2>{
+      std::pair{
+        SplineHandlePart::TangentIn,
+        point.position + mdl::tangentInOffset(m_points, *m_selectedIndex, m_closed)},
+      std::pair{
+        SplineHandlePart::TangentOut,
+        point.position + mdl::tangentOutOffset(m_points, *m_selectedIndex, m_closed)},
+    };
+    for (const auto& [part, position] : handles)
+    {
+      if (
+        const auto distance = camera.pickPointHandle(pickRay, position, handleRadius))
+      {
+        const auto hitPoint = vm::point_at_distance(pickRay, *distance);
+        pickResult.addHit(mdl::Hit{
+          PointHitType, *distance, hitPoint,
+          Target{m_splineNode, *m_selectedIndex, part}});
+      }
     }
   }
 
@@ -110,8 +136,9 @@ void SplineTool::pick(
           camera.pickPointHandle(pickRay, data.points[i].position, handleRadius))
       {
         const auto hitPoint = vm::point_at_distance(pickRay, *distance);
-        pickResult.addHit(
-          mdl::Hit{PointHitType, *distance, hitPoint, Target{entityNode, i}});
+        pickResult.addHit(mdl::Hit{
+          PointHitType, *distance, hitPoint,
+          Target{entityNode, i, SplineHandlePart::Point}});
       }
     }
   }
@@ -208,6 +235,24 @@ void SplineTool::render(
     renderService.renderHandle(vm::vec3f{point.position});
   }
 
+  // In tangent edit mode, show the selected point's tangent handles connected to
+  // the point.
+  if (tangentHandlesVisible())
+  {
+    const auto& point = m_points[*m_selectedIndex];
+    const auto inPosition =
+      point.position + mdl::tangentInOffset(m_points, *m_selectedIndex, m_closed);
+    const auto outPosition =
+      point.position + mdl::tangentOutOffset(m_points, *m_selectedIndex, m_closed);
+
+    renderService.setForegroundColor(pref(Preferences::SplineTangentHandleColor));
+    renderService.setLineWidth(1.0f);
+    renderService.renderLine(vm::vec3f{point.position}, vm::vec3f{inPosition});
+    renderService.renderLine(vm::vec3f{point.position}, vm::vec3f{outPosition});
+    renderService.renderHandle(vm::vec3f{inPosition});
+    renderService.renderHandle(vm::vec3f{outPosition});
+  }
+
   renderHighlight(renderService, pickResult);
 
   if (m_selectedIndex && *m_selectedIndex < m_points.size())
@@ -241,7 +286,8 @@ void SplineTool::renderHighlight(
   const auto& hit = pickResult.first(type(PointHitType));
   if (hit.isMatch())
   {
-    const auto [entityNode, index] = hit.target<std::pair<mdl::EntityNode*, size_t>>();
+    const auto [entityNode, index, part] =
+      hit.target<std::tuple<mdl::EntityNode*, size_t, SplineHandlePart>>();
     const auto* points = &m_points;
     if (entityNode != m_splineNode)
     {
@@ -256,8 +302,17 @@ void SplineTool::renderHighlight(
     }
     if (index < points->size())
     {
+      auto position = (*points)[index].position;
+      if (part == SplineHandlePart::TangentIn)
+      {
+        position = position + mdl::tangentInOffset(*points, index, m_closed);
+      }
+      else if (part == SplineHandlePart::TangentOut)
+      {
+        position = position + mdl::tangentOutOffset(*points, index, m_closed);
+      }
       renderService.setForegroundColor(pref(Preferences::SelectedHandleColor));
-      renderService.renderHandleHighlight(vm::vec3f{(*points)[index].position});
+      renderService.renderHandleHighlight(vm::vec3f{position});
     }
   }
 }
@@ -326,6 +381,7 @@ void SplineTool::addPoint(const vm::vec3d& point)
   m_points.insert(
     m_points.begin() + std::ptrdiff_t(index), mdl::SplinePoint{point});
   m_selectedIndex = index;
+  m_selectedPart = SplineHandlePart::Point;
   commitSpline("Add Spline Point");
 }
 
@@ -358,7 +414,8 @@ bool SplineTool::selectPoint(const mdl::PickResult& pickResult)
   }
 
   // Hitting another spline's point picks up that spline for editing first.
-  const auto [entityNode, index] = hit.target<std::pair<mdl::EntityNode*, size_t>>();
+  const auto [entityNode, index, part] =
+    hit.target<std::tuple<mdl::EntityNode*, size_t, SplineHandlePart>>();
   if (entityNode != m_splineNode)
   {
     if (!entityNode)
@@ -374,6 +431,7 @@ bool SplineTool::selectPoint(const mdl::PickResult& pickResult)
   }
 
   m_selectedIndex = index;
+  m_selectedPart = part;
   refreshViews();
   splineDidChangeNotifier();
   return true;
@@ -405,6 +463,7 @@ bool SplineTool::selectSpline(const mdl::PickResult& pickResult)
 void SplineTool::deselectPoint()
 {
   m_selectedIndex = std::nullopt;
+  m_selectedPart = SplineHandlePart::Point;
   refreshViews();
   splineDidChangeNotifier();
 }
@@ -426,7 +485,8 @@ std::optional<std::tuple<vm::vec3d, vm::vec3d>> SplineTool::beginDragPoint(
   }
 
   // Hitting another spline's point picks up that spline for editing first.
-  const auto [entityNode, index] = hit.target<std::pair<mdl::EntityNode*, size_t>>();
+  const auto [entityNode, index, part] =
+    hit.target<std::tuple<mdl::EntityNode*, size_t, SplineHandlePart>>();
   if (entityNode != m_splineNode)
   {
     if (!entityNode)
@@ -442,9 +502,20 @@ std::optional<std::tuple<vm::vec3d, vm::vec3d>> SplineTool::beginDragPoint(
   }
 
   m_selectedIndex = index;
-  m_dragState = DragState{index, m_points[index]};
+  m_selectedPart = part;
+  m_dragState = DragState{index, part, m_points[index]};
   splineDidChangeNotifier();
-  return {{m_points[index].position, hit.hitPoint()}};
+
+  auto initialPosition = m_points[index].position;
+  if (part == SplineHandlePart::TangentIn)
+  {
+    initialPosition = initialPosition + mdl::tangentInOffset(m_points, index, m_closed);
+  }
+  else if (part == SplineHandlePart::TangentOut)
+  {
+    initialPosition = initialPosition + mdl::tangentOutOffset(m_points, index, m_closed);
+  }
+  return {{initialPosition, hit.hitPoint()}};
 }
 
 bool SplineTool::dragPoint(const vm::vec3d& newPosition)
@@ -454,15 +525,29 @@ bool SplineTool::dragPoint(const vm::vec3d& newPosition)
     return false;
   }
 
-  m_points[m_dragState->index].position = newPosition;
+  auto& point = m_points[m_dragState->index];
+  switch (m_dragState->part)
+  {
+  case SplineHandlePart::Point:
+    point.position = newPosition;
+    break;
+  case SplineHandlePart::TangentIn:
+    point.tangentIn = newPosition - point.position;
+    break;
+  case SplineHandlePart::TangentOut:
+    point.tangentOut = newPosition - point.position;
+    break;
+  }
   refreshViews();
   return true;
 }
 
 void SplineTool::endDragPoint()
 {
+  const auto movedTangent =
+    m_dragState && m_dragState->part != SplineHandlePart::Point;
   m_dragState = std::nullopt;
-  commitSpline("Move Spline Point");
+  commitSpline(movedTangent ? "Move Spline Tangent" : "Move Spline Point");
 }
 
 void SplineTool::cancelDragPoint()
@@ -534,11 +619,83 @@ void SplineTool::toggleSelectedPointLock(const mdl::SplineLock::Type lock)
   setSelectedPointLock(lock, !selectedPointLock(lock));
 }
 
+bool SplineTool::selectedPointAutoTangent() const
+{
+  return !m_selectedIndex || *m_selectedIndex >= m_points.size()
+         || m_points[*m_selectedIndex].autoTangent;
+}
+
+void SplineTool::setSelectedPointAutoTangent(const bool autoTangent)
+{
+  if (
+    !m_selectedIndex || *m_selectedIndex >= m_points.size()
+    || m_points[*m_selectedIndex].autoTangent == autoTangent)
+  {
+    return;
+  }
+
+  auto& point = m_points[*m_selectedIndex];
+  if (!autoTangent)
+  {
+    // Capture the current automatic tangents so the curve stays put until a handle
+    // is moved.
+    point.tangentIn = mdl::tangentInOffset(m_points, *m_selectedIndex, m_closed);
+    point.tangentOut = mdl::tangentOutOffset(m_points, *m_selectedIndex, m_closed);
+  }
+  point.autoTangent = autoTangent;
+
+  if (autoTangent)
+  {
+    m_tangentEditMode = false;
+    m_selectedPart = SplineHandlePart::Point;
+  }
+  commitSpline(
+    autoTangent ? "Use Automatic Spline Tangents" : "Use Manual Spline Tangents");
+}
+
+bool SplineTool::tangentEditMode() const
+{
+  return m_tangentEditMode;
+}
+
+void SplineTool::setTangentEditMode(const bool tangentEditMode)
+{
+  if (tangentEditMode != m_tangentEditMode)
+  {
+    m_tangentEditMode = tangentEditMode;
+    if (!m_tangentEditMode)
+    {
+      m_selectedPart = SplineHandlePart::Point;
+    }
+    refreshViews();
+    splineDidChangeNotifier();
+  }
+}
+
+bool SplineTool::tangentHandlesVisible() const
+{
+  return m_tangentEditMode && m_selectedIndex && *m_selectedIndex < m_points.size()
+         && !m_points[*m_selectedIndex].autoTangent;
+}
+
 void SplineTool::moveSelectedPoint(const vm::vec3d& delta)
 {
-  if (m_selectedIndex && *m_selectedIndex < m_points.size())
+  if (!m_selectedIndex || *m_selectedIndex >= m_points.size())
   {
-    m_points[*m_selectedIndex].position = m_points[*m_selectedIndex].position + delta;
+    return;
+  }
+
+  auto& point = m_points[*m_selectedIndex];
+  if (m_selectedPart != SplineHandlePart::Point && tangentHandlesVisible())
+  {
+    auto& tangent = m_selectedPart == SplineHandlePart::TangentIn ? point.tangentIn
+                                                                  : point.tangentOut;
+    tangent = tangent + delta;
+    commitSpline("Move Spline Tangent");
+  }
+  else
+  {
+    point.position = point.position + delta;
     commitSpline("Move Spline Point");
   }
 }

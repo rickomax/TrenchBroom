@@ -82,21 +82,21 @@ void SplineToolPage::createGui()
     tr("Cross-section scale at the selected point; the swept profile tapers "
        "between points"));
 
-  const auto createLockCheckBox = [this](const QString& label, const QString& toolTip) {
-    auto* checkBox = new QCheckBox{label};
-    checkBox->setFocusPolicy(Qt::NoFocus);
-    checkBox->setToolTip(toolTip);
-    return checkBox;
-  };
-  const auto planeToolTip = tr(
-    "Lock the curve to this plane at the selected point: the point's tangent is "
-    "flattened into the plane, and a segment whose two end points share the lock "
-    "stays entirely in the plane while still curving smoothly within it");
-  m_lockXY = createLockCheckBox(tr("XY"), planeToolTip);
-  m_lockXZ = createLockCheckBox(tr("XZ"), planeToolTip);
-  m_lockYZ = createLockCheckBox(tr("YZ"), planeToolTip);
-  m_lockTwist = createLockCheckBox(
-    tr("Twist"),
+  m_autoTangent = new QCheckBox{tr("Auto")};
+  m_autoTangent->setFocusPolicy(Qt::NoFocus);
+  m_autoTangent->setToolTip(
+    tr("While enabled, the selected point's tangents follow the curve "
+       "automatically; disable it to edit the point's in and out tangents by hand"));
+  m_editTangents = new QPushButton{tr("Edit")};
+  m_editTangents->setCheckable(true);
+  m_editTangents->setFocusPolicy(Qt::NoFocus);
+  m_editTangents->setToolTip(
+    tr("Show the selected point's tangent handles; drag them like control points to "
+       "shape the curve"));
+
+  m_lockTwist = new QCheckBox{tr("Twist")};
+  m_lockTwist->setFocusPolicy(Qt::NoFocus);
+  m_lockTwist->setToolTip(
     tr("Anchor the sweep's orientation at the selected point, so a twist caused by "
        "rotating other points cannot propagate past it"));
 
@@ -125,10 +125,11 @@ void SplineToolPage::createGui()
   layout->addWidget(m_roll);
   layout->addWidget(new QLabel{tr("Scale:")});
   layout->addWidget(m_scale);
+  layout->addWidget(new QLabel{tr("Tangent:")});
+  layout->addWidget(m_autoTangent);
+  layout->addWidget(m_editTangents);
+  layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Lock:")});
-  layout->addWidget(m_lockXY);
-  layout->addWidget(m_lockXZ);
-  layout->addWidget(m_lockYZ);
   layout->addWidget(m_lockTwist);
   layout->addWidget(m_closed);
   layout->addWidget(m_removePointButton);
@@ -167,19 +168,24 @@ void SplineToolPage::createGui()
         m_tool.setSelectedPointScale(value);
       }
     });
-  const auto connectLockCheckBox = [this](QCheckBox* checkBox,
-                                          const mdl::SplineLock::Type lock) {
-    connect(checkBox, &QCheckBox::toggled, this, [this, lock](const bool checked) {
-      if (!m_updatingControls)
-      {
-        m_tool.setSelectedPointLock(lock, checked);
-      }
-    });
-  };
-  connectLockCheckBox(m_lockXY, mdl::SplineLock::XY);
-  connectLockCheckBox(m_lockXZ, mdl::SplineLock::XZ);
-  connectLockCheckBox(m_lockYZ, mdl::SplineLock::YZ);
-  connectLockCheckBox(m_lockTwist, mdl::SplineLock::Twist);
+  connect(m_autoTangent, &QCheckBox::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setSelectedPointAutoTangent(checked);
+    }
+  });
+  connect(m_editTangents, &QPushButton::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setTangentEditMode(checked);
+    }
+  });
+  connect(m_lockTwist, &QCheckBox::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setSelectedPointLock(mdl::SplineLock::Twist, checked);
+    }
+  });
   connect(
     m_removePointButton, &QPushButton::clicked, this, [this]() { m_tool.removePoint(); });
   connect(m_closed, &QCheckBox::toggled, this, [this](const bool checked) {
@@ -219,16 +225,14 @@ void SplineToolPage::updateControls()
   m_roll->setValue(m_tool.selectedPointRoll());
   m_scale->setEnabled(hasSelectedPoint);
   m_scale->setValue(m_tool.selectedPointScale());
-  for (const auto& [checkBox, lock] : {
-         std::pair{m_lockXY, mdl::SplineLock::XY},
-         std::pair{m_lockXZ, mdl::SplineLock::XZ},
-         std::pair{m_lockYZ, mdl::SplineLock::YZ},
-         std::pair{m_lockTwist, mdl::SplineLock::Twist},
-       })
-  {
-    checkBox->setEnabled(hasSelectedPoint);
-    checkBox->setChecked(m_tool.selectedPointLock(lock));
-  }
+  const auto autoTangent = m_tool.selectedPointAutoTangent();
+  m_autoTangent->setEnabled(hasSelectedPoint);
+  m_autoTangent->setChecked(autoTangent);
+  m_editTangents->setEnabled(hasSelectedPoint && !autoTangent);
+  m_editTangents->setChecked(m_tool.tangentEditMode());
+
+  m_lockTwist->setEnabled(hasSelectedPoint);
+  m_lockTwist->setChecked(m_tool.selectedPointLock(mdl::SplineLock::Twist));
   m_removePointButton->setEnabled(m_tool.canRemovePoint());
   m_closed->setEnabled(m_tool.hasPoints());
   m_closed->setChecked(m_tool.closed());

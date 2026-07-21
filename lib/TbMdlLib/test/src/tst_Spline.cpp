@@ -70,41 +70,44 @@ TEST_CASE("Spline")
       CHECK(samples[2] == vm::approx{vm::vec3d{128, 0, 0}});
     }
 
-    SECTION("a segment between two plane locked points stays in the locked plane")
+    SECTION("manual tangents shape the curve")
     {
-      // Two XY locked points on a level line, with lifted end points and a sideways
-      // curve: the locked segment must stay level (z constant), but keep curving
-      // smoothly in the horizontal plane.
-      const auto points = std::vector<SplinePoint>{
-        SplinePoint{vm::vec3d{-64, -64, 512}},
-        SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0, SplineLock::XY},
-        SplinePoint{vm::vec3d{128, 64, 0}, 0.0, 1.0, SplineLock::XY},
-        SplinePoint{vm::vec3d{192, 128, 512}},
+      auto points = std::vector<SplinePoint>{
+        SplinePoint{vm::vec3d{0, 0, 0}},
+        SplinePoint{vm::vec3d{128, 0, 0}},
       };
 
-      const auto subdivisions = size_t{8};
-      const auto samples = sampleSpline(points, subdivisions);
-      REQUIRE(samples.size() == 3 * subdivisions + 1);
+      // With automatic tangents, the two point spline is a straight line.
+      CHECK(curvePoint(points, 0, 0.5) == vm::approx{vm::vec3d{64, 0, 0}});
 
-      // The samples of the middle segment lie between indices 8 and 16 and must stay
-      // level despite the lifted end points.
-      for (size_t i = subdivisions; i <= 2 * subdivisions; ++i)
-      {
-        CHECK(samples[i].z() == vm::approx{0.0});
-      }
+      // Manual tangents bend the curve: the handles point upward, so the curve
+      // leaves and arrives through them and bows up between the points.
+      points[0].autoTangent = false;
+      points[0].tangentIn = vm::vec3d{-32, 0, -32};
+      points[0].tangentOut = vm::vec3d{32, 0, 32};
+      points[1].autoTangent = false;
+      points[1].tangentIn = vm::vec3d{-32, 0, 32};
+      points[1].tangentOut = vm::vec3d{32, 0, -32};
 
-      // The middle segment still curves in the horizontal plane: it deviates from
-      // the straight chord between the two locked points (the chord runs along
-      // y = x / 2).
-      const auto quarterPoint = curvePoint(points, 1, 0.25);
-      CHECK(vm::abs(quarterPoint.y() - quarterPoint.x() / 2.0) > 1.0);
+      // The curve leaves the first point toward its out handle and arrives at the
+      // second point from the direction of its in handle.
+      CHECK(
+        curveTangent(points, 0, 0.0)
+        == vm::approx{vm::normalize(vm::vec3d{32, 0, 32})});
+      CHECK(
+        curveTangent(points, 0, 1.0)
+        == vm::approx{vm::normalize(vm::vec3d{32, 0, -32})});
 
-      // The curve is C1 continuous at the locked points: both touching segments
-      // share the flattened tangent, so the ramps level into the plane.
-      CHECK(curveTangent(points, 0, 1.0) == vm::approx{curveTangent(points, 1, 0.0)});
-      CHECK(curveTangent(points, 1, 1.0) == vm::approx{curveTangent(points, 2, 0.0)});
-      CHECK(curveTangent(points, 1, 0.0).z() == vm::approx{0.0});
-      CHECK(curveTangent(points, 1, 1.0).z() == vm::approx{0.0});
+      CHECK(curvePoint(points, 0, 0.5).z() > 16.0);
+
+      // The end points are still interpolated exactly.
+      CHECK(curvePoint(points, 0, 0.0) == vm::approx{points[0].position});
+      CHECK(curvePoint(points, 0, 1.0) == vm::approx{points[1].position});
+
+      // The handle offsets are exposed for display: manual offsets verbatim,
+      // automatic ones derived from the curve.
+      CHECK(tangentInOffset(points, 1) == vm::approx{vm::vec3d{-32, 0, 32}});
+      CHECK(tangentOutOffset(points, 0) == vm::approx{vm::vec3d{32, 0, 32}});
     }
 
     SECTION("a closed spline wraps back around to the first point")

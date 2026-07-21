@@ -347,6 +347,11 @@ bool SplineToolControllerBase::cancel()
     m_tool.setAddPointMode(false);
     return true;
   }
+  if (m_tool.tangentEditMode())
+  {
+    m_tool.setTangentEditMode(false);
+    return true;
+  }
   if (m_tool.selectedPointIndex())
   {
     m_tool.deselectPoint();

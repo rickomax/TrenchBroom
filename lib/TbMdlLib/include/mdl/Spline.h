@@ -35,24 +35,12 @@ namespace tb::mdl
  * Twist anchors the sweep's frame orientation: the rotation minimizing frame is not
  * transported through the point, but reset to the point's own upright frame, so a
  * twist introduced by rotating other points cannot propagate past it.
- *
- * XY, XZ and YZ lock the curve to the respective plane: the point's tangent is
- * flattened into the plane (its component along the plane's normal is zeroed), and
- * both segments touching the point share the flattened tangent, so neighboring
- * segments level smoothly into the plane. On a segment whose two endpoints both lock
- * a plane, the coordinate along the plane's normal interpolates linearly (constant
- * when the endpoints coincide), so the segment stays in the plane and points outside
- * of it cannot bend it out -- while the remaining coordinates keep their cubic,
- * smooth curve shape.
  */
 namespace SplineLock
 {
 using Type = unsigned;
 constexpr Type None = 0u;
 constexpr Type Twist = 1u << 0u;
-constexpr Type XY = 1u << 1u;
-constexpr Type XZ = 1u << 2u;
-constexpr Type YZ = 1u << 3u;
 } // namespace SplineLock
 
 /**
@@ -60,6 +48,13 @@ constexpr Type YZ = 1u << 3u;
  * carries a roll angle (in degrees) that twists the sweep's frame around the curve's
  * tangent, a cross-section scale that tapers the swept profile, and a set of lock
  * flags (see SplineLock).
+ *
+ * Each point also owns the curve tangents of the segments touching it, expressed as
+ * two handle offsets relative to the point (like the control handles of a Bezier pen
+ * tool): the curve arrives from the direction of the in handle and leaves toward the
+ * out handle. While autoTangent is set (the default), the handles follow the
+ * automatic Catmull-Rom tangents; when cleared, the stored offsets are used and can
+ * be edited freely.
  */
 struct SplinePoint
 {
@@ -67,8 +62,12 @@ struct SplinePoint
   double roll = 0.0;
   double scale = 1.0;
   SplineLock::Type locks = SplineLock::None;
+  bool autoTangent = true;
+  vm::vec3d tangentIn = vm::vec3d{0, 0, 0};
+  vm::vec3d tangentOut = vm::vec3d{0, 0, 0};
 
-  kdl_reflect_decl(SplinePoint, position, roll, scale, locks);
+  kdl_reflect_decl(
+    SplinePoint, position, roll, scale, locks, autoTangent, tangentIn, tangentOut);
 };
 
 /**
@@ -98,8 +97,25 @@ vm::vec3d evaluateSplineSegment(
   double t);
 
 /**
- * The point on the Catmull-Rom curve through the given control points, on the segment
- * starting at the given control point index, at parameter t in [0, 1]. If closed is
+ * The offset of the given point's incoming tangent handle relative to the point: the
+ * stored offset if the point has manual tangents, otherwise derived from the
+ * automatic Catmull-Rom tangent.
+ */
+vm::vec3d tangentInOffset(
+  const std::vector<SplinePoint>& points, size_t index, bool closed = false);
+
+/**
+ * The offset of the given point's outgoing tangent handle relative to the point. See
+ * tangentInOffset.
+ */
+vm::vec3d tangentOutOffset(
+  const std::vector<SplinePoint>& points, size_t index, bool closed = false);
+
+/**
+ * The point on the curve through the given control points, on the segment starting
+ * at the given control point index, at parameter t in [0, 1]. Each segment is a
+ * cubic Hermite curve whose tangents come from the two endpoints' tangent handles;
+ * with automatic tangents, this is the uniform Catmull-Rom curve. If closed is
  * true, the curve wraps around: the last control point connects back to the first,
  * and neighboring control points are looked up modulo the point count.
  */

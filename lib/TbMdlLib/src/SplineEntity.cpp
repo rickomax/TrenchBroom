@@ -122,7 +122,20 @@ std::optional<Brush> parseTemplateBrush(
 
 std::optional<SplinePoint> parsePoint(const std::string& value)
 {
-  // The last component holds the lock flags (see SplineLock). Older splines wrote a
+  // Points with manual tangents append the in and out handle offsets.
+  if (const auto parsed = vm::parse<double, 12>(value))
+  {
+    return SplinePoint{
+      vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
+      (*parsed)[3],
+      (*parsed)[4],
+      SplineLock::Type((*parsed)[5]),
+      false,
+      vm::vec3d{(*parsed)[6], (*parsed)[7], (*parsed)[8]},
+      vm::vec3d{(*parsed)[9], (*parsed)[10], (*parsed)[11]}};
+  }
+
+  // The sixth component holds the lock flags (see SplineLock). Older splines wrote a
   // boolean locked flag in its place, whose value 1 coincides with the Twist lock.
   if (const auto parsed = vm::parse<double, 6>(value))
   {
@@ -148,6 +161,24 @@ std::optional<SplinePoint> parsePoint(const std::string& value)
 
 std::string formatPoint(const SplinePoint& point)
 {
+  if (!point.autoTangent)
+  {
+    return fmt::format(
+      "{} {} {} {} {} {} {} {} {} {} {} {}",
+      point.position.x(),
+      point.position.y(),
+      point.position.z(),
+      point.roll,
+      point.scale,
+      point.locks,
+      point.tangentIn.x(),
+      point.tangentIn.y(),
+      point.tangentIn.z(),
+      point.tangentOut.x(),
+      point.tangentOut.y(),
+      point.tangentOut.z());
+  }
+
   return fmt::format(
     "{} {} {} {} {} {}",
     point.position.x(),

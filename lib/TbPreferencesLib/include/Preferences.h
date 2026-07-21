@@ -164,6 +164,8 @@ inline auto SplineLineColor =
   Preference<Color>{"render/Colors/Spline line", RgbF{1.0f, 0.5f, 0.0f}};
 inline auto SplineLockedHandleColor =
   Preference<Color>{"render/Colors/Spline locked handle", RgbF{0.6f, 0.6f, 0.65f}};
+inline auto SplineTangentHandleColor =
+  Preference<Color>{"render/Colors/Spline tangent handle", RgbF{0.0f, 0.85f, 0.0f}};
 
 inline auto ExtrudeHandleColor =
   Preference<Color>{"render/Colors/Resize handle", RgbB{248, 230, 60}};
