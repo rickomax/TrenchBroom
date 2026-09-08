@@ -214,6 +214,25 @@ TEST_CASE("Terrain")
       CHECK(terrainBounds(terrain).max == vm::approx{vm::vec3d{256, 128, 64}});
     }
 
+    SECTION("the far corner is sampled from the last cell, not past the grid")
+    {
+      auto terrain = makeTerrain(4, 4);
+      // A corner spike, so a wrong sample at the far edge shows up as a wrong height
+      // rather than only as an out of range read.
+      terrain.heights[terrainVertexIndex(terrain, 4, 4)] = 96.0;
+
+      REQUIRE(
+        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{256, 256, 96}}));
+
+      REQUIRE(terrain.columns == 8);
+      REQUIRE(terrain.rows == 8);
+      // The corner vertex maps exactly onto the old corner vertex, and the vertex one
+      // step in is half way down the spike.
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 8, 8)] == vm::approx{96.0});
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 7, 8)] == vm::approx{64.0});
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 8, 7)] == vm::approx{64.0});
+    }
+
     SECTION("scaling in Z scales the height data")
     {
       auto terrain = makeTerrain(4, 4);

@@ -103,13 +103,16 @@ VertexRange vertexRangeInRadius(
  */
 double sampleHeight(const Terrain& terrain, const double column, const double row)
 {
-  const auto lower = [](const double coordinate, const size_t count) {
+  // The upper index of each pair is the lower one plus one, so the lower one is clamped
+  // to the last cell rather than the last vertex; the coordinate at the far edge lands
+  // on the last cell with a weight of one.
+  const auto lower = [](const double coordinate, const size_t cellCount) {
     const auto raw = std::llround(std::floor(coordinate));
-    return size_t(vm::clamp(raw, 0ll, static_cast<long long>(count) - 1));
+    return size_t(vm::clamp(raw, 0ll, static_cast<long long>(cellCount) - 1));
   };
 
-  const auto column0 = lower(column, terrain.columns + 1);
-  const auto row0 = lower(row, terrain.rows + 1);
+  const auto column0 = lower(column, terrain.columns);
+  const auto row0 = lower(row, terrain.rows);
   const auto column1 = column0 + 1;
   const auto row1 = row0 + 1;
 
