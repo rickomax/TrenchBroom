@@ -335,7 +335,8 @@ private:
   /** Whether the given input starts or continues a sculpting stroke. */
   bool acceptsSculpting(const InputState& inputState) const
   {
-    return !m_delegate->tool().addMode()
+    // With no sculpting mode selected the tool only selects terrains.
+    return m_delegate->tool().sculpting()
            && (inputState.modifierKeysPressed(ModifierKeys::None) || inputState.modifierKeysPressed(ModifierKeys::Shift));
   }
 
@@ -379,12 +380,9 @@ private:
   void mouseMove(const InputState& inputState) override
   {
     auto& tool = m_delegate->tool();
-    if (tool.addMode())
-    {
-      tool.setBrushPosition(std::nullopt);
-      return;
-    }
-    tool.setBrushPosition(tool.pickSurface(inputState.pickRay()));
+    // The brush is only shown while a sculpting mode is selected.
+    tool.setBrushPosition(
+      tool.sculpting() ? tool.pickSurface(inputState.pickRay()) : std::nullopt);
   }
 
   bool mouseClick(const InputState& inputState) override

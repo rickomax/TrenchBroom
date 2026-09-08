@@ -55,7 +55,8 @@ namespace ui
 {
 class MapDocument;
 
-/** The terrain tool's editing modes. */
+/** The terrain tool's sculpting modes. Having none selected turns the tool into a
+ * plain selection tool: clicking a terrain picks it up for editing. */
 enum class TerrainToolMode
 {
   Raise,
@@ -97,7 +98,8 @@ private:
 
   /** Whether dragging out a box creates a new terrain. */
   bool m_addMode = false;
-  TerrainToolMode m_mode = TerrainToolMode::Raise;
+  /** The selected sculpting mode, or nothing when the tool only selects terrains. */
+  std::optional<TerrainToolMode> m_mode;
 
   double m_radius = 128.0;
   double m_strength = 0.5;
@@ -138,12 +140,18 @@ public: // modes and settings
   bool addMode() const;
   void setAddMode(bool addMode);
 
-  TerrainToolMode mode() const;
-  void setMode(TerrainToolMode mode);
+  std::optional<TerrainToolMode> mode() const;
+  /** Selects a sculpting mode, or none to just select terrains. Selecting one leaves
+   * add mode. */
+  void setMode(std::optional<TerrainToolMode> mode);
+
+  /** Whether the tool sculpts, i.e. a sculpting mode is selected and terrains are not
+   * being created. */
+  bool sculpting() const;
 
   /** The mode actually applied, taking the Shift key into account: it swaps Raise
    * with Lower and Flatten with Smooth. */
-  TerrainToolMode effectiveMode(bool invert) const;
+  std::optional<TerrainToolMode> effectiveMode(bool invert) const;
 
   double radius() const;
   void setRadius(double radius);

@@ -28,6 +28,8 @@
 #include "ui/MapDocument.h"
 #include "ui/TerrainTool.h"
 
+#include <optional>
+
 namespace tb::ui
 {
 TerrainToolPage::TerrainToolPage(
@@ -54,10 +56,17 @@ void TerrainToolPage::createGui()
     return button;
   };
 
+  // Clicking the active mode toggle turns it off again, which leaves the tool doing
+  // nothing but picking up the terrain that is clicked.
+  const auto makeModeToggle = [&](const QString& label, const QString& toolTip) {
+    return makeToggle(
+      label, toolTip + tr("; click it again to turn it off and only select terrains"));
+  };
+
   m_addTerrain = makeToggle(
     tr("Create"),
     tr("While enabled, dragging out a box in a map view creates a new terrain of that "
-       "size; disable it to sculpt the terrain instead"));
+       "size; disable it to sculpt or select terrains instead"));
 
   m_cellSize = new QDoubleSpinBox{};
   m_cellSize->setRange(1.0, 1024.0);
@@ -79,17 +88,17 @@ void TerrainToolPage::createGui()
     tr("How much each application of the sculpting brush changes the terrain; the "
        "brush keeps being applied while the mouse is held down"));
 
-  m_raise = makeToggle(
+  m_raise = makeModeToggle(
     tr("Raise"), tr("Raise the terrain under the brush (hold Shift to lower)"));
-  m_lower = makeToggle(
+  m_lower = makeModeToggle(
     tr("Lower"), tr("Lower the terrain under the brush (hold Shift to raise)"));
-  m_flatten = makeToggle(
+  m_flatten = makeModeToggle(
     tr("Flatten"),
     tr("Flatten the terrain under the brush towards the height where you clicked "
        "(hold Shift to smooth)"));
-  m_smooth = makeToggle(
+  m_smooth = makeModeToggle(
     tr("Smooth"), tr("Even out the terrain under the brush (hold Shift to flatten)"));
-  m_texture = makeToggle(
+  m_texture = makeModeToggle(
     tr("Texture"),
     tr("Paint the material selected in the material browser onto the terrain cells "
        "under the brush"));
@@ -157,8 +166,10 @@ void TerrainToolPage::createGui()
     connect(button, &QPushButton::clicked, this, [this, mode]() {
       if (!m_updatingControls)
       {
-        // The modes are mutually exclusive, so re-selecting the active one keeps it.
-        m_tool.setMode(mode);
+        // The modes are mutually exclusive, and clicking the active one deselects it,
+        // which leaves the tool only selecting terrains.
+        m_tool.setMode(
+          m_tool.mode() == mode ? std::optional<TerrainToolMode>{} : std::optional{mode});
         updateControls();
       }
     });
@@ -240,15 +251,14 @@ void TerrainToolPage::updateControls()
   m_radius->setValue(m_tool.radius());
   m_strength->setValue(m_tool.strength());
 
-  // While add mode is on no sculpting mode is active, so none of the mode toggles are
-  // shown as selected; clicking one of them leaves add mode again.
-  const auto addMode = m_tool.addMode();
+  // With no mode toggle selected the tool just picks up the terrain that is clicked;
+  // selecting one leaves creation mode, and vice versa.
   const auto mode = m_tool.mode();
-  m_raise->setChecked(!addMode && mode == TerrainToolMode::Raise);
-  m_lower->setChecked(!addMode && mode == TerrainToolMode::Lower);
-  m_flatten->setChecked(!addMode && mode == TerrainToolMode::Flatten);
-  m_smooth->setChecked(!addMode && mode == TerrainToolMode::Smooth);
-  m_texture->setChecked(!addMode && mode == TerrainToolMode::Texture);
+  m_raise->setChecked(mode == TerrainToolMode::Raise);
+  m_lower->setChecked(mode == TerrainToolMode::Lower);
+  m_flatten->setChecked(mode == TerrainToolMode::Flatten);
+  m_smooth->setChecked(mode == TerrainToolMode::Smooth);
+  m_texture->setChecked(mode == TerrainToolMode::Texture);
 
   const auto hasTerrain = m_tool.hasTerrain();
   m_texScaleX->setEnabled(hasTerrain);

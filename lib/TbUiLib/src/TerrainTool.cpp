@@ -93,7 +93,8 @@ void TerrainTool::render(
   }
 
   // The sculpting brush: a circle of the current radius lying on the terrain surface.
-  if (m_brushPosition && !m_addMode)
+  // Without a sculpting mode the tool only selects terrains, so there is no brush.
+  if (m_brushPosition && sculpting())
   {
     renderService.setShowOccludedObjects();
     renderService.setForegroundColor(pref(Preferences::TerrainBrushColor));
@@ -169,40 +170,58 @@ void TerrainTool::setAddMode(const bool addMode)
   if (addMode != m_addMode)
   {
     m_addMode = addMode;
-    // While new terrains are being created, no sculpting mode is active.
+    // Creating and sculpting are never active at once, so turning creation on leaves
+    // whatever sculpting mode was selected.
+    if (m_addMode)
+    {
+      m_mode = std::nullopt;
+    }
     m_brushPosition = std::nullopt;
     refreshViews();
     terrainDidChangeNotifier();
   }
 }
 
-TerrainToolMode TerrainTool::mode() const
+std::optional<TerrainToolMode> TerrainTool::mode() const
 {
   return m_mode;
 }
 
-void TerrainTool::setMode(const TerrainToolMode mode)
+void TerrainTool::setMode(const std::optional<TerrainToolMode> mode)
 {
   // Picking a sculpting mode leaves add mode, so the two are never active at once.
-  const auto changed = mode != m_mode || m_addMode;
-  m_addMode = false;
+  const auto changed = mode != m_mode || (mode && m_addMode);
+  if (mode)
+  {
+    m_addMode = false;
+  }
   m_mode = mode;
 
   if (changed)
   {
+    if (!m_mode)
+    {
+      // Without a sculpting mode the tool only selects terrains, so there is no brush.
+      m_brushPosition = std::nullopt;
+    }
     refreshViews();
     terrainDidChangeNotifier();
   }
 }
 
-TerrainToolMode TerrainTool::effectiveMode(const bool invert) const
+bool TerrainTool::sculpting() const
 {
-  if (!invert)
+  return !m_addMode && m_mode.has_value();
+}
+
+std::optional<TerrainToolMode> TerrainTool::effectiveMode(const bool invert) const
+{
+  if (!invert || !m_mode)
   {
     return m_mode;
   }
 
-  switch (m_mode)
+  switch (*m_mode)
   {
   case TerrainToolMode::Raise:
     return TerrainToolMode::Lower;
@@ -450,7 +469,7 @@ void TerrainTool::setBrushPosition(std::optional<vm::vec3d> position)
 
 std::string TerrainTool::strokeCommandName() const
 {
-  switch (m_mode)
+  switch (m_mode.value_or(TerrainToolMode::Raise))
   {
   case TerrainToolMode::Flatten:
     return "Flatten Terrain";
@@ -523,12 +542,12 @@ std::vector<size_t> TerrainTool::cellsInRadius(const vm::vec3d& position) const
 
 bool TerrainTool::applyStroke(const vm::vec3d& position, const bool invert)
 {
-  if (!hasTerrain())
+  const auto mode = effectiveMode(invert);
+  if (!hasTerrain() || !mode)
   {
     return false;
   }
 
-  const auto mode = effectiveMode(invert);
   if (mode == TerrainToolMode::Texture)
   {
     // The painted material is the one selected in the material browser.
