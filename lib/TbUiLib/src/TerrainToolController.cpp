@@ -296,13 +296,30 @@ private:
     auto& tool = m_delegate->tool();
     if (
       tool.addMode() || !inputState.mouseButtonsPressed(MouseButtons::Left)
-      || !inputState.modifierKeysPressed(ModifierKeys::None))
+      || (!inputState.modifierKeysPressed(ModifierKeys::None) && !inputState.modifierKeysPressed(ModifierKeys::Shift)))
     {
       return false;
     }
 
-    // Clicking a terrain's geometry picks it up for editing.
-    return tool.selectTerrainAt(inputState.pickResult());
+    // Clicking another terrain's geometry picks it up for editing.
+    if (
+      inputState.modifierKeysPressed(ModifierKeys::None)
+      && tool.selectTerrainAt(inputState.pickResult()))
+    {
+      return true;
+    }
+
+    // Pressing and releasing the mouse in the same place never becomes a drag, so the
+    // brush is applied once here; otherwise clicking without moving would do nothing.
+    if (const auto position = tool.pickSurface(inputState.pickRay()))
+    {
+      tool.beginStroke();
+      tool.setBrushPosition(*position);
+      tool.applyStroke(*position, inputState.modifierKeysDown(ModifierKeys::Shift));
+      tool.endStroke();
+      return true;
+    }
+    return false;
   }
 
   std::unique_ptr<GestureTracker> acceptMouseDrag(const InputState& inputState) override
