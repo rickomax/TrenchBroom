@@ -42,15 +42,16 @@ namespace
 using ModeItem = std::pair<std::optional<TerrainToolMode>, QString>;
 
 /** The entries of the mode drop down, in the order they are shown. */
-const std::array<ModeItem, 6>& modeItems()
+const std::array<ModeItem, 7>& modeItems()
 {
-  static const auto items = std::array<ModeItem, 6>{
+  static const auto items = std::array<ModeItem, 7>{
     ModeItem{std::nullopt, QObject::tr("None")},
     ModeItem{TerrainToolMode::Raise, QObject::tr("Raise")},
     ModeItem{TerrainToolMode::Lower, QObject::tr("Lower")},
     ModeItem{TerrainToolMode::Flatten, QObject::tr("Flatten")},
     ModeItem{TerrainToolMode::Smooth, QObject::tr("Smooth")},
     ModeItem{TerrainToolMode::Texture, QObject::tr("Texture")},
+    ModeItem{TerrainToolMode::Scale, QObject::tr("Scale")},
   };
   return items;
 }
@@ -119,7 +120,9 @@ void TerrainToolPage::createGui()
        "brush, Flatten levels it towards the height where you clicked, Smooth evens it "
        "out, and Texture paints the material selected in the material browser onto the "
        "cells under the brush. Holding Shift swaps Raise with Lower and Flatten with "
-       "Smooth. With None selected, clicking a terrain picks it up for editing."));
+       "Smooth. Scale drags the handles of the terrain's bounding box: scaling it in X "
+       "or Y changes how many cells it has, and scaling it in Z scales its heights. "
+       "With None selected, clicking a terrain picks it up for editing."));
 
   m_texScaleX = new QDoubleSpinBox{};
   m_texScaleX->setRange(-64.0, 64.0);

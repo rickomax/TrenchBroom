@@ -113,6 +113,21 @@ vm::vec3d terrainVertexPosition(const Terrain& terrain, size_t column, size_t ro
 vm::bbox3d terrainBounds(const Terrain& terrain);
 
 /**
+ * Reshapes the terrain to fill the given bounds.
+ *
+ * The footprint keeps the terrain's cell size, so the number of columns and rows follows
+ * the new size rather than the cells being stretched, and the heights are resampled
+ * bilinearly from the old ones. Scaling in Z maps the old height range onto the new
+ * one. The terrain's shape is therefore stretched or squashed with the bounds instead of
+ * being cropped or reset.
+ *
+ * Returns false, leaving the terrain unchanged, if the bounds are too small for a single
+ * cell or thin enough to collapse the terrain, or would need more than TerrainMaxCells
+ * cells.
+ */
+bool scaleTerrain(Terrain& terrain, const vm::bbox3d& bounds);
+
+/**
  * Applies one step of the sculpting brush centered at the given world position.
  *
  * Vertices within the radius are moved with a smooth (cosine) falloff towards the

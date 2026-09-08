@@ -96,6 +96,34 @@ VertexRange vertexRangeInRadius(
       terrain.rows)};
 }
 
+/**
+ * The height of the terrain's surface at fractional grid coordinates, interpolated
+ * bilinearly from the four surrounding vertices. Used to resample the height field when
+ * the terrain is scaled.
+ */
+double sampleHeight(const Terrain& terrain, const double column, const double row)
+{
+  const auto lower = [](const double coordinate, const size_t count) {
+    const auto raw = std::llround(std::floor(coordinate));
+    return size_t(vm::clamp(raw, 0ll, static_cast<long long>(count) - 1));
+  };
+
+  const auto column0 = lower(column, terrain.columns + 1);
+  const auto row0 = lower(row, terrain.rows + 1);
+  const auto column1 = column0 + 1;
+  const auto row1 = row0 + 1;
+
+  const auto u = vm::clamp(column - double(column0), 0.0, 1.0);
+  const auto v = vm::clamp(row - double(row0), 0.0, 1.0);
+
+  const auto h00 = terrain.heights[terrainVertexIndex(terrain, column0, row0)];
+  const auto h10 = terrain.heights[terrainVertexIndex(terrain, column1, row0)];
+  const auto h01 = terrain.heights[terrainVertexIndex(terrain, column0, row1)];
+  const auto h11 = terrain.heights[terrainVertexIndex(terrain, column1, row1)];
+
+  return (h00 * (1.0 - u) + h10 * u) * (1.0 - v) + (h01 * (1.0 - u) + h11 * u) * v;
+}
+
 /** The average height of a vertex's existing neighbours, used by the smooth brush. */
 double neighbourAverage(
   const Terrain& terrain,
@@ -253,6 +281,74 @@ vm::bbox3d terrainBounds(const Terrain& terrain)
       terrain.origin.x() + double(terrain.columns) * terrain.cellSize,
       terrain.origin.y() + double(terrain.rows) * terrain.cellSize,
       maxZ}};
+}
+
+bool scaleTerrain(Terrain& terrain, const vm::bbox3d& bounds)
+{
+  if (!isValidTerrain(terrain))
+  {
+    return false;
+  }
+
+  // The cell size is kept, so scaling the footprint changes the terrain's resolution
+  // rather than the size of its cells.
+  const auto size = bounds.size();
+  const auto columns = size_t(std::llround(size.x() / terrain.cellSize));
+  const auto rows = size_t(std::llround(size.y() / terrain.cellSize));
+  if (
+    columns < 1 || rows < 1 || columns * rows > TerrainMaxCells
+    || size.z() < TerrainMinThickness)
+  {
+    return false;
+  }
+
+  // Heights are absolute, so scaling in Z means mapping the old height range onto the
+  // new one. Sculpting keeps every vertex at least TerrainMinThickness above the base,
+  // so the old range is never empty, but a terrain read from a map file might be.
+  const auto oldBounds = terrainBounds(terrain);
+  const auto oldRangeZ = oldBounds.max.z() - oldBounds.min.z();
+  const auto scaleZ = oldRangeZ > 0.0 ? size.z() / oldRangeZ : 0.0;
+  const auto minHeight = bounds.min.z() + TerrainMinThickness;
+
+  auto heights = std::vector<double>((columns + 1) * (rows + 1));
+  for (size_t row = 0; row <= rows; ++row)
+  {
+    const auto sourceRow = double(row) / double(rows) * double(terrain.rows);
+    for (size_t column = 0; column <= columns; ++column)
+    {
+      const auto sourceColumn =
+        double(column) / double(columns) * double(terrain.columns);
+      const auto height = sampleHeight(terrain, sourceColumn, sourceRow);
+      const auto scaled = scaleZ > 0.0
+                            ? bounds.min.z() + (height - oldBounds.min.z()) * scaleZ
+                            : bounds.max.z();
+      heights[row * (columns + 1) + column] = vm::max(scaled, minHeight);
+    }
+  }
+
+  // Materials cannot be interpolated, so every new cell takes the material of the old
+  // cell that covers the same part of the footprint.
+  auto materials = std::vector<std::string>(columns * rows);
+  for (size_t row = 0; row < rows; ++row)
+  {
+    const auto sourceRow = vm::min(
+      terrain.rows - 1, size_t(double(row) / double(rows) * double(terrain.rows)));
+    for (size_t column = 0; column < columns; ++column)
+    {
+      const auto sourceColumn = vm::min(
+        terrain.columns - 1,
+        size_t(double(column) / double(columns) * double(terrain.columns)));
+      materials[row * columns + column] =
+        terrain.materials[sourceRow * terrain.columns + sourceColumn];
+    }
+  }
+
+  terrain.origin = vm::vec3d{bounds.min.x(), bounds.min.y(), bounds.min.z()};
+  terrain.columns = columns;
+  terrain.rows = rows;
+  terrain.heights = std::move(heights);
+  terrain.materials = std::move(materials);
+  return true;
 }
 
 bool sculptTerrain(

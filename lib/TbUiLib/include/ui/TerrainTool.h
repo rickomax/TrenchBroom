@@ -64,6 +64,8 @@ enum class TerrainToolMode
   Flatten,
   Smooth,
   Texture,
+  /** Scales the terrain's bounding box, like the scale tool does for brushes. */
+  Scale,
 };
 
 /**
@@ -109,6 +111,10 @@ private:
    * over it; drawn as a circle of the current radius. */
   std::optional<vm::vec3d> m_brushPosition;
 
+  /** The bounds a running scale drag would give the terrain. Only the box is drawn
+   * while dragging; the terrain is resampled once the drag ends. */
+  std::optional<vm::bbox3d> m_scalePreview;
+
   /** The terrain as it was before the current stroke started, so that the whole
    * stroke can be undone in one step and cancelled cleanly. */
   std::optional<mdl::Terrain> m_strokeOriginal;
@@ -145,9 +151,12 @@ public: // modes and settings
    * add mode. */
   void setMode(std::optional<TerrainToolMode> mode);
 
-  /** Whether the tool sculpts, i.e. a sculpting mode is selected and terrains are not
-   * being created. */
+  /** Whether the sculpting brush applies, i.e. a brush mode is selected and terrains
+   * are neither being created nor scaled. */
   bool sculpting() const;
+
+  /** Whether there is a terrain whose bounding box can be scaled. */
+  bool scaling() const;
 
   /** The mode actually applied, taking the Shift key into account: it swaps Raise
    * with Lower and Flatten with Smooth. */
@@ -199,6 +208,17 @@ public: // terrain management
    * removes the terrain, so the geometry can be edited by hand.
    */
   void breakTerrain();
+
+public: // scaling
+  /** The bounds a running scale drag would give the terrain, drawn as a preview. */
+  const std::optional<vm::bbox3d>& scalePreview() const;
+  void setScalePreview(std::optional<vm::bbox3d> bounds);
+
+  /**
+   * Resamples the terrain to fill the given bounds and commits it as one undoable step.
+   * Returns whether the bounds were usable.
+   */
+  bool applyScale(const vm::bbox3d& bounds);
 
 public: // the sculpting brush
   const std::optional<vm::vec3d>& brushPosition() const;

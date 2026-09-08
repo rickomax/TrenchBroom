@@ -180,6 +180,87 @@ TEST_CASE("Terrain")
     CHECK(terrainCellMaterial(terrain, 0, 0) == "some_material");
   }
 
+  SECTION("scaleTerrain")
+  {
+    SECTION("scaling in XY changes the resolution and stretches the shape")
+    {
+      auto terrain = makeTerrain(4, 4);
+      // A ramp along X, so the resampled heights can be checked against it.
+      for (size_t row = 0; row <= terrain.rows; ++row)
+      {
+        for (size_t column = 0; column <= terrain.columns; ++column)
+        {
+          terrain.heights[terrainVertexIndex(terrain, column, row)] =
+            32.0 + double(column) * 8.0;
+        }
+      }
+
+      REQUIRE(
+        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{256, 128, 64}}));
+
+      // The cell size is kept, so twice the width means twice the columns.
+      CHECK(terrain.cellSize == vm::approx{32.0});
+      CHECK(terrain.columns == 8);
+      CHECK(terrain.rows == 4);
+      CHECK(isValidTerrain(terrain));
+
+      // The ramp is stretched across the wider footprint rather than repeated or
+      // cropped: its ends keep their heights and the new vertices in between are
+      // interpolated. The height range already matched the new bounds, so Z is
+      // unchanged.
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 0, 0)] == vm::approx{32.0});
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 1, 0)] == vm::approx{36.0});
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 8, 0)] == vm::approx{64.0});
+      CHECK(terrainBounds(terrain).max == vm::approx{vm::vec3d{256, 128, 64}});
+    }
+
+    SECTION("scaling in Z scales the height data")
+    {
+      auto terrain = makeTerrain(4, 4);
+      terrain.heights[terrainVertexIndex(terrain, 2, 2)] = 64.0;
+
+      // The old height range is [0, 64] and the new one is [0, 128], so every height
+      // above the base is doubled.
+      REQUIRE(
+        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{128, 128, 128}}));
+
+      CHECK(terrain.columns == 4);
+      CHECK(terrain.rows == 4);
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 2, 2)] == vm::approx{128.0});
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 0, 0)] == vm::approx{64.0});
+    }
+
+    SECTION("materials follow the cells they covered")
+    {
+      auto terrain = makeTerrain(4, 4);
+      REQUIRE(
+        paintTerrain(terrain, terrainVertexPosition(terrain, 0, 0), 40.0, "painted"));
+      REQUIRE(terrainCellMaterial(terrain, 0, 0) == "painted");
+
+      REQUIRE(
+        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{256, 256, 32}}));
+
+      // The painted cell now covers the first two cells along each axis.
+      CHECK(terrainCellMaterial(terrain, 0, 0) == "painted");
+      CHECK(terrainCellMaterial(terrain, 1, 1) == "painted");
+      CHECK(terrainCellMaterial(terrain, 7, 7) == "some_material");
+    }
+
+    SECTION("rejects bounds that would collapse or oversize the terrain")
+    {
+      auto terrain = makeTerrain(4, 4);
+      const auto original = terrain;
+
+      CHECK(!scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{8, 8, 32}}));
+      CHECK(
+        !scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{128, 128, 0}}));
+      CHECK(!scaleTerrain(
+        terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{8192, 8192, 32}}));
+
+      CHECK(terrain == original);
+    }
+  }
+
   SECTION("pickTerrain finds the surface under a ray")
   {
     const auto terrain = makeTerrain();
