@@ -1537,6 +1537,21 @@ void ActionManager::createToolsMenu()
     std::filesystem::path{"SplineTool.svg"},
   }));
   toolsMenu.addItem(addAction(Action{
+    "Menu/Edit/Tools/Terrain Tool",
+    QObject::tr("Terrain Tool"),
+    ActionContext::Any,
+    QKeySequence{Qt::Key_U},
+    [](auto& context) { context.mapWindow().toolBox().toggleTerrainTool(); },
+    [](const auto& context) {
+      return context.hasDocument()
+             && context.mapWindow().toolBox().canToggleTerrainTool();
+    },
+    [](const auto& context) {
+      return context.hasDocument() && context.mapWindow().toolBox().terrainToolActive();
+    },
+    std::filesystem::path{"TerrainTool.svg"},
+  }));
+  toolsMenu.addItem(addAction(Action{
     "Controls/Map view/Deactivate current tool",
     QObject::tr("Deactivate Current Tool"),
     ActionContext::Any,
@@ -2038,6 +2053,7 @@ void ActionManager::createToolbar()
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Face Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Control Point Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Spline Tool"));
+  m_toolBar.addItem(existingAction("Menu/Edit/Tools/Terrain Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Rotate Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Scale Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Shear Tool"));

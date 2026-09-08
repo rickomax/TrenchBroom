@@ -29,6 +29,7 @@
 #include "mdl/Node.h"
 #include "mdl/PatchNode.h"
 #include "mdl/SplineEntity.h"
+#include "mdl/TerrainEntity.h"
 #include "mdl/WorldNode.h"
 
 #include "kd/contracts.h"
@@ -361,7 +362,8 @@ bool EditorContext::selectable(const BrushNode& brushNode) const
   // and editing them individually would be undone by the next regeneration, so they
   // cannot be selected. Use the spline tool to edit the spline instead.
   if (const auto* entityNode = brushNode.entity();
-      entityNode && isSplineEntity(entityNode->entity()))
+      entityNode
+      && (isSplineEntity(entityNode->entity()) || isTerrainEntity(entityNode->entity())))
   {
     return false;
   }
@@ -372,7 +374,8 @@ bool EditorContext::selectable(const BrushNode& brushNode) const
 bool EditorContext::selectable(const BrushNode& brushNode, const BrushFace& face) const
 {
   if (const auto* entityNode = brushNode.entity();
-      entityNode && isSplineEntity(entityNode->entity()))
+      entityNode
+      && (isSplineEntity(entityNode->entity()) || isTerrainEntity(entityNode->entity())))
   {
     return false;
   }

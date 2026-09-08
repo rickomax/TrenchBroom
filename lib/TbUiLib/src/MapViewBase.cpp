@@ -923,6 +923,7 @@ ActionContext::Type MapViewBase::actionContext() const
     : m_toolBox.anyVertexToolActive()    ? ActionContext::AnyVertexTool
     : m_toolBox.controlPointToolActive() ? ActionContext::ControlPointTool
     : m_toolBox.splineToolActive()       ? ActionContext::SplineTool
+    : m_toolBox.terrainToolActive()      ? ActionContext::TerrainTool
     : m_toolBox.rotateToolActive()       ? ActionContext::RotateTool
     : m_toolBox.scaleToolActive()        ? ActionContext::ScaleTool
     : m_toolBox.shearToolActive()        ? ActionContext::ShearTool

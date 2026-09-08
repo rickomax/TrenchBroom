@@ -164,6 +164,13 @@ inline auto SplineLineColor =
   Preference<Color>{"render/Colors/Spline line", RgbF{1.0f, 0.5f, 0.0f}};
 inline auto SplineLockedHandleColor =
   Preference<Color>{"render/Colors/Spline locked handle", RgbF{0.6f, 0.6f, 0.65f}};
+inline auto TerrainBoundsColor =
+  Preference<Color>{"render/Colors/Terrain bounds", RgbF{0.3f, 0.6f, 1.0f}};
+inline auto TerrainBrushColor =
+  Preference<Color>{"render/Colors/Terrain brush", RgbF{0.2f, 0.5f, 1.0f}};
+inline auto TerrainBrushFillColor =
+  Preference<Color>{"render/Colors/Terrain brush fill", RgbaF{0.2f, 0.5f, 1.0f, 0.25f}};
+
 inline auto SplineTangentHandleColor =
   Preference<Color>{"render/Colors/Spline tangent handle", RgbF{0.0f, 0.85f, 0.0f}};
 inline auto SplineInactiveTangentHandleColor = Preference<Color>{

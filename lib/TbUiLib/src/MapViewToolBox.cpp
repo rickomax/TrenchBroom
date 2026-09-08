@@ -25,7 +25,6 @@
 #include "ui/AssembleBrushTool.h"
 #include "ui/ClipTool.h"
 #include "ui/ControlPointTool.h"
-#include "ui/SplineTool.h"
 #include "ui/CreateEntityTool.h"
 #include "ui/DrawShapeTool.h"
 #include "ui/EdgeTool.h"
@@ -36,6 +35,8 @@
 #include "ui/RotateTool.h"
 #include "ui/ScaleTool.h"
 #include "ui/ShearTool.h"
+#include "ui/SplineTool.h"
+#include "ui/TerrainTool.h"
 #include "ui/VertexTool.h"
 
 #include "kd/contracts.h"
@@ -185,6 +186,16 @@ const SplineTool& MapViewToolBox::splineTool() const
 SplineTool& MapViewToolBox::splineTool()
 {
   return KDL_CONST_OVERLOAD(splineTool());
+}
+
+const TerrainTool& MapViewToolBox::terrainTool() const
+{
+  return *m_terrainTool;
+}
+
+TerrainTool& MapViewToolBox::terrainTool()
+{
+  return KDL_CONST_OVERLOAD(terrainTool());
 }
 
 bool MapViewToolBox::canToggleAssembleBrushTool() const
@@ -424,6 +435,24 @@ bool MapViewToolBox::splineToolActive() const
   return m_splineTool->active();
 }
 
+bool MapViewToolBox::canToggleTerrainTool() const
+{
+  return true;
+}
+
+void MapViewToolBox::toggleTerrainTool()
+{
+  if (canToggleTerrainTool())
+  {
+    toggleTool(terrainTool());
+  }
+}
+
+bool MapViewToolBox::terrainToolActive() const
+{
+  return m_terrainTool->active();
+}
+
 bool MapViewToolBox::anyModalToolActive() const
 {
   return rotateToolActive() || scaleToolActive() || shearToolActive()
@@ -475,6 +504,7 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   m_faceTool = std::make_unique<FaceTool>(m_document);
   m_controlPointTool = std::make_unique<ControlPointTool>(m_document);
   m_splineTool = std::make_unique<SplineTool>(m_document);
+  m_terrainTool = std::make_unique<TerrainTool>(m_document);
 
   addExclusiveToolGroup(
     assembleBrushTool(),
@@ -485,7 +515,8 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
     edgeTool(),
     faceTool(),
     clipTool(),
-    splineTool());
+    splineTool(),
+    terrainTool());
 
   addExclusiveToolGroup(
     assembleBrushTool(),
@@ -494,7 +525,8 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
     faceTool(),
     controlPointTool(),
     clipTool(),
-    splineTool());
+    splineTool(),
+    terrainTool());
 
   suppressWhileActive(
     assembleBrushTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
@@ -508,6 +540,7 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
     controlPointTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
   suppressWhileActive(clipTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
   suppressWhileActive(splineTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
+  suppressWhileActive(terrainTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
 
   registerTool(moveObjectsTool(), bookCtrl);
   registerTool(rotateTool(), bookCtrl);
@@ -521,6 +554,7 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   registerTool(faceTool(), bookCtrl);
   registerTool(controlPointTool(), bookCtrl);
   registerTool(splineTool(), bookCtrl);
+  registerTool(terrainTool(), bookCtrl);
   registerTool(createEntityTool(), bookCtrl);
   registerTool(drawShapeTool(), bookCtrl);
 
@@ -612,6 +646,10 @@ void MapViewToolBox::updateToolPage()
   else if (splineToolActive())
   {
     splineTool().showPage();
+  }
+  else if (terrainToolActive())
+  {
+    terrainTool().showPage();
   }
   else
   {
