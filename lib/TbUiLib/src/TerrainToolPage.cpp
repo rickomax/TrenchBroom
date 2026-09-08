@@ -107,6 +107,10 @@ void TerrainToolPage::createGui()
     tr("Vertical texture scale of the whole terrain; changing it rescales all of the "
        "terrain's texture coordinates"));
 
+  m_removeButton = new QPushButton{tr("Remove")};
+  m_removeButton->setFocusPolicy(Qt::NoFocus);
+  m_removeButton->setToolTip(tr("Delete the current terrain and its brushes"));
+
   m_breakButton = new QPushButton{tr("Break")};
   m_breakButton->setFocusPolicy(Qt::NoFocus);
   m_breakButton->setToolTip(
@@ -135,6 +139,7 @@ void TerrainToolPage::createGui()
   layout->addWidget(new QLabel{tr("Y:")});
   layout->addWidget(m_texScaleY);
   layout->addSpacing(12);
+  layout->addWidget(m_removeButton);
   layout->addWidget(m_breakButton);
   layout->addStretch();
 
@@ -212,6 +217,8 @@ void TerrainToolPage::createGui()
     [applyTexScale](double) { applyTexScale(); });
 
   connect(
+    m_removeButton, &QPushButton::clicked, this, [this]() { m_tool.removeTerrain(); });
+  connect(
     m_breakButton, &QPushButton::clicked, this, [this]() { m_tool.breakTerrain(); });
 }
 
@@ -232,12 +239,15 @@ void TerrainToolPage::updateControls()
   m_radius->setValue(m_tool.radius());
   m_strength->setValue(m_tool.strength());
 
+  // While add mode is on no sculpting mode is active, so none of the mode toggles are
+  // shown as selected; clicking one of them leaves add mode again.
+  const auto addMode = m_tool.addMode();
   const auto mode = m_tool.mode();
-  m_raise->setChecked(mode == TerrainToolMode::Raise);
-  m_lower->setChecked(mode == TerrainToolMode::Lower);
-  m_flatten->setChecked(mode == TerrainToolMode::Flatten);
-  m_smooth->setChecked(mode == TerrainToolMode::Smooth);
-  m_texture->setChecked(mode == TerrainToolMode::Texture);
+  m_raise->setChecked(!addMode && mode == TerrainToolMode::Raise);
+  m_lower->setChecked(!addMode && mode == TerrainToolMode::Lower);
+  m_flatten->setChecked(!addMode && mode == TerrainToolMode::Flatten);
+  m_smooth->setChecked(!addMode && mode == TerrainToolMode::Smooth);
+  m_texture->setChecked(!addMode && mode == TerrainToolMode::Texture);
 
   const auto hasTerrain = m_tool.hasTerrain();
   m_texScaleX->setEnabled(hasTerrain);
@@ -248,6 +258,7 @@ void TerrainToolPage::updateControls()
     m_texScaleY->setValue(double(m_tool.texScaleY()));
   }
 
+  m_removeButton->setEnabled(m_tool.canRemoveTerrain());
   m_breakButton->setEnabled(m_tool.canBreakTerrain());
 
   m_updatingControls = false;

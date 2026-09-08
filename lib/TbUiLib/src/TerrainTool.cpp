@@ -104,6 +104,59 @@ void TerrainTool::render(
     renderService.renderFilledCircle(
       vm::vec3f{*m_brushPosition}, vm::axis::z, 32, float(m_radius));
   }
+
+  renderStrokePreview(renderContext, renderBatch);
+}
+
+void TerrainTool::renderStrokePreview(
+  render::RenderContext& renderContext, render::RenderBatch& renderBatch) const
+{
+  // A stroke only edits the height field, because rebuilding the brushes of every cell
+  // under the sculpting brush costs far too much to do on every mouse movement. So the
+  // new shape of the swept cells is drawn on top of the stale geometry until the stroke
+  // ends and the brushes are built.
+  if (!strokeActive() || m_strokeCells.empty() || !hasTerrain())
+  {
+    return;
+  }
+
+  auto renderService = render::RenderService{renderContext, renderBatch};
+  renderService.setShowOccludedObjects();
+  renderService.setShowBackfaces();
+
+  auto edges = std::vector<vm::vec3f>{};
+  edges.reserve(m_strokeCells.size() * 8);
+
+  renderService.setForegroundColor(pref(Preferences::TerrainPreviewFillColor));
+  for (const auto cell : m_strokeCells)
+  {
+    const auto column = cell % m_terrain.columns;
+    const auto row = cell / m_terrain.columns;
+
+    const auto v00 = vm::vec3f{mdl::terrainVertexPosition(m_terrain, column, row)};
+    const auto v10 = vm::vec3f{mdl::terrainVertexPosition(m_terrain, column + 1, row)};
+    const auto v11 =
+      vm::vec3f{mdl::terrainVertexPosition(m_terrain, column + 1, row + 1)};
+    const auto v01 = vm::vec3f{mdl::terrainVertexPosition(m_terrain, column, row + 1)};
+
+    // The two triangles match the prisms the cell is generated from, so the preview
+    // shows exactly the surface the stroke will produce.
+    renderService.renderFilledPolygon({v00, v10, v11});
+    renderService.renderFilledPolygon({v00, v11, v01});
+
+    edges.push_back(v00);
+    edges.push_back(v10);
+    edges.push_back(v10);
+    edges.push_back(v11);
+    edges.push_back(v11);
+    edges.push_back(v01);
+    edges.push_back(v01);
+    edges.push_back(v00);
+  }
+
+  renderService.setForegroundColor(pref(Preferences::TerrainPreviewColor));
+  renderService.setLineWidth(1.0f);
+  renderService.renderLines(edges);
 }
 
 bool TerrainTool::addMode() const
@@ -116,6 +169,7 @@ void TerrainTool::setAddMode(const bool addMode)
   if (addMode != m_addMode)
   {
     m_addMode = addMode;
+    // While new terrains are being created, no sculpting mode is active.
     m_brushPosition = std::nullopt;
     refreshViews();
     terrainDidChangeNotifier();
@@ -129,9 +183,13 @@ TerrainToolMode TerrainTool::mode() const
 
 void TerrainTool::setMode(const TerrainToolMode mode)
 {
-  if (mode != m_mode)
+  // Picking a sculpting mode leaves add mode, so the two are never active at once.
+  const auto changed = mode != m_mode || m_addMode;
+  m_addMode = false;
+  m_mode = mode;
+
+  if (changed)
   {
-    m_mode = mode;
     refreshViews();
     terrainDidChangeNotifier();
   }
@@ -285,6 +343,38 @@ std::optional<vm::vec3d> TerrainTool::pickSurface(const vm::ray3d& ray) const
   return hasTerrain() ? mdl::pickTerrain(m_terrain, ray) : std::nullopt;
 }
 
+bool TerrainTool::canRemoveTerrain() const
+{
+  return m_terrainNode != nullptr;
+}
+
+void TerrainTool::removeTerrain()
+{
+  if (!canRemoveTerrain())
+  {
+    return;
+  }
+
+  auto& map = m_document.map();
+
+  {
+    const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
+    auto transaction = mdl::Transaction{map, "Remove Terrain"};
+    removeNodes(map, {m_terrainNode});
+    transaction.commit();
+  }
+
+  m_terrainNode = nullptr;
+  m_terrain = mdl::Terrain{};
+  m_strokeOriginal = std::nullopt;
+  m_strokeCells.clear();
+  m_brushPosition = std::nullopt;
+
+  refreshOtherTerrains();
+  refreshViews();
+  terrainDidChangeNotifier();
+}
+
 bool TerrainTool::canBreakTerrain() const
 {
   return m_terrainNode != nullptr && !m_terrainNode->children().empty();
@@ -376,17 +466,7 @@ void TerrainTool::beginStroke()
   }
 
   m_strokeOriginal = m_terrain;
-  m_strokeBrushes.clear();
-
-  // The stroke runs inside one long running transaction: the terrain is updated live
-  // while the mouse is dragged, and the whole stroke becomes a single undoable step.
-  if (canUpdateCellsInPlace())
-  {
-    const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
-    m_document.map().startTransaction(
-      strokeCommandName(), mdl::TransactionScope::LongRunning);
-    m_strokeTransaction = true;
-  }
+  m_strokeCells.clear();
 }
 
 std::vector<size_t> TerrainTool::cellsInRadius(const vm::vec3d& position) const
@@ -427,71 +507,6 @@ std::vector<size_t> TerrainTool::cellsInRadius(const vm::vec3d& position) const
   return cells;
 }
 
-bool TerrainTool::regenerateCells(const std::vector<size_t>& cells)
-{
-  auto& map = m_document.map();
-  for (const auto cell : cells)
-  {
-    auto brushes = mdl::createTerrainCellBrushes(
-      map.worldNode().mapFormat(),
-      map.worldBounds(),
-      m_terrain,
-      cell % m_terrain.columns,
-      cell / m_terrain.columns);
-    if (brushes.is_error())
-    {
-      return false;
-    }
-
-    auto cellBrushes = std::move(brushes) | kdl::value();
-    if (cellBrushes.size() != mdl::TerrainBrushesPerCell)
-    {
-      return false;
-    }
-    m_strokeBrushes[cell] = std::move(cellBrushes);
-  }
-  return true;
-}
-
-bool TerrainTool::applyStrokeToDocument()
-{
-  if (!m_strokeTransaction || !canUpdateCellsInPlace())
-  {
-    return false;
-  }
-
-  auto& map = m_document.map();
-  const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
-
-  // Roll back to the state before the stroke, then swap in the cached brushes of every
-  // cell the stroke has touched so far. Rolling back keeps the transaction from
-  // accumulating one set of changes per mouse movement.
-  map.rollbackTransaction();
-
-  auto nodesToSwap = std::vector<std::pair<mdl::Node*, mdl::NodeContents>>{};
-  nodesToSwap.reserve(m_strokeBrushes.size() * mdl::TerrainBrushesPerCell + 1);
-
-  const auto& children = m_terrainNode->children();
-  for (const auto& [cell, brushes] : m_strokeBrushes)
-  {
-    for (size_t i = 0; i < mdl::TerrainBrushesPerCell; ++i)
-    {
-      auto* node = children[cell * mdl::TerrainBrushesPerCell + i];
-      if (!dynamic_cast<mdl::BrushNode*>(node))
-      {
-        return false;
-      }
-      nodesToSwap.emplace_back(node, mdl::NodeContents{brushes[i]});
-    }
-  }
-
-  nodesToSwap.emplace_back(
-    m_terrainNode,
-    mdl::NodeContents{mdl::writeTerrainEntity(m_terrainNode->entity(), m_terrain)});
-
-  return updateNodeContents(map, strokeCommandName(), std::move(nodesToSwap));
-}
-
 bool TerrainTool::applyStroke(const vm::vec3d& position, const bool invert)
 {
   if (!hasTerrain())
@@ -523,20 +538,72 @@ bool TerrainTool::applyStroke(const vm::vec3d& position, const bool invert)
     }
   }
 
-  // Show the change immediately: rebuild only the cells under the brush and replay the
-  // stroke, so the cost depends on the brush radius rather than the terrain size.
-  if (m_strokeTransaction)
+  // Building a brush costs roughly 45us, far too much to redo for every cell under the
+  // brush on every mouse movement. So a stroke only edits the height field here and the
+  // result is drawn as a preview (see render); the brushes of the cells the stroke swept
+  // are built once when it ends.
+  for (const auto cell : cellsInRadius(position))
   {
-    if (!regenerateCells(cellsInRadius(position)) || !applyStrokeToDocument())
-    {
-      m_strokeTransaction = false;
-      const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
-      m_document.map().cancelTransaction();
-    }
+    m_strokeCells.insert(cell);
   }
 
   refreshViews();
   return true;
+}
+
+bool TerrainTool::commitStrokeCells()
+{
+  if (!canUpdateCellsInPlace() || m_strokeCells.empty())
+  {
+    return false;
+  }
+
+  auto& map = m_document.map();
+  const auto& children = m_terrainNode->children();
+
+  // Only the cells the stroke swept are rebuilt, and their brushes are swapped into
+  // the existing nodes, so the cost depends on the stroke rather than the terrain.
+  auto nodesToSwap = std::vector<std::pair<mdl::Node*, mdl::NodeContents>>{};
+  nodesToSwap.reserve(m_strokeCells.size() * mdl::TerrainBrushesPerCell + 1);
+
+  for (const auto cell : m_strokeCells)
+  {
+    auto cellBrushes = mdl::createTerrainCellBrushes(
+      map.worldNode().mapFormat(),
+      map.worldBounds(),
+      m_terrain,
+      cell % m_terrain.columns,
+      cell / m_terrain.columns);
+    if (cellBrushes.is_error())
+    {
+      return false;
+    }
+
+    auto brushes = std::move(cellBrushes) | kdl::value();
+    if (brushes.size() != mdl::TerrainBrushesPerCell)
+    {
+      return false;
+    }
+
+    for (size_t i = 0; i < mdl::TerrainBrushesPerCell; ++i)
+    {
+      auto* node = children[cell * mdl::TerrainBrushesPerCell + i];
+      if (!dynamic_cast<mdl::BrushNode*>(node))
+      {
+        return false;
+      }
+      nodesToSwap.emplace_back(node, mdl::NodeContents{std::move(brushes[i])});
+    }
+  }
+
+  // The height field itself lives in the entity's properties, so it is updated in the
+  // same transaction.
+  nodesToSwap.emplace_back(
+    m_terrainNode,
+    mdl::NodeContents{mdl::writeTerrainEntity(m_terrainNode->entity(), m_terrain)});
+
+  const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
+  return updateNodeContents(map, strokeCommandName(), std::move(nodesToSwap));
 }
 
 void TerrainTool::endStroke()
@@ -548,50 +615,23 @@ void TerrainTool::endStroke()
 
   const auto original = std::move(*m_strokeOriginal);
   m_strokeOriginal = std::nullopt;
-  m_strokeBrushes.clear();
 
   const auto changed =
     original.heights != m_terrain.heights || original.materials != m_terrain.materials;
 
-  if (m_strokeTransaction)
-  {
-    m_strokeTransaction = false;
-    const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
-    auto& map = m_document.map();
-    if (changed)
-    {
-      // The live updates already put the final state into the transaction, so this
-      // just turns them into one undoable step.
-      map.commitTransaction();
-    }
-    else
-    {
-      map.cancelTransaction();
-    }
-
-    refreshViews();
-    terrainDidChangeNotifier();
-    return;
-  }
-
-  // No live transaction was running (e.g. the terrain's brushes could not be swapped
-  // in place), so commit the result in one go.
-  if (changed)
+  if (changed && !commitStrokeCells())
   {
     commitTerrain(strokeCommandName());
   }
+
+  m_strokeCells.clear();
+  refreshViews();
+  terrainDidChangeNotifier();
 }
 
 void TerrainTool::cancelStroke()
 {
-  if (m_strokeTransaction)
-  {
-    m_strokeTransaction = false;
-    const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
-    m_document.map().cancelTransaction();
-  }
-
-  m_strokeBrushes.clear();
+  m_strokeCells.clear();
 
   if (m_strokeOriginal)
   {

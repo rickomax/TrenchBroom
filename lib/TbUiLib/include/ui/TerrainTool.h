@@ -21,7 +21,6 @@
 
 #include "Notifier.h"
 #include "NotifierConnection.h"
-#include "mdl/Brush.h"
 #include "mdl/Terrain.h"
 #include "mdl/TerrainEntity.h"
 #include "ui/Tool.h"
@@ -30,8 +29,8 @@
 #include "vm/ray.h"
 #include "vm/vec.h"
 
-#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -71,9 +70,11 @@ enum class TerrainToolMode
  *
  * A terrain is created by dragging out a box, and is then sculpted with a circular
  * brush: raising, lowering, flattening and smoothing its vertices, or painting the
- * materials of its cells. The solid geometry is regenerated as tetrahedra after every
- * change (see mdl::createTerrainBrushes) and kept as the children of the terrain's
- * entity, so maps stay usable in editors without terrain support.
+ * materials of its cells. The solid geometry is generated as triangular prisms (see
+ * mdl::createTerrainBrushes) and kept as the children of the terrain's entity, so maps
+ * stay usable in editors without terrain support. Building a brush is expensive, so a
+ * stroke only edits the height field and draws the result as a preview; the brushes of
+ * the cells it swept are rebuilt once when it ends.
  *
  * The terrain itself is persisted in the entity's properties, so it remains editable
  * across sessions; every change goes through a transaction and is undoable.
@@ -110,15 +111,9 @@ private:
    * stroke can be undone in one step and cancelled cleanly. */
   std::optional<mdl::Terrain> m_strokeOriginal;
 
-  /** Whether a long running transaction is open for the current stroke. The terrain
-   * is updated live inside it, and it becomes a single undoable step when the stroke
-   * ends. */
-  bool m_strokeTransaction = false;
-
-  /** The brushes of every cell the current stroke has touched, kept so that replaying
-   * the stroke after a rollback does not have to rebuild cells that have not changed
-   * since they were last generated. */
-  std::map<size_t, std::vector<mdl::Brush>> m_strokeBrushes;
+  /** The cells the current stroke has touched. Their brushes are built once when the
+   * stroke ends; until then the change is only drawn as a preview. */
+  std::set<size_t> m_strokeCells;
 
   bool m_ignoreNotifications = false;
 
@@ -131,6 +126,12 @@ public:
   const mdl::Grid& grid() const;
 
   void render(
+    render::RenderContext& renderContext, render::RenderBatch& renderBatch) const;
+
+private:
+  /** Draws the surface the current stroke has produced so far, which the generated
+   * brushes do not show yet. */
+  void renderStrokePreview(
     render::RenderContext& renderContext, render::RenderBatch& renderBatch) const;
 
 public: // modes and settings
@@ -174,6 +175,11 @@ public: // terrain management
   /** The point where the given ray enters the current terrain's surface. */
   std::optional<vm::vec3d> pickSurface(const vm::ray3d& ray) const;
 
+  /** Whether there is a terrain that can be removed. */
+  bool canRemoveTerrain() const;
+  /** Deletes the current terrain and its generated brushes. */
+  void removeTerrain();
+
   /** Whether the terrain has generated brushes that can be broken out. */
   bool canBreakTerrain() const;
   /**
@@ -214,16 +220,12 @@ private:
   /** The cells whose brushes the sculpting brush at the given position can affect. */
   std::vector<size_t> cellsInRadius(const vm::vec3d& position) const;
 
-  /** Regenerates and caches the brushes of the given cells. Returns false if any cell
-   * could not be built. */
-  bool regenerateCells(const std::vector<size_t>& cells);
-
   /**
-   * Replays the whole stroke onto the document: rolls the open transaction back to the
-   * state before the stroke and swaps in the cached brushes of every touched cell,
-   * together with the terrain entity's updated properties.
+   * Builds the brushes of every cell the stroke has touched and swaps them into the
+   * existing brush nodes, together with the terrain entity's updated properties, as a
+   * single undoable step. Returns false if the brushes could not be swapped in place.
    */
-  bool applyStrokeToDocument();
+  bool commitStrokeCells();
 
   /** The name of the undoable step produced by a stroke in the current mode. */
   std::string strokeCommandName() const;

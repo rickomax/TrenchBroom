@@ -170,6 +170,10 @@ inline auto TerrainBrushColor =
   Preference<Color>{"render/Colors/Terrain brush", RgbF{0.2f, 0.5f, 1.0f}};
 inline auto TerrainBrushFillColor =
   Preference<Color>{"render/Colors/Terrain brush fill", RgbaF{0.2f, 0.5f, 1.0f, 0.25f}};
+inline auto TerrainPreviewColor =
+  Preference<Color>{"render/Colors/Terrain preview", RgbaF{1.0f, 1.0f, 1.0f, 0.6f}};
+inline auto TerrainPreviewFillColor =
+  Preference<Color>{"render/Colors/Terrain preview fill", RgbaF{0.6f, 0.8f, 1.0f, 0.4f}};
 
 inline auto SplineTangentHandleColor =
   Preference<Color>{"render/Colors/Spline tangent handle", RgbF{0.0f, 0.85f, 0.0f}};

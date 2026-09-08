@@ -52,6 +52,7 @@ private:
   QDoubleSpinBox* m_texScaleX = nullptr;
   QDoubleSpinBox* m_texScaleY = nullptr;
 
+  QPushButton* m_removeButton = nullptr;
   QPushButton* m_breakButton = nullptr;
 
   bool m_updatingControls = false;
