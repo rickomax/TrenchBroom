@@ -25,6 +25,7 @@
 #include "mdl/GroupNode.h"
 #include "mdl/LayerNode.h"
 #include "mdl/LockState.h"
+#include "mdl/MapSidecar.h"
 #include "mdl/PatchNode.h"
 #include "mdl/WorldNode.h"
 
@@ -72,6 +73,16 @@ bool NodeSerializer::stripTbProperties() const
 void NodeSerializer::setStripTbProperties(const bool stripTbProperties)
 {
   m_stripTbProperties = stripTbProperties;
+}
+
+bool NodeSerializer::omitSidecarProperties() const
+{
+  return m_omitSidecarProperties;
+}
+
+void NodeSerializer::setOmitSidecarProperties(const bool omitSidecarProperties)
+{
+  m_omitSidecarProperties = omitSidecarProperties;
 }
 
 void NodeSerializer::beginFile(
@@ -226,11 +237,20 @@ void NodeSerializer::entityProperties(const std::vector<EntityProperty>& propert
 void NodeSerializer::entityProperty(const EntityProperty& property)
 {
   if (
-    !m_stripTbProperties
-    || !kdl::cs::str_is_prefix(property.key(), EntityPropertyKeys::TbPrefix))
+    m_stripTbProperties
+    && kdl::cs::str_is_prefix(property.key(), EntityPropertyKeys::TbPrefix))
   {
-    doEntityProperty(property);
+    return;
   }
+
+  // The spline and terrain tools store far more data than a map compiler will accept in
+  // a single token, so it goes to the map's sidecar file instead.
+  if (m_omitSidecarProperties && isSidecarPropertyKey(property.key()))
+  {
+    return;
+  }
+
+  doEntityProperty(property);
 }
 
 void NodeSerializer::brushes(const std::vector<BrushNode*>& brushNodes)

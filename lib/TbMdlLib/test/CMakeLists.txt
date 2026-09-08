@@ -70,6 +70,7 @@ target_sources(TbMdlLibTest PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_Map_World.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_Map.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_MapHeader.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_MapSidecar.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_MaterialUtils.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_ModelDefinition.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/tst_ModelUtils.cpp

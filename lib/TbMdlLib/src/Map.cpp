@@ -59,6 +59,7 @@
 #include "mdl/Map.h"
 #include "mdl/MapFormat.h"
 #include "mdl/MapHeader.h"
+#include "mdl/MapSidecar.h"
 #include "mdl/MapTextEncoding.h"
 #include "mdl/Map_Assets.h"
 #include "mdl/Map_Entities.h"
@@ -76,7 +77,6 @@
 #include "mdl/NodeHandles.h"
 #include "mdl/NodeIndex.h"
 #include "mdl/NodeQueries.h"
-#include "mdl/NodeReader.h"
 #include "mdl/NodeWriter.h"
 #include "mdl/NonIntegerVerticesValidator.h"
 #include "mdl/ObjSerializer.h"
@@ -641,6 +641,23 @@ Result<std::unique_ptr<Map>> Map::loadMap(
   return loadWorldNode(
            mapFormat, gameInfo.gameConfig, worldBounds, path, taskManager, logger)
          | kdl::transform([&](auto worldNode) {
+             // The spline and terrain tools' data lives next to the map. Without it the
+             // generated brushes simply stay in the map as ordinary geometry.
+             const auto sidecarPath = sidecarPathForMap(path);
+             readSidecarFile(sidecarPath)
+               | kdl::transform([&](const auto& records) {
+                   applySidecarRecords(*worldNode, records);
+                   // A map written before the sidecar existed carries its tool data
+                   // inline and has no ids, so they are handed out here.
+                   assignSidecarIds(*worldNode);
+                 })
+               | kdl::transform_error([&](const auto& e) {
+                   logger.error()
+                     << "Could not load tool data from " << sidecarPath << ": " << e.msg;
+                 });
+             return worldNode;
+           })
+         | kdl::transform([&](auto worldNode) {
              return std::make_unique<Map>(
                environmentConfig,
                gameInfo,
@@ -871,10 +888,26 @@ Result<void> Map::saveTo(const std::filesystem::path& path) const
 
     auto writer = NodeWriter{*m_worldNode, stream};
     writer.setExporting(false);
+    // The spline and terrain tools' data goes to the sidecar file below instead of into
+    // the map, where its property values would be longer than a map compiler accepts.
+    writer.setOmitSidecarProperties(true);
     writer.writeMap(m_taskManager);
   }) | kdl::transform_error([&](const auto& e) {
     m_logger.error() << "Could not save document: " << e.msg;
   });
+
+  // Entities read from a map written before the sidecar existed have no id, and copying
+  // an entity copies its id, so the ids are repaired before the records are collected;
+  // an entity without an id of its own would lose its data here. This only touches a
+  // bookkeeping property of entities that need it.
+  assignSidecarIds(*m_worldNode);
+
+  const auto sidecarPath = sidecarPathForMap(path);
+  writeSidecarFile(sidecarPath, collectSidecarRecords(*m_worldNode))
+    | kdl::transform_error([&](const auto& e) {
+        m_logger.error() << "Could not save tool data to " << sidecarPath << ": "
+                         << e.msg;
+      });
 
   return Result<void>{};
 }
@@ -901,6 +934,9 @@ Result<void> Map::exportAs(const ExportOptions& options) const
           auto writer = NodeWriter{*m_worldNode, stream};
           writer.setExporting(true);
           writer.setStripTbProperties(mapOptions.stripTbProperties);
+          // An export is for a compiler, not for editing, so the tool data is left out
+          // and no sidecar is written alongside it.
+          writer.setOmitSidecarProperties(true);
           writer.writeMap(m_taskManager);
         });
       }),

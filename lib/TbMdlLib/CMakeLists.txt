@@ -125,6 +125,7 @@ target_sources(TbMdlLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MapHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MapParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MapReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/MapSidecar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MaterialUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MissingClassnameValidator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MissingDefinitionValidator.cpp

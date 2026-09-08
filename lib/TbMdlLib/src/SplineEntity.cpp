@@ -24,6 +24,7 @@
 #include "mdl/BrushFaceAttributes.h"
 #include "mdl/Entity.h"
 #include "mdl/EntityProperties.h"
+#include "mdl/MapSidecar.h"
 
 #include "kd/reflection_impl.h"
 #include "kd/result.h"
@@ -262,6 +263,14 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   result.removeProperty(SplinePropertyKeys::Closed);
 
   result.addOrUpdateProperty(EntityPropertyKeys::Classname, SplineEntityClassname);
+
+  // The bulk of this data is written to the map's sidecar file rather than the map
+  // itself, so the entity carries an id tying it to its record there. Existing ids are
+  // kept so that the link survives an edit.
+  if (const auto* id = result.property(SidecarPropertyKeys::DataId); !id || id->empty())
+  {
+    result.addOrUpdateProperty(SidecarPropertyKeys::DataId, generateSidecarId());
+  }
 
   for (size_t i = 0; i < data.points.size(); ++i)
   {
