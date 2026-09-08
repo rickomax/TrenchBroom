@@ -27,6 +27,8 @@
 #include "vm/vec_io.h" // IWYU pragma: keep
 
 #include <cmath>
+#include <limits>
+#include <utility>
 
 namespace tb::mdl
 {
@@ -53,6 +55,45 @@ double planarDistance(const vm::vec3d& vertex, const vm::vec3d& center)
   const auto dx = vertex.x() - center.x();
   const auto dy = vertex.y() - center.y();
   return std::sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * The inclusive range of grid vertices covered by a brush of the given radius, clamped
+ * to the terrain. Used to avoid visiting the whole height field for a local edit.
+ */
+struct VertexRange
+{
+  size_t minColumn;
+  size_t maxColumn;
+  size_t minRow;
+  size_t maxRow;
+};
+
+VertexRange vertexRangeInRadius(
+  const Terrain& terrain, const vm::vec3d& center, const double radius)
+{
+  const auto index = [](
+                       const double world,
+                       const double origin,
+                       const double cellSize,
+                       const size_t count) {
+    const auto raw = std::llround(std::floor((world - origin) / cellSize));
+    return size_t(vm::clamp(raw, 0ll, static_cast<long long>(count)));
+  };
+
+  return VertexRange{
+    index(center.x() - radius, terrain.origin.x(), terrain.cellSize, terrain.columns),
+    index(
+      center.x() + radius + terrain.cellSize,
+      terrain.origin.x(),
+      terrain.cellSize,
+      terrain.columns),
+    index(center.y() - radius, terrain.origin.y(), terrain.cellSize, terrain.rows),
+    index(
+      center.y() + radius + terrain.cellSize,
+      terrain.origin.y(),
+      terrain.cellSize,
+      terrain.rows)};
 }
 
 /** The average height of a vertex's existing neighbours, used by the smooth brush. */
@@ -86,6 +127,47 @@ double neighbourAverage(
   }
   return count > 0 ? sum / double(count)
                    : heights[terrainVertexIndex(terrain, column, row)];
+}
+
+/**
+ * The parameter range in which the given ray overlaps the given bounds, or nullopt if
+ * it misses them entirely.
+ */
+std::optional<std::pair<double, double>> clipRayToSlab(
+  const vm::ray3d& ray, const vm::bbox3d& bounds)
+{
+  auto near = 0.0;
+  auto far = std::numeric_limits<double>::max();
+
+  for (size_t axis = 0; axis < 3; ++axis)
+  {
+    const auto direction = ray.direction[axis];
+    const auto origin = ray.origin[axis];
+    if (vm::abs(direction) < vm::Cd::almost_zero())
+    {
+      if (origin < bounds.min[axis] || origin > bounds.max[axis])
+      {
+        return std::nullopt;
+      }
+      continue;
+    }
+
+    auto t0 = (bounds.min[axis] - origin) / direction;
+    auto t1 = (bounds.max[axis] - origin) / direction;
+    if (t0 > t1)
+    {
+      std::swap(t0, t1);
+    }
+
+    near = vm::max(near, t0);
+    far = vm::min(far, t1);
+    if (near > far)
+    {
+      return std::nullopt;
+    }
+  }
+
+  return std::pair{near, far};
 }
 
 } // namespace
@@ -186,14 +268,22 @@ bool sculptTerrain(
   }
 
   // Smoothing reads the unmodified heights so that the result does not depend on the
-  // order in which the vertices are visited.
-  const auto original = terrain.heights;
+  // order in which the vertices are visited; the other modes read each vertex once
+  // before writing it, so they can work in place and skip copying the height field.
+  const auto snapshot =
+    mode == TerrainSculptMode::Smooth ? terrain.heights : std::vector<double>{};
+  const auto& original = mode == TerrainSculptMode::Smooth ? snapshot : terrain.heights;
   const auto minHeight = terrain.origin.z() + TerrainMinThickness;
 
+  // Only the vertices inside the brush's bounding square can be affected, so the whole
+  // height field does not have to be visited.
+  const auto [minColumn, maxColumn, minRow, maxRow] =
+    vertexRangeInRadius(terrain, center, radius);
+
   auto changed = false;
-  for (size_t row = 0; row <= terrain.rows; ++row)
+  for (size_t row = minRow; row <= maxRow; ++row)
   {
-    for (size_t column = 0; column <= terrain.columns; ++column)
+    for (size_t column = minColumn; column <= maxColumn; ++column)
     {
       const auto index = terrainVertexIndex(terrain, column, row);
       const auto position = terrainVertexPosition(terrain, column, row);
@@ -249,10 +339,14 @@ bool paintTerrain(
     return false;
   }
 
+  const auto [minColumn, maxColumn, minRow, maxRow] =
+    vertexRangeInRadius(terrain, center, radius);
+
   auto changed = false;
-  for (size_t row = 0; row < terrain.rows; ++row)
+  for (size_t row = minRow; row < vm::min(maxRow + 1, terrain.rows); ++row)
   {
-    for (size_t column = 0; column < terrain.columns; ++column)
+    for (size_t column = minColumn; column < vm::min(maxColumn + 1, terrain.columns);
+         ++column)
     {
       // The cell's center, at the average height of its four corners.
       auto height = 0.0;
@@ -311,11 +405,39 @@ std::optional<vm::vec3d> pickTerrain(const Terrain& terrain, const vm::ray3d& ra
     }
   };
 
-  // The surface is the triangulated top of the height field; both triangles of every
-  // cell are tested against the ray.
-  for (size_t row = 0; row < terrain.rows; ++row)
+  // Restrict the search to the cells the ray can actually cross: clip it to the slab
+  // spanned by the terrain's heights and take the bounds of the resulting segment.
+  const auto bounds = terrainBounds(terrain);
+  const auto entry = clipRayToSlab(ray, bounds);
+  if (!entry)
   {
-    for (size_t column = 0; column < terrain.columns; ++column)
+    return std::nullopt;
+  }
+
+  const auto [near, far] = *entry;
+  const auto p0 = vm::point_at_distance(ray, near);
+  const auto p1 = vm::point_at_distance(ray, far);
+
+  const auto cellIndex = [&](
+                           const double world, const double origin, const size_t count) {
+    const auto raw = std::llround(std::floor((world - origin) / terrain.cellSize));
+    return size_t(vm::clamp(raw, 0ll, static_cast<long long>(count) - 1));
+  };
+
+  const auto minColumn = cellIndex(
+    vm::min(p0.x(), p1.x()) - terrain.cellSize, terrain.origin.x(), terrain.columns);
+  const auto maxColumn = cellIndex(
+    vm::max(p0.x(), p1.x()) + terrain.cellSize, terrain.origin.x(), terrain.columns);
+  const auto minRow = cellIndex(
+    vm::min(p0.y(), p1.y()) - terrain.cellSize, terrain.origin.y(), terrain.rows);
+  const auto maxRow = cellIndex(
+    vm::max(p0.y(), p1.y()) + terrain.cellSize, terrain.origin.y(), terrain.rows);
+
+  // The surface is the triangulated top of the height field; both triangles of every
+  // candidate cell are tested against the ray.
+  for (size_t row = minRow; row <= maxRow; ++row)
+  {
+    for (size_t column = minColumn; column <= maxColumn; ++column)
     {
       const auto v00 = terrainVertexPosition(terrain, column, row);
       const auto v10 = terrainVertexPosition(terrain, column + 1, row);

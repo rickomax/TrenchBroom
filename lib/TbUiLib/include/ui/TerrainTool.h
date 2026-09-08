@@ -21,6 +21,7 @@
 
 #include "Notifier.h"
 #include "NotifierConnection.h"
+#include "mdl/Brush.h"
 #include "mdl/Terrain.h"
 #include "mdl/TerrainEntity.h"
 #include "ui/Tool.h"
@@ -29,6 +30,7 @@
 #include "vm/ray.h"
 #include "vm/vec.h"
 
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -99,7 +101,6 @@ private:
   double m_radius = 128.0;
   double m_strength = 16.0;
   double m_cellSize = 32.0;
-  std::string m_paintMaterial;
 
   /** The position of the sculpting brush on the terrain's surface, if the mouse is
    * over it; drawn as a circle of the current radius. */
@@ -108,6 +109,16 @@ private:
   /** The terrain as it was before the current stroke started, so that the whole
    * stroke can be undone in one step and cancelled cleanly. */
   std::optional<mdl::Terrain> m_strokeOriginal;
+
+  /** Whether a long running transaction is open for the current stroke. The terrain
+   * is updated live inside it, and it becomes a single undoable step when the stroke
+   * ends. */
+  bool m_strokeTransaction = false;
+
+  /** The brushes of every cell the current stroke has touched, kept so that replaying
+   * the stroke after a rollback does not have to rebuild cells that have not changed
+   * since they were last generated. */
+  std::map<size_t, std::vector<mdl::Brush>> m_strokeBrushes;
 
   bool m_ignoreNotifications = false;
 
@@ -142,9 +153,6 @@ public: // modes and settings
   /** The width and height of a cell of newly created terrains. */
   double cellSize() const;
   void setCellSize(double cellSize);
-
-  const std::string& paintMaterial() const;
-  void setPaintMaterial(std::string materialName);
 
   float texScaleX() const;
   float texScaleY() const;
@@ -199,16 +207,26 @@ private:
    */
   void commitTerrain(const std::string& commandName);
 
-  /** The indices of the cells that differ from the given terrain, or an empty vector
-   * if the terrain's structure changed and every cell has to be rebuilt. */
-  std::vector<size_t> changedCells(const mdl::Terrain& original) const;
+  /** Whether the terrain's brushes can be swapped in place, i.e. the terrain node
+   * holds exactly the brushes the current terrain generates. */
+  bool canUpdateCellsInPlace() const;
+
+  /** The cells whose brushes the sculpting brush at the given position can affect. */
+  std::vector<size_t> cellsInRadius(const vm::vec3d& position) const;
+
+  /** Regenerates and caches the brushes of the given cells. Returns false if any cell
+   * could not be built. */
+  bool regenerateCells(const std::vector<size_t>& cells);
 
   /**
-   * Commits a stroke by swapping the contents of only the changed cells' brushes and
-   * the terrain entity, which is far cheaper than regenerating every brush. Returns
-   * false if the terrain has to be rebuilt as a whole instead.
+   * Replays the whole stroke onto the document: rolls the open transaction back to the
+   * state before the stroke and swaps in the cached brushes of every touched cell,
+   * together with the terrain entity's updated properties.
    */
-  bool commitChangedCells(const std::string& commandName, const mdl::Terrain& original);
+  bool applyStrokeToDocument();
+
+  /** The name of the undoable step produced by a stroke in the current mode. */
+  std::string strokeCommandName() const;
 
   std::vector<mdl::Node*> createBrushNodes() const;
 

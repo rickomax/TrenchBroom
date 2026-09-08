@@ -23,7 +23,6 @@
 
 #include "NotifierConnection.h"
 
-class QComboBox;
 class QDoubleSpinBox;
 class QPushButton;
 
@@ -50,7 +49,6 @@ private:
   QPushButton* m_smooth = nullptr;
   QPushButton* m_texture = nullptr;
 
-  QComboBox* m_material = nullptr;
   QDoubleSpinBox* m_texScaleX = nullptr;
   QDoubleSpinBox* m_texScaleY = nullptr;
 
@@ -68,7 +66,6 @@ private:
   void createGui();
   void connectObservers();
   void updateControls();
-  void updateMaterials();
 };
 
 } // namespace tb::ui

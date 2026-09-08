@@ -20,89 +20,16 @@
 #include "ui/TerrainToolPage.h"
 
 #include <QBoxLayout>
-#include <QComboBox>
 #include <QDoubleSpinBox>
-#include <QIcon>
-#include <QImage>
 #include <QLabel>
-#include <QPixmap>
 #include <QPushButton>
 
-#include "gl/Material.h"
-#include "gl/MaterialManager.h"
-#include "gl/Texture.h"
 #include "mdl/Map.h"
 #include "ui/MapDocument.h"
 #include "ui/TerrainTool.h"
 
-#include <array>
-
 namespace tb::ui
 {
-namespace
-{
-
-/** The size of the material thumbnails shown in the material combo box. */
-constexpr auto MaterialIconSize = 16;
-
-/**
- * Builds a thumbnail for the given material, or a null icon if its texture is not
- * loaded or stored in a format we cannot read without a GL context.
- */
-QIcon materialIcon(const gl::Material& material)
-{
-  const auto* texture = material.texture();
-  if (!texture)
-  {
-    return QIcon{};
-  }
-
-  const auto& buffers = texture->buffersIfLoaded();
-  if (buffers.empty() || texture->width() == 0 || texture->height() == 0)
-  {
-    return QIcon{};
-  }
-
-  const auto format = texture->format();
-  const auto components = format == GL_RGBA || format == GL_BGRA ? 4
-                          : format == GL_RGB || format == GL_BGR ? 3
-                                                                 : 0;
-  if (components == 0)
-  {
-    return QIcon{};
-  }
-
-  const auto width = int(texture->width());
-  const auto height = int(texture->height());
-  const auto& buffer = buffers.front();
-  if (buffer.size() < size_t(width) * size_t(height) * size_t(components))
-  {
-    return QIcon{};
-  }
-
-  const auto swapped = format == GL_BGR || format == GL_BGRA;
-  auto image = QImage{width, height, QImage::Format_RGBA8888};
-  const auto* bytes = buffer.data();
-  for (auto y = 0; y < height; ++y)
-  {
-    for (auto x = 0; x < width; ++x)
-    {
-      const auto* pixel =
-        bytes + (size_t(y) * size_t(width) + size_t(x)) * size_t(components);
-      const auto r = pixel[swapped ? 2 : 0];
-      const auto g = pixel[1];
-      const auto b = pixel[swapped ? 0 : 2];
-      const auto a = components == 4 ? pixel[3] : 255;
-      image.setPixelColor(x, y, QColor{r, g, b, a});
-    }
-  }
-
-  return QIcon{QPixmap::fromImage(
-    image.scaled(MaterialIconSize, MaterialIconSize, Qt::IgnoreAspectRatio))};
-}
-
-} // namespace
-
 TerrainToolPage::TerrainToolPage(
   MapDocument& document, TerrainTool& tool, QWidget* parent)
   : QWidget{parent}
@@ -111,7 +38,6 @@ TerrainToolPage::TerrainToolPage(
 {
   createGui();
   connectObservers();
-  updateMaterials();
   updateControls();
 }
 
@@ -164,13 +90,8 @@ void TerrainToolPage::createGui()
     tr("Smooth"), tr("Even out the terrain under the brush (hold Shift to flatten)"));
   m_texture = makeToggle(
     tr("Texture"),
-    tr("Paint the selected material onto the terrain cells under the brush"));
-
-  m_material = new QComboBox{};
-  m_material->setFocusPolicy(Qt::NoFocus);
-  m_material->setIconSize(QSize{MaterialIconSize, MaterialIconSize});
-  m_material->setToolTip(tr("The material painted by the Texture mode"));
-  m_material->setMinimumContentsLength(12);
+    tr("Paint the material selected in the material browser onto the terrain cells "
+       "under the brush"));
 
   m_texScaleX = new QDoubleSpinBox{};
   m_texScaleX->setRange(-64.0, 64.0);
@@ -209,7 +130,6 @@ void TerrainToolPage::createGui()
   layout->addWidget(m_smooth);
   layout->addWidget(m_texture);
   layout->addSpacing(12);
-  layout->addWidget(m_material);
   layout->addWidget(new QLabel{tr("Scale X:")});
   layout->addWidget(m_texScaleX);
   layout->addWidget(new QLabel{tr("Y:")});
@@ -274,17 +194,6 @@ void TerrainToolPage::createGui()
       }
     });
 
-  connect(
-    m_material,
-    QOverload<int>::of(&QComboBox::currentIndexChanged),
-    this,
-    [this](const int) {
-      if (!m_updatingControls)
-      {
-        m_tool.setPaintMaterial(m_material->currentText().toStdString());
-      }
-    });
-
   const auto applyTexScale = [this]() {
     if (!m_updatingControls)
     {
@@ -310,35 +219,8 @@ void TerrainToolPage::connectObservers()
 {
   m_notifierConnection +=
     m_tool.terrainDidChangeNotifier.connect([this]() { updateControls(); });
-  m_notifierConnection += m_document.map().materialCollectionsDidChangeNotifier.connect(
-    [this]() { updateMaterials(); });
-}
-
-void TerrainToolPage::updateMaterials()
-{
-  const auto selected = m_material->currentText();
-
-  m_updatingControls = true;
-  m_material->clear();
-  for (const auto* material : m_document.map().materialManager().materials())
-  {
-    m_material->addItem(
-      materialIcon(*material), QString::fromStdString(material->name()));
-  }
-
-  if (const auto index = m_material->findText(selected); index >= 0)
-  {
-    m_material->setCurrentIndex(index);
-  }
-  else if (const auto currentIndex = m_material->findText(
-             QString::fromStdString(m_document.map().currentMaterialName()));
-           currentIndex >= 0)
-  {
-    m_material->setCurrentIndex(currentIndex);
-  }
-  m_updatingControls = false;
-
-  m_tool.setPaintMaterial(m_material->currentText().toStdString());
+  m_notifierConnection += m_document.map().currentMaterialNameDidChangeNotifier.connect(
+    [this]() { updateControls(); });
 }
 
 void TerrainToolPage::updateControls()
@@ -358,7 +240,6 @@ void TerrainToolPage::updateControls()
   m_texture->setChecked(mode == TerrainToolMode::Texture);
 
   const auto hasTerrain = m_tool.hasTerrain();
-  m_material->setEnabled(mode == TerrainToolMode::Texture);
   m_texScaleX->setEnabled(hasTerrain);
   m_texScaleY->setEnabled(hasTerrain);
   if (hasTerrain)
