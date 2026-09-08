@@ -100,7 +100,7 @@ private:
   TerrainToolMode m_mode = TerrainToolMode::Raise;
 
   double m_radius = 128.0;
-  double m_strength = 16.0;
+  double m_strength = 0.5;
   double m_cellSize = 32.0;
 
   /** The position of the sculpting brush on the terrain's surface, if the mouse is
@@ -168,6 +168,10 @@ public: // terrain management
    * whether the bounds were usable. */
   bool createTerrain(const vm::bbox3d& bounds);
 
+  /** Whether the hit geometry belongs to a terrain other than the current one, i.e.
+   * whether clicking it would switch terrains rather than sculpt. */
+  bool canSelectTerrainAt(const mdl::PickResult& pickResult) const;
+
   /** Picks up the terrain whose generated geometry is hit for editing. Returns whether
    * a terrain was hit. */
   bool selectTerrainAt(const mdl::PickResult& pickResult);
@@ -206,6 +210,9 @@ private:
   void loadTerrainNode(mdl::EntityNode* terrainNode);
   void clearTerrain();
   void refreshOtherTerrains();
+
+  /** The terrain entity the hit geometry belongs to, unless it is the current one. */
+  mdl::EntityNode* otherTerrainNodeAt(const mdl::PickResult& pickResult) const;
 
   /**
    * Writes the current terrain to the document by replacing the terrain entity (and

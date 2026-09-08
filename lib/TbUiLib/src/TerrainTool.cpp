@@ -315,7 +315,7 @@ bool TerrainTool::createTerrain(const vm::bbox3d& bounds)
   return true;
 }
 
-bool TerrainTool::selectTerrainAt(const mdl::PickResult& pickResult)
+mdl::EntityNode* TerrainTool::otherTerrainNodeAt(const mdl::PickResult& pickResult) const
 {
   using namespace mdl::HitFilters;
 
@@ -330,10 +330,24 @@ bool TerrainTool::selectTerrainAt(const mdl::PickResult& pickResult)
           entityNode && entityNode != m_terrainNode
           && mdl::isTerrainEntity(entityNode->entity()))
       {
-        loadTerrainNode(entityNode);
-        return true;
+        return entityNode;
       }
     }
+  }
+  return nullptr;
+}
+
+bool TerrainTool::canSelectTerrainAt(const mdl::PickResult& pickResult) const
+{
+  return otherTerrainNodeAt(pickResult) != nullptr;
+}
+
+bool TerrainTool::selectTerrainAt(const mdl::PickResult& pickResult)
+{
+  if (auto* entityNode = otherTerrainNodeAt(pickResult))
+  {
+    loadTerrainNode(entityNode);
+    return true;
   }
   return false;
 }

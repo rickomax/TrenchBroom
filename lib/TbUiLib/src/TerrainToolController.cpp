@@ -19,6 +19,8 @@
 
 #include "ui/TerrainToolController.h"
 
+#include <QTimer>
+
 #include "PreferenceManager.h"
 #include "Preferences.h"
 #include "gl/Camera.h"
@@ -204,31 +206,41 @@ public:
   }
 };
 
-/** Applies the sculpting brush for as long as the mouse is dragged over the terrain. */
+/**
+ * What a sculpting drag reports back to the part that owns the stroke. The stroke is
+ * started on mouse down rather than by the drag, so the drag only moves it around.
+ */
+class SculptHandler
+{
+public:
+  virtual ~SculptHandler() = default;
+
+  virtual void sculptMoved(const InputState& inputState) = 0;
+  virtual void sculptEnded() = 0;
+  virtual void sculptCancelled() = 0;
+};
+
+/** Follows the mouse while it is dragged over the terrain. */
 class SculptTracker : public GestureTracker
 {
 private:
-  TerrainTool& m_tool;
+  SculptHandler& m_handler;
 
 public:
-  explicit SculptTracker(TerrainTool& tool)
-    : m_tool{tool}
+  explicit SculptTracker(SculptHandler& handler)
+    : m_handler{handler}
   {
   }
 
   bool update(const InputState& inputState) override
   {
-    if (const auto position = m_tool.pickSurface(inputState.pickRay()))
-    {
-      m_tool.setBrushPosition(*position);
-      m_tool.applyStroke(*position, inputState.modifierKeysDown(ModifierKeys::Shift));
-    }
+    m_handler.sculptMoved(inputState);
     return true;
   }
 
-  void end(const InputState&) override { m_tool.endStroke(); }
+  void end(const InputState&) override { m_handler.sculptEnded(); }
 
-  void cancel() override { m_tool.cancelStroke(); }
+  void cancel() override { m_handler.sculptCancelled(); }
 };
 
 /** Creates new terrains while add mode is enabled. */
@@ -266,19 +278,103 @@ private:
   bool cancel() override { return false; }
 };
 
-/** Sculpts and paints the current terrain while add mode is disabled. */
-class SculptPart : public ToolController, protected PartBase
+/**
+ * Sculpts and paints the current terrain while add mode is disabled.
+ *
+ * The stroke starts on mouse down and lasts until the button is released, so a click
+ * applies the brush just like a drag does. It is applied repeatedly for as long as the
+ * button is held: moving the mouse applies it at the new position, and a repeat timer
+ * keeps applying it at the last position while the mouse stands still, so holding the
+ * button down in one spot keeps building the terrain up there.
+ */
+class SculptPart : public ToolController, protected PartBase, private SculptHandler
 {
+private:
+  /** How often the brush is applied while the mouse is held down without moving. */
+  static constexpr auto RepeatIntervalMs = 33;
+
+  std::unique_ptr<QTimer> m_repeatTimer;
+
+  /** The position the brush is applied at while the button is held. It stays put while
+   * the mouse does, which also keeps Flatten levelling towards the height that was
+   * clicked. */
+  std::optional<vm::vec3d> m_position;
+  bool m_invert = false;
+  /** Whether the button is down and a stroke is being applied. */
+  bool m_sculpting = false;
+
 public:
   explicit SculptPart(std::unique_ptr<PartDelegateBase> delegate)
     : PartBase{std::move(delegate)}
+    , m_repeatTimer{std::make_unique<QTimer>()}
   {
+    m_repeatTimer->setInterval(RepeatIntervalMs);
+    // The timer is owned by this part and is also the connection's context, so the
+    // lambda cannot outlive it.
+    QObject::connect(
+      m_repeatTimer.get(), &QTimer::timeout, m_repeatTimer.get(), [this]() {
+        applyBrush();
+      });
   }
 
 private:
   Tool& tool() override { return m_delegate->tool(); }
 
   const Tool& tool() const override { return m_delegate->tool(); }
+
+  void applyBrush()
+  {
+    if (m_sculpting && m_position)
+    {
+      m_delegate->tool().applyStroke(*m_position, m_invert);
+      // Applying restarts the wait, so a moving mouse never doubles the rate.
+      m_repeatTimer->start();
+    }
+  }
+
+  /** Whether the given input starts or continues a sculpting stroke. */
+  bool acceptsSculpting(const InputState& inputState) const
+  {
+    return !m_delegate->tool().addMode()
+           && (inputState.modifierKeysPressed(ModifierKeys::None) || inputState.modifierKeysPressed(ModifierKeys::Shift));
+  }
+
+  void endSculpting()
+  {
+    if (m_sculpting)
+    {
+      m_repeatTimer->stop();
+      m_sculpting = false;
+      m_delegate->tool().endStroke();
+    }
+  }
+
+  void mouseDown(const InputState& inputState) override
+  {
+    auto& tool = m_delegate->tool();
+    if (
+      m_sculpting || !inputState.mouseButtonsPressed(MouseButtons::Left)
+      || !acceptsSculpting(inputState)
+      // Clicking another terrain picks that one up instead of sculpting this one.
+      || tool.canSelectTerrainAt(inputState.pickResult()))
+    {
+      return;
+    }
+
+    m_position = tool.pickSurface(inputState.pickRay());
+    if (!m_position)
+    {
+      return;
+    }
+
+    m_invert = inputState.modifierKeysDown(ModifierKeys::Shift);
+    m_sculpting = true;
+    tool.setBrushPosition(*m_position);
+    tool.beginStroke();
+    applyBrush();
+  }
+
+  void mouseUp(const InputState&) override { endSculpting(); }
 
   void mouseMove(const InputState& inputState) override
   {
@@ -293,55 +389,56 @@ private:
 
   bool mouseClick(const InputState& inputState) override
   {
+    // The click already started a stroke on mouse down, which mouse up will end.
+    if (m_sculpting)
+    {
+      return true;
+    }
+
     auto& tool = m_delegate->tool();
     if (
       tool.addMode() || !inputState.mouseButtonsPressed(MouseButtons::Left)
-      || (!inputState.modifierKeysPressed(ModifierKeys::None) && !inputState.modifierKeysPressed(ModifierKeys::Shift)))
+      || !inputState.modifierKeysPressed(ModifierKeys::None))
     {
       return false;
     }
 
-    // Clicking another terrain's geometry picks it up for editing.
-    if (
-      inputState.modifierKeysPressed(ModifierKeys::None)
-      && tool.selectTerrainAt(inputState.pickResult()))
-    {
-      return true;
-    }
-
-    // Pressing and releasing the mouse in the same place never becomes a drag, so the
-    // brush is applied once here; otherwise clicking without moving would do nothing.
-    if (const auto position = tool.pickSurface(inputState.pickRay()))
-    {
-      tool.beginStroke();
-      tool.setBrushPosition(*position);
-      tool.applyStroke(*position, inputState.modifierKeysDown(ModifierKeys::Shift));
-      tool.endStroke();
-      return true;
-    }
-    return false;
+    // Clicking a terrain's geometry picks it up for editing.
+    return tool.selectTerrainAt(inputState.pickResult());
   }
 
   std::unique_ptr<GestureTracker> acceptMouseDrag(const InputState& inputState) override
   {
+    // The stroke is already running; the drag only moves it and ends it.
+    // Constructed here rather than with make_unique so that the conversion to the
+    // privately inherited handler interface is allowed.
+    return m_sculpting && inputState.mouseButtons() == MouseButtons::Left
+             ? std::unique_ptr<GestureTracker>{new SculptTracker{*this}}
+             : nullptr;
+  }
+
+  void sculptMoved(const InputState& inputState) override
+  {
     auto& tool = m_delegate->tool();
-    if (
-      tool.addMode() || inputState.mouseButtons() != MouseButtons::Left
-      || (!inputState.modifierKeysPressed(ModifierKeys::None) && !inputState.modifierKeysPressed(ModifierKeys::Shift)))
+    if (const auto position = tool.pickSurface(inputState.pickRay()))
     {
-      return nullptr;
+      m_position = *position;
+      m_invert = inputState.modifierKeysDown(ModifierKeys::Shift);
+      tool.setBrushPosition(*position);
+      applyBrush();
     }
+  }
 
-    const auto position = tool.pickSurface(inputState.pickRay());
-    if (!position)
+  void sculptEnded() override { endSculpting(); }
+
+  void sculptCancelled() override
+  {
+    if (m_sculpting)
     {
-      return nullptr;
+      m_repeatTimer->stop();
+      m_sculpting = false;
+      m_delegate->tool().cancelStroke();
     }
-
-    tool.beginStroke();
-    tool.setBrushPosition(*position);
-    tool.applyStroke(*position, inputState.modifierKeysDown(ModifierKeys::Shift));
-    return std::make_unique<SculptTracker>(tool);
   }
 
   bool cancel() override { return false; }

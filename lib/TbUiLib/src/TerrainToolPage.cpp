@@ -55,7 +55,7 @@ void TerrainToolPage::createGui()
   };
 
   m_addTerrain = makeToggle(
-    tr("Add"),
+    tr("Create"),
     tr("While enabled, dragging out a box in a map view creates a new terrain of that "
        "size; disable it to sculpt the terrain instead"));
 
@@ -72,11 +72,12 @@ void TerrainToolPage::createGui()
   m_radius->setToolTip(tr("The radius of the sculpting brush"));
 
   m_strength = new QDoubleSpinBox{};
-  m_strength->setRange(0.1, 1024.0);
-  m_strength->setSingleStep(4.0);
+  m_strength->setRange(0.01, 1024.0);
+  m_strength->setDecimals(2);
+  m_strength->setSingleStep(0.1);
   m_strength->setToolTip(
-    tr("How much one stroke of the sculpting brush changes the "
-       "terrain"));
+    tr("How much each application of the sculpting brush changes the terrain; the "
+       "brush keeps being applied while the mouse is held down"));
 
   m_raise = makeToggle(
     tr("Raise"), tr("Raise the terrain under the brush (hold Shift to lower)"));
