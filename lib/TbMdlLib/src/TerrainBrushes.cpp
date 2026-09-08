@@ -20,15 +20,15 @@
 #include "mdl/TerrainBrushes.h"
 
 #include "mdl/Brush.h"
-#include "mdl/BrushBuilder.h"
 #include "mdl/BrushFace.h"
 #include "mdl/BrushFaceAttributes.h"
 
 #include "kd/result.h"
+#include "kd/result_fold.h"
 
 #include "vm/vec.h"
 
-#include <array>
+#include <vector>
 
 namespace tb::mdl
 {
@@ -36,21 +36,90 @@ namespace
 {
 
 /**
- * Applies the terrain's material and texture scale to every face of the given brush.
+ * Builds one triangular prism from its bottom triangle and the matching top triangle.
+ *
+ * The bottom triangle must wind counter clockwise seen from above, and every top
+ * vertex must lie directly above its bottom vertex. The faces are given as point
+ * triples whose normal is cross(p2 - p0, p1 - p0), which is TrenchBroom's convention,
+ * so the normals below point out of the prism.
  */
-void applyAttributes(
-  Brush& brush, const std::string& materialName, const Terrain& terrain)
+Result<Brush> createPrism(
+  const MapFormat mapFormat,
+  const vm::bbox3d& worldBounds,
+  const vm::vec3d& a0,
+  const vm::vec3d& b0,
+  const vm::vec3d& c0,
+  const vm::vec3d& a1,
+  const vm::vec3d& b1,
+  const vm::vec3d& c1,
+  const BrushFaceAttributes& attributes)
 {
-  for (auto& face : brush.faces())
-  {
-    auto attributes = face.attributes();
-    attributes.setMaterialName(materialName);
-    attributes.setScale(vm::vec2f{terrain.texScaleX, terrain.texScaleY});
-    face.setAttributes(attributes);
-  }
+  return std::vector{
+           BrushFace::create(a0, b0, c0, attributes, mapFormat), // bottom
+           BrushFace::create(a1, c1, b1, attributes, mapFormat), // top
+           BrushFace::create(a0, a1, b0, attributes, mapFormat), // side a -> b
+           BrushFace::create(b0, b1, c0, attributes, mapFormat), // side b -> c
+           BrushFace::create(c0, c1, a0, attributes, mapFormat), // side c -> a
+         }
+         | kdl::fold | kdl::and_then([&](auto faces) {
+             return Brush::create(worldBounds, std::move(faces));
+           });
 }
 
 } // namespace
+
+Result<std::vector<Brush>> createTerrainCellBrushes(
+  const MapFormat mapFormat,
+  const vm::bbox3d& worldBounds,
+  const Terrain& terrain,
+  const size_t column,
+  const size_t row)
+{
+  if (!isValidTerrain(terrain) || column >= terrain.columns || row >= terrain.rows)
+  {
+    return Error{"Terrain cell is out of bounds"};
+  }
+
+  auto attributes = BrushFaceAttributes{terrainCellMaterial(terrain, column, row)};
+  attributes.setScale(vm::vec2f{terrain.texScaleX, terrain.texScaleY});
+
+  const auto t00 = terrainVertexPosition(terrain, column, row);
+  const auto t10 = terrainVertexPosition(terrain, column + 1, row);
+  const auto t11 = terrainVertexPosition(terrain, column + 1, row + 1);
+  const auto t01 = terrainVertexPosition(terrain, column, row + 1);
+
+  const auto baseZ = terrain.origin.z();
+  const auto atBase = [&](const vm::vec3d& top) {
+    return vm::vec3d{top.x(), top.y(), baseZ};
+  };
+
+  // Split the cell along the 00-11 diagonal. Both bottom triangles below wind counter
+  // clockwise seen from above, and the same diagonal is used in every cell so that
+  // neighbouring cells stay conforming.
+  return std::vector{
+           createPrism(
+             mapFormat,
+             worldBounds,
+             atBase(t00),
+             atBase(t10),
+             atBase(t11),
+             t00,
+             t10,
+             t11,
+             attributes),
+           createPrism(
+             mapFormat,
+             worldBounds,
+             atBase(t00),
+             atBase(t11),
+             atBase(t01),
+             t00,
+             t11,
+             t01,
+             attributes),
+         }
+         | kdl::fold;
+}
 
 Result<std::vector<Brush>> createTerrainBrushes(
   const MapFormat mapFormat, const vm::bbox3d& worldBounds, const Terrain& terrain)
@@ -60,71 +129,23 @@ Result<std::vector<Brush>> createTerrainBrushes(
     return Error{"Terrain is degenerate"};
   }
 
-  const auto builder = BrushBuilder{mapFormat, worldBounds};
-  const auto baseZ = terrain.origin.z();
-
   auto brushes = std::vector<Brush>{};
-  brushes.reserve(terrainCellCount(terrain) * 6);
+  brushes.reserve(terrainCellCount(terrain) * TerrainBrushesPerCell);
 
   for (size_t row = 0; row < terrain.rows; ++row)
   {
     for (size_t column = 0; column < terrain.columns; ++column)
     {
-      const auto& materialName = terrainCellMaterial(terrain, column, row);
-
-      const auto t00 = terrainVertexPosition(terrain, column, row);
-      const auto t10 = terrainVertexPosition(terrain, column + 1, row);
-      const auto t11 = terrainVertexPosition(terrain, column + 1, row + 1);
-      const auto t01 = terrainVertexPosition(terrain, column, row + 1);
-
-      const auto atBase = [&](const vm::vec3d& top) {
-        return vm::vec3d{top.x(), top.y(), baseZ};
-      };
-      const auto b00 = atBase(t00);
-      const auto b10 = atBase(t10);
-      const auto b11 = atBase(t11);
-      const auto b01 = atBase(t01);
-
-      // Split the cell into two triangular prisms along the 00-11 diagonal, and each
-      // prism into three tetrahedra. The vertex order below is the standard prism
-      // decomposition; using the same diagonal in every cell keeps neighbouring cells
-      // conforming.
-      const auto prisms = std::array<std::array<vm::vec3d, 6>, 2>{
-        // bottom triangle, then the matching top triangle
-        std::array<vm::vec3d, 6>{b00, b10, b11, t00, t10, t11},
-        std::array<vm::vec3d, 6>{b00, b11, b01, t00, t11, t01},
-      };
-
-      for (const auto& p : prisms)
+      auto cellBrushes =
+        createTerrainCellBrushes(mapFormat, worldBounds, terrain, column, row);
+      if (cellBrushes.is_error())
       {
-        const auto& a0 = p[0];
-        const auto& b0 = p[1];
-        const auto& c0 = p[2];
-        const auto& a1 = p[3];
-        const auto& b1 = p[4];
-        const auto& c1 = p[5];
+        return Error{"Could not create terrain brushes"};
+      }
 
-        const auto tetrahedra = std::array<std::array<vm::vec3d, 4>, 3>{
-          std::array<vm::vec3d, 4>{a0, b0, c0, c1},
-          std::array<vm::vec3d, 4>{a0, b0, c1, b1},
-          std::array<vm::vec3d, 4>{a0, b1, c1, a1},
-        };
-
-        for (const auto& tetrahedron : tetrahedra)
-        {
-          builder.createBrush(
-            std::vector<vm::vec3d>{
-              tetrahedron[0], tetrahedron[1], tetrahedron[2], tetrahedron[3]},
-            materialName)
-            | kdl::transform([&](Brush brush) {
-                applyAttributes(brush, materialName, terrain);
-                brushes.push_back(std::move(brush));
-              })
-            | kdl::transform_error([](const auto&) {
-                // Skip degenerate tetrahedra, e.g. where two corner heights coincide
-                // with the base plane.
-              });
-        }
+      for (auto& brush : std::move(cellBrushes) | kdl::value())
+      {
+        brushes.push_back(std::move(brush));
       }
     }
   }

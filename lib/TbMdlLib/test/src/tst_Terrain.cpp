@@ -197,20 +197,47 @@ TEST_CASE("Terrain")
 
   SECTION("createTerrainBrushes")
   {
-    SECTION("produces six tetrahedra per cell")
+    SECTION("produces two triangular prisms per cell")
     {
       const auto terrain = makeTerrain(2, 2);
       const auto brushes =
         createTerrainBrushes(MapFormat::Standard, worldBounds, terrain) | kdl::value();
 
-      CHECK(brushes.size() == terrainCellCount(terrain) * 6);
+      CHECK(brushes.size() == terrainCellCount(terrain) * TerrainBrushesPerCell);
 
       for (const auto& brush : brushes)
       {
-        // A tetrahedron has four faces and four vertices.
-        CHECK(brush.faceCount() == 4);
-        CHECK(brush.vertexCount() == 4);
+        // A triangular prism has five faces and six vertices.
+        CHECK(brush.faceCount() == 5);
+        CHECK(brush.vertexCount() == 6);
         CHECK(brush.fullySpecified());
+      }
+    }
+
+    SECTION("a cell's brushes can be regenerated on their own")
+    {
+      const auto terrain = makeTerrain(3, 3);
+      const auto all =
+        createTerrainBrushes(MapFormat::Standard, worldBounds, terrain) | kdl::value();
+
+      // The cell's brushes appear at its index in row major order, so they can be
+      // swapped in place when only that cell changes.
+      for (size_t row = 0; row < terrain.rows; ++row)
+      {
+        for (size_t column = 0; column < terrain.columns; ++column)
+        {
+          const auto cellBrushes =
+            createTerrainCellBrushes(
+              MapFormat::Standard, worldBounds, terrain, column, row)
+            | kdl::value();
+          REQUIRE(cellBrushes.size() == TerrainBrushesPerCell);
+
+          const auto base = (row * terrain.columns + column) * TerrainBrushesPerCell;
+          for (size_t i = 0; i < TerrainBrushesPerCell; ++i)
+          {
+            CHECK(cellBrushes[i].bounds() == all[base + i].bounds());
+          }
+        }
       }
     }
 

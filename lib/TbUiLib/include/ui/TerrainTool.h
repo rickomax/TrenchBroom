@@ -199,6 +199,17 @@ private:
    */
   void commitTerrain(const std::string& commandName);
 
+  /** The indices of the cells that differ from the given terrain, or an empty vector
+   * if the terrain's structure changed and every cell has to be rebuilt. */
+  std::vector<size_t> changedCells(const mdl::Terrain& original) const;
+
+  /**
+   * Commits a stroke by swapping the contents of only the changed cells' brushes and
+   * the terrain entity, which is far cheaper than regenerating every brush. Returns
+   * false if the terrain has to be rebuilt as a whole instead.
+   */
+  bool commitChangedCells(const std::string& commandName, const mdl::Terrain& original);
+
   std::vector<mdl::Node*> createBrushNodes() const;
 
 private:
