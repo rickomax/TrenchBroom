@@ -20,6 +20,7 @@
 #include "ui/TerrainToolPage.h"
 
 #include <QBoxLayout>
+#include <QComboBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
 #include <QPushButton>
@@ -28,10 +29,34 @@
 #include "ui/MapDocument.h"
 #include "ui/TerrainTool.h"
 
+#include <algorithm>
+#include <array>
 #include <optional>
+#include <utility>
 
 namespace tb::ui
 {
+namespace
+{
+
+using ModeItem = std::pair<std::optional<TerrainToolMode>, QString>;
+
+/** The entries of the mode drop down, in the order they are shown. */
+const std::array<ModeItem, 6>& modeItems()
+{
+  static const auto items = std::array<ModeItem, 6>{
+    ModeItem{std::nullopt, QObject::tr("None")},
+    ModeItem{TerrainToolMode::Raise, QObject::tr("Raise")},
+    ModeItem{TerrainToolMode::Lower, QObject::tr("Lower")},
+    ModeItem{TerrainToolMode::Flatten, QObject::tr("Flatten")},
+    ModeItem{TerrainToolMode::Smooth, QObject::tr("Smooth")},
+    ModeItem{TerrainToolMode::Texture, QObject::tr("Texture")},
+  };
+  return items;
+}
+
+} // namespace
+
 TerrainToolPage::TerrainToolPage(
   MapDocument& document, TerrainTool& tool, QWidget* parent)
   : QWidget{parent}
@@ -54,13 +79,6 @@ void TerrainToolPage::createGui()
     button->setFocusPolicy(Qt::NoFocus);
     button->setToolTip(toolTip);
     return button;
-  };
-
-  // Clicking the active mode toggle turns it off again, which leaves the tool doing
-  // nothing but picking up the terrain that is clicked.
-  const auto makeModeToggle = [&](const QString& label, const QString& toolTip) {
-    return makeToggle(
-      label, toolTip + tr("; click it again to turn it off and only select terrains"));
   };
 
   m_addTerrain = makeToggle(
@@ -88,20 +106,20 @@ void TerrainToolPage::createGui()
     tr("How much each application of the sculpting brush changes the terrain; the "
        "brush keeps being applied while the mouse is held down"));
 
-  m_raise = makeModeToggle(
-    tr("Raise"), tr("Raise the terrain under the brush (hold Shift to lower)"));
-  m_lower = makeModeToggle(
-    tr("Lower"), tr("Lower the terrain under the brush (hold Shift to raise)"));
-  m_flatten = makeModeToggle(
-    tr("Flatten"),
-    tr("Flatten the terrain under the brush towards the height where you clicked "
-       "(hold Shift to smooth)"));
-  m_smooth = makeModeToggle(
-    tr("Smooth"), tr("Even out the terrain under the brush (hold Shift to flatten)"));
-  m_texture = makeModeToggle(
-    tr("Texture"),
-    tr("Paint the material selected in the material browser onto the terrain cells "
-       "under the brush"));
+  // The modes are mutually exclusive, so one drop down takes far less of the toolbar
+  // than a row of toggles. "None" leaves the tool only selecting terrains.
+  m_mode = new QComboBox{};
+  m_mode->setFocusPolicy(Qt::NoFocus);
+  for (const auto& [mode, label] : modeItems())
+  {
+    m_mode->addItem(label);
+  }
+  m_mode->setToolTip(
+    tr("What the sculpting brush does: Raise and Lower move the terrain under the "
+       "brush, Flatten levels it towards the height where you clicked, Smooth evens it "
+       "out, and Texture paints the material selected in the material browser onto the "
+       "cells under the brush. Holding Shift swaps Raise with Lower and Flatten with "
+       "Smooth. With None selected, clicking a terrain picks it up for editing."));
 
   m_texScaleX = new QDoubleSpinBox{};
   m_texScaleX->setRange(-64.0, 64.0);
@@ -138,11 +156,8 @@ void TerrainToolPage::createGui()
   layout->addWidget(new QLabel{tr("Strength:")});
   layout->addWidget(m_strength);
   layout->addSpacing(12);
-  layout->addWidget(m_raise);
-  layout->addWidget(m_lower);
-  layout->addWidget(m_flatten);
-  layout->addWidget(m_smooth);
-  layout->addWidget(m_texture);
+  layout->addWidget(new QLabel{tr("Mode:")});
+  layout->addWidget(m_mode);
   layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Scale X:")});
   layout->addWidget(m_texScaleX);
@@ -162,23 +177,17 @@ void TerrainToolPage::createGui()
     }
   });
 
-  const auto connectMode = [this](QPushButton* button, const TerrainToolMode mode) {
-    connect(button, &QPushButton::clicked, this, [this, mode]() {
-      if (!m_updatingControls)
+  connect(
+    m_mode,
+    QOverload<int>::of(&QComboBox::currentIndexChanged),
+    this,
+    [this](const int index) {
+      if (!m_updatingControls && index >= 0 && size_t(index) < modeItems().size())
       {
-        // The modes are mutually exclusive, and clicking the active one deselects it,
-        // which leaves the tool only selecting terrains.
-        m_tool.setMode(
-          m_tool.mode() == mode ? std::optional<TerrainToolMode>{} : std::optional{mode});
+        m_tool.setMode(modeItems()[size_t(index)].first);
         updateControls();
       }
     });
-  };
-  connectMode(m_raise, TerrainToolMode::Raise);
-  connectMode(m_lower, TerrainToolMode::Lower);
-  connectMode(m_flatten, TerrainToolMode::Flatten);
-  connectMode(m_smooth, TerrainToolMode::Smooth);
-  connectMode(m_texture, TerrainToolMode::Texture);
 
   connect(
     m_cellSize,
@@ -251,14 +260,11 @@ void TerrainToolPage::updateControls()
   m_radius->setValue(m_tool.radius());
   m_strength->setValue(m_tool.strength());
 
-  // With no mode toggle selected the tool just picks up the terrain that is clicked;
-  // selecting one leaves creation mode, and vice versa.
-  const auto mode = m_tool.mode();
-  m_raise->setChecked(mode == TerrainToolMode::Raise);
-  m_lower->setChecked(mode == TerrainToolMode::Lower);
-  m_flatten->setChecked(mode == TerrainToolMode::Flatten);
-  m_smooth->setChecked(mode == TerrainToolMode::Smooth);
-  m_texture->setChecked(mode == TerrainToolMode::Texture);
+  // With None selected the tool just picks up the terrain that is clicked; selecting a
+  // mode leaves creation mode, and vice versa.
+  const auto& items = modeItems();
+  const auto item = std::ranges::find(items, m_tool.mode(), &ModeItem::first);
+  m_mode->setCurrentIndex(item != items.end() ? int(item - items.begin()) : 0);
 
   const auto hasTerrain = m_tool.hasTerrain();
   m_texScaleX->setEnabled(hasTerrain);

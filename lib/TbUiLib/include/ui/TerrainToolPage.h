@@ -23,6 +23,7 @@
 
 #include "NotifierConnection.h"
 
+class QComboBox;
 class QDoubleSpinBox;
 class QPushButton;
 
@@ -43,11 +44,7 @@ private:
   QDoubleSpinBox* m_radius = nullptr;
   QDoubleSpinBox* m_strength = nullptr;
 
-  QPushButton* m_raise = nullptr;
-  QPushButton* m_lower = nullptr;
-  QPushButton* m_flatten = nullptr;
-  QPushButton* m_smooth = nullptr;
-  QPushButton* m_texture = nullptr;
+  QComboBox* m_mode = nullptr;
 
   QDoubleSpinBox* m_texScaleX = nullptr;
   QDoubleSpinBox* m_texScaleY = nullptr;
