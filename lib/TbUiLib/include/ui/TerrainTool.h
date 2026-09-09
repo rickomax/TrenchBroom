@@ -23,6 +23,7 @@
 #include "NotifierConnection.h"
 #include "mdl/Terrain.h"
 #include "mdl/TerrainEntity.h"
+#include "mdl/TerrainHeightmap.h"
 #include "ui/Tool.h"
 
 #include "vm/bbox.h"
@@ -204,10 +205,15 @@ public: // terrain management
 
   /**
    * Replaces the terrain's heights with a headerless .raw height map read from the given
-   * file, spread over the vertical extent the terrain already has. Returns whether the
+   * file, spread over the vertical extent the terrain already has.
+   *
+   * The sample format is deduced from the file unless one is given, which is needed for
+   * the files whose length fits both 8 bit and 32 bit float samples. Returns whether the
    * file could be read; the reason is logged if not.
    */
-  bool importHeightmap(const std::filesystem::path& path);
+  bool importHeightmap(
+    const std::filesystem::path& path,
+    std::optional<mdl::RawSampleFormat> format = std::nullopt);
 
   /** Whether the terrain has generated brushes that can be broken out. */
   bool canBreakTerrain() const;

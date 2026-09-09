@@ -26,8 +26,10 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QStringList>
 
 #include "mdl/Map.h"
+#include "mdl/TerrainHeightmap.h"
 #include "ui/FileDialogDefaultDir.h"
 #include "ui/MapDocument.h"
 #include "ui/QPathUtils.h"
@@ -261,23 +263,44 @@ void TerrainToolPage::createGui()
 
 void TerrainToolPage::importHeightmap()
 {
+  // A .raw file carries no header, so the sample format normally has to be deduced from
+  // its length and contents. Picking one of the explicit filters says it outright, which
+  // is worth having because a file's length can fit both 8 bit and 32 bit float samples.
+  const auto autoFilter = tr("Raw height map (*.raw *.r8 *.r16 *.r32 *.f32 *.flt)");
+  const auto int8Filter = tr("Raw height map, 8 bit (*.raw *.r8)");
+  const auto int16Filter = tr("Raw height map, 16 bit (*.raw *.r16)");
+  const auto float32Filter = tr("Raw height map, 32 bit float (*.raw *.r32 *.f32 *.flt)");
+  const auto filters = QStringList{autoFilter, int8Filter, int16Filter, float32Filter}
+                       << tr("All files (*.*)");
+
+  auto selectedFilter = autoFilter;
   const auto path = QFileDialog::getOpenFileName(
     this,
     tr("Import Height Map"),
     fileDialogDefaultDirectory(FileDialogDir::Map),
-    tr("Raw height maps (*.raw *.r8 *.r16);;All files (*.*)"));
+    filters.join(";;"),
+    &selectedFilter);
 
-  if (!path.isEmpty())
+  if (path.isEmpty())
   {
-    updateFileDialogDefaultDirectoryWithFilename(FileDialogDir::Map, path);
-    if (!m_tool.importHeightmap(pathFromQString(path)))
-    {
-      QMessageBox::critical(
-        this,
-        tr("Import Height Map"),
-        tr("The height map could not be imported. See the map's issue log for the "
-           "reason."));
-    }
+    return;
+  }
+
+  const auto format =
+    selectedFilter == int8Filter      ? std::optional{mdl::RawSampleFormat::Int8}
+    : selectedFilter == int16Filter   ? std::optional{mdl::RawSampleFormat::Int16}
+    : selectedFilter == float32Filter ? std::optional{mdl::RawSampleFormat::Float32}
+                                      : std::nullopt;
+
+  updateFileDialogDefaultDirectoryWithFilename(FileDialogDir::Map, path);
+  if (!m_tool.importHeightmap(pathFromQString(path), format))
+  {
+    QMessageBox::critical(
+      this,
+      tr("Import Height Map"),
+      tr("The height map could not be imported. See the map's issue log for the reason. "
+         "If the file's size fits more than one sample format, choose the format "
+         "explicitly in the file dialog."));
   }
 }
 

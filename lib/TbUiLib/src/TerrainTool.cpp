@@ -422,7 +422,8 @@ void TerrainTool::removeTerrain()
   terrainDidChangeNotifier();
 }
 
-bool TerrainTool::importHeightmap(const std::filesystem::path& path)
+bool TerrainTool::importHeightmap(
+  const std::filesystem::path& path, const std::optional<mdl::RawSampleFormat> format)
 {
   auto& map = m_document.map();
   if (!hasTerrain())
@@ -432,7 +433,11 @@ bool TerrainTool::importHeightmap(const std::filesystem::path& path)
 
   return fs::Disk::openFile(path) | kdl::and_then([&](auto file) {
            const auto reader = file->reader().buffer();
-           return mdl::parseRawHeightmap(reader.stringView());
+           // An extension that names the sample format settles it when the caller did
+           // not; .raw itself says nothing, so the file has to be judged instead.
+           return mdl::parseRawHeightmap(
+             reader.stringView(),
+             format ? format : mdl::rawSampleFormatForExtension(path));
          })
          | kdl::and_then([&](const auto& heightmap) -> Result<void> {
              if (!mdl::applyRawHeightmap(m_terrain, heightmap))
@@ -442,7 +447,8 @@ bool TerrainTool::importHeightmap(const std::filesystem::path& path)
 
              map.logger().info()
                << "Imported a " << heightmap.size << "x" << heightmap.size << " "
-               << (heightmap.sixteenBit ? 16 : 8) << " bit height map from " << path;
+               << mdl::describeRawSampleFormat(heightmap.format) << " height map from "
+               << path;
              commitTerrain("Import Terrain Heightmap");
              return Result<void>{};
            })
