@@ -22,6 +22,8 @@
 #include "Logger.h"
 #include "PreferenceManager.h"
 #include "Preferences.h"
+#include "fs/DiskIO.h"
+#include "fs/File.h"
 #include "mdl/Brush.h"
 #include "mdl/BrushNode.h"
 #include "mdl/Entity.h"
@@ -37,6 +39,7 @@
 #include "mdl/PatchNode.h"
 #include "mdl/PickResult.h"
 #include "mdl/TerrainBrushes.h"
+#include "mdl/TerrainHeightmap.h"
 #include "mdl/Transaction.h"
 #include "mdl/TransactionScope.h"
 #include "mdl/WorldNode.h"
@@ -417,6 +420,39 @@ void TerrainTool::removeTerrain()
   refreshOtherTerrains();
   refreshViews();
   terrainDidChangeNotifier();
+}
+
+bool TerrainTool::importHeightmap(const std::filesystem::path& path)
+{
+  auto& map = m_document.map();
+  if (!hasTerrain())
+  {
+    return false;
+  }
+
+  return fs::Disk::openFile(path) | kdl::and_then([&](auto file) {
+           const auto reader = file->reader().buffer();
+           return mdl::parseRawHeightmap(reader.stringView());
+         })
+         | kdl::and_then([&](const auto& heightmap) -> Result<void> {
+             if (!mdl::applyRawHeightmap(m_terrain, heightmap))
+             {
+               return Error{"the height map could not be applied to this terrain"};
+             }
+
+             map.logger().info()
+               << "Imported a " << heightmap.size << "x" << heightmap.size << " "
+               << (heightmap.sixteenBit ? 16 : 8) << " bit height map from " << path;
+             commitTerrain("Import Terrain Heightmap");
+             return Result<void>{};
+           })
+         | kdl::transform([]() { return true; })
+         | kdl::transform_error([&](const auto& e) {
+             map.logger().error()
+               << "Could not import height map from " << path << ": " << e.msg;
+             return false;
+           })
+         | kdl::value();
 }
 
 bool TerrainTool::canBreakTerrain() const

@@ -182,6 +182,7 @@ target_sources(TbMdlLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineBrushes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineEntity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Terrain.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TerrainHeightmap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TerrainBrushes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TerrainEntity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/StandardMapParser.cpp

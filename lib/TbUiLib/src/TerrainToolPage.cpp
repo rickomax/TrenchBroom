@@ -22,11 +22,15 @@
 #include <QBoxLayout>
 #include <QComboBox>
 #include <QDoubleSpinBox>
+#include <QFileDialog>
 #include <QLabel>
+#include <QMessageBox>
 #include <QPushButton>
 
 #include "mdl/Map.h"
+#include "ui/FileDialogDefaultDir.h"
 #include "ui/MapDocument.h"
+#include "ui/QPathUtils.h"
 #include "ui/TerrainTool.h"
 
 #include <algorithm>
@@ -138,6 +142,13 @@ void TerrainToolPage::createGui()
     tr("Vertical texture scale of the whole terrain; changing it rescales all of the "
        "terrain's texture coordinates"));
 
+  m_importButton = new QPushButton{tr("Import")};
+  m_importButton->setFocusPolicy(Qt::NoFocus);
+  m_importButton->setToolTip(
+    tr("Replace the terrain's heights with a raw height map. The file's dimensions are "
+       "taken from its size, which must be a square of 8 bit or 16 bit samples, and the "
+       "heights are spread over the terrain's current height"));
+
   m_removeButton = new QPushButton{tr("Remove")};
   m_removeButton->setFocusPolicy(Qt::NoFocus);
   m_removeButton->setToolTip(tr("Delete the current terrain and its brushes"));
@@ -167,6 +178,7 @@ void TerrainToolPage::createGui()
   layout->addWidget(new QLabel{tr("Y:")});
   layout->addWidget(m_texScaleY);
   layout->addSpacing(12);
+  layout->addWidget(m_importButton);
   layout->addWidget(m_removeButton);
   layout->addWidget(m_breakButton);
   layout->addStretch();
@@ -240,10 +252,33 @@ void TerrainToolPage::createGui()
     this,
     [applyTexScale](double) { applyTexScale(); });
 
+  connect(m_importButton, &QPushButton::clicked, this, [this]() { importHeightmap(); });
   connect(
     m_removeButton, &QPushButton::clicked, this, [this]() { m_tool.removeTerrain(); });
   connect(
     m_breakButton, &QPushButton::clicked, this, [this]() { m_tool.breakTerrain(); });
+}
+
+void TerrainToolPage::importHeightmap()
+{
+  const auto path = QFileDialog::getOpenFileName(
+    this,
+    tr("Import Height Map"),
+    fileDialogDefaultDirectory(FileDialogDir::Map),
+    tr("Raw height maps (*.raw *.r8 *.r16);;All files (*.*)"));
+
+  if (!path.isEmpty())
+  {
+    updateFileDialogDefaultDirectoryWithFilename(FileDialogDir::Map, path);
+    if (!m_tool.importHeightmap(pathFromQString(path)))
+    {
+      QMessageBox::critical(
+        this,
+        tr("Import Height Map"),
+        tr("The height map could not be imported. See the map's issue log for the "
+           "reason."));
+    }
+  }
 }
 
 void TerrainToolPage::connectObservers()
@@ -278,6 +313,7 @@ void TerrainToolPage::updateControls()
     m_texScaleY->setValue(double(m_tool.texScaleY()));
   }
 
+  m_importButton->setEnabled(m_tool.hasTerrain());
   m_removeButton->setEnabled(m_tool.canRemoveTerrain());
   m_breakButton->setEnabled(m_tool.canBreakTerrain());
 

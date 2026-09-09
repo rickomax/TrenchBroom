@@ -49,6 +49,7 @@ private:
   QDoubleSpinBox* m_texScaleX = nullptr;
   QDoubleSpinBox* m_texScaleY = nullptr;
 
+  QPushButton* m_importButton = nullptr;
   QPushButton* m_removeButton = nullptr;
   QPushButton* m_breakButton = nullptr;
 
@@ -62,6 +63,7 @@ public:
 
 private:
   void createGui();
+  void importHeightmap();
   void connectObservers();
   void updateControls();
 };

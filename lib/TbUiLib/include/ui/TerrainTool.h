@@ -29,6 +29,7 @@
 #include "vm/ray.h"
 #include "vm/vec.h"
 
+#include <filesystem>
 #include <optional>
 #include <set>
 #include <string>
@@ -200,6 +201,13 @@ public: // terrain management
   bool canRemoveTerrain() const;
   /** Deletes the current terrain and its generated brushes. */
   void removeTerrain();
+
+  /**
+   * Replaces the terrain's heights with a headerless .raw height map read from the given
+   * file, spread over the vertical extent the terrain already has. Returns whether the
+   * file could be read; the reason is logged if not.
+   */
+  bool importHeightmap(const std::filesystem::path& path);
 
   /** Whether the terrain has generated brushes that can be broken out. */
   bool canBreakTerrain() const;
