@@ -19,6 +19,8 @@
 
 #include "ui/MapView3D.h"
 
+#include <QTimer>
+
 #include "PreferenceManager.h"
 #include "Preferences.h"
 #include "gl/PerspectiveCamera.h"
@@ -38,6 +40,7 @@
 #include "mdl/WorldNode.h"
 #include "render/BoundsGuideRenderer.h"
 #include "render/Compass3D.h"
+#include "render/LightPreview.h"
 #include "render/MapRenderer.h"
 #include "render/RenderBatch.h"
 #include "render/RenderContext.h"
@@ -46,8 +49,6 @@
 #include "ui/CameraAnimation.h"
 #include "ui/CameraTool3D.h"
 #include "ui/ClipToolController.h"
-#include "ui/SplineToolController.h"
-#include "ui/TerrainToolController.h"
 #include "ui/ControlPointTool.h"
 #include "ui/ControlPointToolController.h"
 #include "ui/CreateEntityToolController.h"
@@ -58,6 +59,8 @@
 #include "ui/FaceTool.h" // IWYU pragma: keep
 #include "ui/FaceToolController.h"
 #include "ui/FlyModeHelper.h"
+#include "ui/GlFunctions.h"
+#include "ui/GlQt.h"
 #include "ui/MapDocument.h"
 #include "ui/MapViewToolBox.h"
 #include "ui/MoveObjectsToolController.h"
@@ -66,6 +69,8 @@
 #include "ui/SelectionTool.h"
 #include "ui/SetBrushFaceAttributesTool.h"
 #include "ui/ShearToolController.h"
+#include "ui/SplineToolController.h"
+#include "ui/TerrainToolController.h"
 #include "ui/VertexTool.h"
 #include "ui/VertexToolController.h"
 
@@ -82,6 +87,7 @@ MapView3D::MapView3D(
   : MapViewBase{appController, document, toolBox}
   , m_camera{std::make_unique<gl::PerspectiveCamera>()}
   , m_flyModeHelper{std::make_unique<FlyModeHelper>(*m_camera)}
+  , m_lightPreview{std::make_unique<render::LightPreview>()}
 {
   bindEvents();
   connectObservers();
@@ -136,6 +142,55 @@ void MapView3D::connectObservers()
   auto& prefs = PreferenceManager::instance();
   m_notifierConnection +=
     prefs.preferenceDidChangeNotifier.connect(this, &MapView3D::preferenceDidChange);
+
+  // Anything that moves geometry, changes a light, hides something or reloads a texture
+  // changes what the preview should show, so it starts over.
+  m_notifierConnection += m_document.documentWasLoadedNotifier.connect(
+    this, &MapView3D::invalidateLightPreview);
+  m_notifierConnection += m_document.documentDidChangeNotifier.connect(
+    this, &MapView3D::invalidateLightPreview);
+  m_notifierConnection += m_document.editorContextDidChangeNotifier.connect(
+    this, &MapView3D::invalidateLightPreview);
+  // Reloading a collection destroys the materials the preview cached albedo for, so that
+  // cache has to go with them.
+  m_notifierConnection += m_document.materialCollectionsDidChangeNotifier.connect(
+    this, &MapView3D::invalidateLightPreviewMaterials);
+  m_notifierConnection += m_document.nodeVisibilityDidChangeNotifier.connect(
+    this, [this](const std::vector<mdl::Node*>&) { invalidateLightPreview(); });
+}
+
+void MapView3D::invalidateLightPreview()
+{
+  m_lightPreview->invalidateScene();
+}
+
+void MapView3D::invalidateLightPreviewMaterials()
+{
+  m_lightPreview->invalidateMaterials();
+}
+
+void MapView3D::updateLightPreviewSettings()
+{
+  m_lightPreview->setEnabled(pref(Preferences::ShowLightPreview));
+
+  const auto& quality = pref(Preferences::LightPreviewQuality);
+  m_lightPreview->setQuality(
+    quality == Preferences::LightPreviewQualityLow ? render::LightPreview::Quality::Low
+    : quality == Preferences::LightPreviewQualityHigh
+      ? render::LightPreview::Quality::High
+      : render::LightPreview::Quality::Medium);
+
+  m_lightPreview->setExposure(pref(Preferences::LightPreviewExposure));
+}
+
+void MapView3D::releaseLightPreviewResources()
+{
+  // The preview's texture and buffer belong to this widget's context, so they have to go
+  // while that context is still current.
+  makeCurrent();
+  auto gl = GlQt{getGlFunctions("MapView3D::releaseLightPreviewResources", context())};
+  m_lightPreview->releaseGlResources(gl);
+  doneCurrent();
 }
 
 void MapView3D::cameraDidChange(const gl::Camera& /* camera */)
@@ -194,6 +249,17 @@ void MapView3D::bindEvents()
 {
   // Fly mode animation
   connect(this, &QOpenGLWidget::frameSwapped, this, &MapView3D::updateFlyMode);
+
+  // The preview refines itself on its own threads, so the view has to come back and ask
+  // for the newer image. Fifteen times a second is enough to watch the noise settle
+  // without spending the cores that are doing the tracing on redrawing the scene.
+  m_lightPreviewTimer = new QTimer{this};
+  m_lightPreviewTimer->setInterval(66);
+  connect(m_lightPreviewTimer, &QTimer::timeout, this, [this]() { update(); });
+
+  connect(this, &QOpenGLWidget::aboutToBeDestroyed, this, [this]() {
+    releaseLightPreviewResources();
+  });
 }
 
 void MapView3D::updateFlyMode()
@@ -579,6 +645,29 @@ void MapView3D::renderTools(
   render::RenderBatch& renderBatch)
 {
   ToolBoxConnector::renderTools(renderContext, renderBatch);
+}
+
+void MapView3D::renderOverlay(render::RenderContext& renderContext)
+{
+  updateLightPreviewSettings();
+  m_lightPreview->render(renderContext, vboManager(), m_document.map());
+
+  if (m_lightPreview->needsUpdate())
+  {
+    if (!m_lightPreviewTimer->isActive())
+    {
+      m_lightPreviewTimer->start();
+    }
+  }
+  else if (m_lightPreviewTimer->isActive())
+  {
+    m_lightPreviewTimer->stop();
+  }
+}
+
+std::string MapView3D::overlayStatusText() const
+{
+  return m_lightPreview->statusText();
 }
 
 void MapView3D::beforePopupMenu()

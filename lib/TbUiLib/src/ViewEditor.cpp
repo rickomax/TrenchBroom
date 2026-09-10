@@ -21,11 +21,13 @@
 
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QGridLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 
 #include "PreferenceManager.h"
 #include "Preferences.h"
@@ -313,6 +315,7 @@ void ViewEditor::createGui()
     gridLayout->addWidget(patchesPanel, row++, 1);
   }
   gridLayout->addWidget(createRendererPanel(this), row++, 1);
+  gridLayout->addWidget(createLightPreviewPanel(this), row++, 1);
   gridLayout->addWidget(createEntityDefinitionsPanel(this), 0, 0, row, 1);
 
   setLayout(gridLayout);
@@ -616,6 +619,7 @@ void ViewEditor::refreshGui()
   refreshBrushesPanel();
   refreshPatchesPanel();
   refreshRendererPanel();
+  refreshLightPreviewPanel();
 }
 
 void ViewEditor::refreshEntityDefinitionsPanel()
@@ -670,6 +674,59 @@ void ViewEditor::refreshRendererPanel()
     QString::fromStdString(pref(Preferences::EntityLinkMode)),
     true);
   m_showSoftBoundsCheckBox->setChecked(pref(Preferences::ShowSoftMapBounds));
+}
+
+void ViewEditor::refreshLightPreviewPanel()
+{
+  m_showLightPreviewCheckBox->setChecked(pref(Preferences::ShowLightPreview));
+
+  const auto quality = QString::fromStdString(pref(Preferences::LightPreviewQuality));
+  if (const auto index = m_lightPreviewQualityComboBox->findData(quality); index >= 0)
+  {
+    const auto blocker = QSignalBlocker{m_lightPreviewQualityComboBox};
+    m_lightPreviewQualityComboBox->setCurrentIndex(index);
+  }
+}
+
+QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
+{
+  auto* panel = new TitledPanel{"Light Preview", parent, false};
+  auto* inner = panel->getPanel();
+
+  m_showLightPreviewCheckBox = new QCheckBox{tr("Show light preview")};
+  m_showLightPreviewCheckBox->setToolTip(tr(
+    "Path traces the map's lighting over the 3D view. The preview refines itself while "
+    "the view is left alone, and starts over when the camera or the map changes."));
+
+  m_lightPreviewQualityComboBox = new QComboBox{};
+  m_lightPreviewQualityComboBox->addItem(
+    tr("Low quality"), QString::fromStdString(Preferences::LightPreviewQualityLow));
+  m_lightPreviewQualityComboBox->addItem(
+    tr("Medium quality"), QString::fromStdString(Preferences::LightPreviewQualityMedium));
+  m_lightPreviewQualityComboBox->addItem(
+    tr("High quality"), QString::fromStdString(Preferences::LightPreviewQualityHigh));
+  m_lightPreviewQualityComboBox->setToolTip(
+    tr("Trades resolution and bounce count against how quickly the preview settles."));
+
+  connect(
+    m_showLightPreviewCheckBox,
+    &QAbstractButton::clicked,
+    this,
+    &ViewEditor::showLightPreviewChanged);
+  connect(
+    m_lightPreviewQualityComboBox,
+    &QComboBox::currentIndexChanged,
+    this,
+    &ViewEditor::lightPreviewQualityChanged);
+
+  auto* layout = new QVBoxLayout{};
+  layout->setContentsMargins(0, 0, 0, 0);
+  layout->setSpacing(0);
+  layout->addWidget(m_showLightPreviewCheckBox);
+  layout->addWidget(m_lightPreviewQualityComboBox);
+
+  inner->setLayout(layout);
+  return panel;
 }
 
 void ViewEditor::showEntityClassnamesChanged(const bool checked)
@@ -787,6 +844,21 @@ void ViewEditor::showSoftMapBoundsChanged(const bool checked)
   setPref(Preferences::ShowSoftMapBounds, checked);
 }
 
+void ViewEditor::showLightPreviewChanged(const bool checked)
+{
+  setPref(Preferences::ShowLightPreview, checked);
+}
+
+void ViewEditor::lightPreviewQualityChanged(const int index)
+{
+  if (index >= 0)
+  {
+    setPref(
+      Preferences::LightPreviewQuality,
+      m_lightPreviewQualityComboBox->itemData(index).toString().toStdString());
+  }
+}
+
 void ViewEditor::restoreDefaultsClicked()
 {
   auto& prefs = PreferenceManager::instance();
@@ -803,6 +875,9 @@ void ViewEditor::restoreDefaultsClicked()
   prefs.resetToDefault(Preferences::ShowPointEntities);
   prefs.resetToDefault(Preferences::ShowBrushes);
   prefs.resetToDefault(Preferences::EntityLinkMode);
+  prefs.resetToDefault(Preferences::ShowLightPreview);
+  prefs.resetToDefault(Preferences::LightPreviewQuality);
+  prefs.resetToDefault(Preferences::LightPreviewExposure);
   prefs.saveChanges();
 }
 

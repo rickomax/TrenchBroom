@@ -31,6 +31,7 @@
 #include "Logger.h"
 #include "PreferenceManager.h"
 #include "Preferences.h"
+#include "gl/AttrString.h"
 #include "gl/Camera.h"
 #include "gl/FontDescriptor.h"
 #include "gl/FontManager.h"
@@ -1037,10 +1038,14 @@ void MapViewBase::renderContents(gl::Gl& gl)
   renderPointFile(renderContext, renderBatch);
   renderPortalFile(renderContext, renderBatch);
   renderCompass(renderBatch);
-  renderFPS(renderContext, renderBatch);
+  renderHeadsUp(renderContext, renderBatch);
 
   renderBatch.render(renderContext);
+
+  renderOverlay(renderContext);
 }
+
+void MapViewBase::renderOverlay(render::RenderContext&) {}
 
 void MapViewBase::preRender() {}
 
@@ -1147,14 +1152,34 @@ void MapViewBase::renderCompass(render::RenderBatch& renderBatch)
   }
 }
 
-void MapViewBase::renderFPS(
+void MapViewBase::renderHeadsUp(
   render::RenderContext& renderContext, render::RenderBatch& renderBatch)
 {
+  auto headsUp = gl::AttrString{};
+  auto empty = true;
+
   if (pref(Preferences::ShowFPS))
   {
-    auto renderService = render::RenderService{renderContext, renderBatch};
-    renderService.renderHeadsUp(m_currentFPS);
+    headsUp.appendLeftJustified(m_currentFPS);
+    empty = false;
   }
+
+  if (auto status = overlayStatusText(); !status.empty())
+  {
+    headsUp.appendLeftJustified(std::move(status));
+    empty = false;
+  }
+
+  if (!empty)
+  {
+    auto renderService = render::RenderService{renderContext, renderBatch};
+    renderService.renderHeadsUp(headsUp);
+  }
+}
+
+std::string MapViewBase::overlayStatusText() const
+{
+  return {};
 }
 
 void MapViewBase::processEvent(const KeyEvent& event)

@@ -314,6 +314,17 @@ inline auto ShadeFaces = Preference<bool>{"Map view/Shade faces", true};
 inline auto ShowFog = Preference<bool>{"Map view/Show fog", false};
 inline auto ShowEdges = Preference<bool>{"Map view/Show edges", true};
 
+inline auto ShowLightPreview = Preference<bool>{"Map view/Light preview", false};
+
+inline constexpr auto LightPreviewQualityLow = "low";
+inline constexpr auto LightPreviewQualityMedium = "medium";
+inline constexpr auto LightPreviewQualityHigh = "high";
+inline auto LightPreviewQuality =
+  Preference<std::string>{"Map view/Light preview quality", LightPreviewQualityMedium};
+
+inline auto LightPreviewExposure =
+  Preference<float>{"Map view/Light preview exposure", 1.0f};
+
 inline auto ShowSoftMapBounds = Preference<bool>{"Map view/Show soft map bounds", true};
 
 inline auto ShowPointEntities = Preference<bool>{"Map view/Show point entities", true};

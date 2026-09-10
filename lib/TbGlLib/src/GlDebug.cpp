@@ -600,6 +600,16 @@ void GlDebug::compressedTexImage2D(
     target, level, internalformat, width, height, border, imageSize, data));
 }
 
+void GlDebug::getTexImage(
+  const GLenum target,
+  const GLint level,
+  const GLenum format,
+  const GLenum type,
+  GLvoid* pixels)
+{
+  glAssert(m_gl.getTexImage(target, level, format, type, pixels));
+}
+
 void GlDebug::texParameterf(const GLenum target, const GLenum pname, const GLfloat param)
 {
   glAssert(m_gl.texParameterf(target, pname, param));

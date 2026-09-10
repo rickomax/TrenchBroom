@@ -66,6 +66,12 @@ inline const ShaderConfig PatchShader = ShaderConfig{
   {"Grid.fragsh", "MapBounds.fragsh", "Face.fragsh"},
 };
 
+inline const ShaderConfig LightPreviewShader = ShaderConfig{
+  "Light Preview",
+  {"LightPreview.vertsh"},
+  {"LightPreview.fragsh"},
+};
+
 inline const ShaderConfig EdgeShader = ShaderConfig{
   "Edge",
   {"Edge.vertsh"},

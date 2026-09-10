@@ -190,6 +190,9 @@ public:
     GLsizei imageSize,
     const GLvoid* data) = 0;
 
+  virtual void getTexImage(
+    GLenum target, GLint level, GLenum format, GLenum type, GLvoid* pixels) = 0;
+
   virtual void texParameterf(GLenum target, GLenum pname, GLfloat param) = 0;
   virtual void texParameteri(GLenum target, GLenum pname, GLint param) = 0;
 

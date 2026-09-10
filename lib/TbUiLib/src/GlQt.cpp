@@ -525,6 +525,16 @@ void GlQt::compressedTexImage2D(
     target, level, internalformat, width, height, border, imageSize, data);
 }
 
+void GlQt::getTexImage(
+  const GLenum target,
+  const GLint level,
+  const GLenum format,
+  const GLenum type,
+  GLvoid* pixels)
+{
+  m_gl.glGetTexImage(target, level, format, type, pixels);
+}
+
 void GlQt::texParameterf(const GLenum target, const GLenum pname, const GLfloat param)
 {
   m_gl.glTexParameterf(target, pname, param);

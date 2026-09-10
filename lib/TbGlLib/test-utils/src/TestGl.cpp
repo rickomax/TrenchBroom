@@ -165,6 +165,8 @@ void TestGl::compressedTexImage2D(
 {
 }
 
+void TestGl::getTexImage(GLenum, GLint, GLenum, GLenum, GLvoid*) {}
+
 void TestGl::texParameterf(GLenum, GLenum, GLfloat) {}
 void TestGl::texParameteri(GLenum, GLenum, GLint) {}
 

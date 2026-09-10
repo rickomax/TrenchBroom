@@ -151,6 +151,8 @@ public:
   void compressedTexImage2D(
     GLenum, GLint, GLenum, GLsizei, GLsizei, GLint, GLsizei, const GLvoid*) override;
 
+  void getTexImage(GLenum, GLint, GLenum, GLenum, GLvoid*) override;
+
   void texParameterf(GLenum, GLenum, GLfloat) override;
   void texParameteri(GLenum, GLenum, GLint) override;
 
