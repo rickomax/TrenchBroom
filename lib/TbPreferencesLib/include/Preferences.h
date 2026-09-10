@@ -323,7 +323,13 @@ inline auto LightPreviewQuality =
   Preference<std::string>{"Map view/Light preview quality", LightPreviewQualityMedium};
 
 inline auto LightPreviewShowModels =
-  Preference<bool>{"Map view/Light preview models", true};
+  Preference<bool>{"Map view/Light preview models", false};
+
+inline constexpr auto LightPreviewIndirectFromMap = "map";
+inline constexpr auto LightPreviewIndirectOn = "on";
+inline constexpr auto LightPreviewIndirectOff = "off";
+inline auto LightPreviewIndirect =
+  Preference<std::string>{"Map view/Light preview indirect", LightPreviewIndirectFromMap};
 
 inline auto LightPreviewExposure =
   Preference<float>{"Map view/Light preview exposure", 1.0f};

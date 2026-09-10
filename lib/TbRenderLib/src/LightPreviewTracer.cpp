@@ -248,8 +248,9 @@ float attenuatedValue(
   }
 
   // An explicit falloff overrides the formula: the light fades linearly and reaches zero
-  // exactly at the given distance, whatever "wait" says.
-  if (light.falloff > 0.0f)
+  // exactly at the given distance, whatever "wait" says. The compilers only honour it on
+  // linear lights, so neither does this.
+  if (light.falloff > 0.0f && light.attenuation == PreviewAttenuation::Linear)
   {
     return distance >= light.falloff
              ? 0.0f
@@ -284,12 +285,13 @@ float attenuatedValue(
  * How much the angle between the surface and the light matters.
  *
  * The compilers do not use the plain cosine here: "_anglescale" mixes it towards a flat
- * response, which softens the terminator on curved brushwork. A scale of zero leaves the
- * cosine alone, which is what makes it the identity rather than the extreme.
+ * response, which softens the terminator on curved brushwork. The scale runs the whole
+ * way, from zero, where the angle has no effect on brightness at all, to one, where the
+ * plain cosine is used. It defaults to half way between.
  */
 float angleTerm(const float cosTheta, const float angleScale)
 {
-  return angleScale > 0.0f ? (1.0f - angleScale) + angleScale * cosTheta : cosTheta;
+  return (1.0f - angleScale) + angleScale * cosTheta;
 }
 
 /**
@@ -756,8 +758,10 @@ vm::vec3f tracePreviewPixel(
   auto radiance = vm::vec3f{0, 0, 0};
   auto throughput = vm::vec3f{1, 1, 1};
 
-  const auto maxBounces =
-    scene.globals.bounceEnabled ? std::max(settings.maxBounces, 0) : 0;
+  const auto bounceEnabled =
+    settings.indirectLight == PreviewIndirectLight::On
+    || (settings.indirectLight == PreviewIndirectLight::FromMap && scene.globals.bounceEnabled);
+  const auto maxBounces = bounceEnabled ? std::max(settings.maxBounces, 0) : 0;
 
   auto depth = 0;
   auto passThroughs = 0;

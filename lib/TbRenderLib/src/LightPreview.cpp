@@ -411,6 +411,23 @@ void LightPreview::setShowModels(const bool showModels)
   }
 }
 
+PreviewIndirectLight LightPreview::indirectLight() const
+{
+  return m_indirectLight;
+}
+
+void LightPreview::setIndirectLight(const PreviewIndirectLight indirectLight)
+{
+  if (m_indirectLight != indirectLight)
+  {
+    m_indirectLight = indirectLight;
+
+    // This changes how the scene is traced rather than what is in it, so the trace starts
+    // over but the geometry is kept.
+    cancelJob();
+  }
+}
+
 void LightPreview::invalidateMaterials()
 {
   m_materialCache->clear();
@@ -479,6 +496,7 @@ PreviewTraceSettings LightPreview::traceSettings() const
 {
   auto settings = PreviewTraceSettings{};
   settings.exposure = m_exposure;
+  settings.indirectLight = m_indirectLight;
 
   switch (m_quality)
   {

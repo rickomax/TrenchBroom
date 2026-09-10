@@ -211,7 +211,7 @@ struct PreviewSceneOptions
   /** The largest side an albedo texture is kept at. */
   size_t maxTextureSize = 64;
   /** Whether entity models are traced along with the brushwork. */
-  bool includeEntityModels = true;
+  bool includeEntityModels = false;
 };
 
 /**

@@ -175,12 +175,12 @@ struct PreviewGlobalLighting
   /** "_anglescale": the default angle of incidence response for lights that omit it. */
   float defaultAngleScale = 0.5f;
 
-  /** "_bounce": whether indirect light is computed at all. */
-  bool bounceEnabled = true;
+  /** "_bounce": whether indirect light is computed at all. Off unless asked for. */
+  bool bounceEnabled = false;
   /** "_bouncescale": how strong indirect light is. */
   float bounceScale = 1.0f;
   /** "_bouncecolorscale": how much indirect light picks up the colour of surfaces. */
-  float bounceColorScale = 1.0f;
+  float bounceColorScale = 0.0f;
 
   /** "_surflightscale" and "_surflightskyscale". */
   float surfaceLightScale = 1.0f;

@@ -21,7 +21,13 @@ and `delay 4` local minimum light; projected texture lights. All five `delay` at
 formulas, `wait`, `_falloff`, `_anglescale`, `_deviance`, `_softangle`, the GoldSrc
 `_cone`/`_cone2` cone spelling, `_light_channel_mask`, negative lights, and the
 `_dist`/`_range`/`_gamma`/`_maxlight` worldspawn controls. Indirect light, with
-`_bounce`, `_bouncescale` and `_bouncecolorscale`.
+`_bounce`, `_bouncescale` and `_bouncecolorscale`, which like the compilers is off unless
+the map turns it on; the "Indirect light" setting in View Options overrides that the same
+way passing `-bounce` does.
+
+Brush models cast shadows only where the compilers do: the world and the brushes merged
+into it by `func_detail` and `func_group` always cast unless `_shadow` `-1` says
+otherwise, and a separate brush model casts only when `_shadow` `1` asks it to.
 
 Faces the game config tags transparent (water, slime, lava, triggers, clip, hint) are
 shaded but do not block light, because the compiler only traces against the solid hull. A
@@ -49,6 +55,13 @@ one cast a shadow would show something the compiled map will not have.
 
 These are worth revisiting; they are listed here rather than buried in the code so that
 they can be checked against a real compile.
+
+**Open questions**
+
+- *`_range` is treated as defaulting to 1.* The manual describes it as "values of n > 0.5
+  makes lights brighter and n < 0.5 makes lights less bright", which reads as though the
+  default were 0.5, but it does not state one. Reading it that way would halve every
+  preview, so it is left at 1 until something settles it.
 
 **Read from the wrong place, or guessed**
 
@@ -103,10 +116,13 @@ they can be checked against a real compile.
 
 - `_samples` on a `_deviance` light. The preview takes one sample of the light's sphere
   per pass and the passes converge to the same answer, so the count has nothing to do.
+  The manual notes that `light` is scaled down for most formulas to keep the brightness
+  equal as `_deviance` splits it; averaging the passes does that on its own.
 - `_surflightsubdivision` and `-surflight_subdivide`. Surface lights are sampled as area
-  lights rather than subdivided into point lights, so no spacing is chosen. This also
-  sidesteps the inconsistency between the 128 unit spacing the `_surface` documentation
-  mentions and the 16 unit default documented for `-surflight_subdivide`.
+  lights rather than subdivided into point lights, so no spacing is chosen.
+- `-soft`, `-extra` and `-extra4`, which oversample and smooth the lightmap. The preview
+  jitters within each pixel and averages the passes, which is the same idea carried
+  further.
 - `_bouncelightsubdivision`, for the same reason.
 
 ## Notes on the units

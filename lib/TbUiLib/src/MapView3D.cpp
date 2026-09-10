@@ -188,6 +188,14 @@ void MapView3D::updateLightPreviewSettings()
       : render::LightPreview::Quality::Medium);
 
   m_lightPreview->setShowModels(pref(Preferences::LightPreviewShowModels));
+
+  const auto& indirect = pref(Preferences::LightPreviewIndirect);
+  m_lightPreview->setIndirectLight(
+    indirect == Preferences::LightPreviewIndirectOn ? render::PreviewIndirectLight::On
+    : indirect == Preferences::LightPreviewIndirectOff
+      ? render::PreviewIndirectLight::Off
+      : render::PreviewIndirectLight::FromMap);
+
   m_lightPreview->setExposure(pref(Preferences::LightPreviewExposure));
 }
 

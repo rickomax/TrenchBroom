@@ -32,6 +32,7 @@
 #include "mdl/EntityModel.h"
 #include "mdl/EntityNode.h"
 #include "mdl/EntityNodeBase.h"
+#include "mdl/EntityProperties.h"
 #include "mdl/GameConfig.h"
 #include "mdl/GameInfo.h"
 #include "mdl/GroupNode.h"
@@ -451,12 +452,16 @@ BrushModelLighting readBrushModelLighting(const mdl::EntityNodeBase* entityNode)
     result.objectChannelMask = int32_t(*mask);
   }
 
-  // "_shadow" "-1" makes a brush model invisible to shadow rays, which mappers use to
-  // keep a decorative model from darkening the room it sits in.
-  if (const auto shadow = number("_shadow"))
-  {
-    result.castsShadows = *shadow >= 0.0f;
-  }
+  // A brush model is a separate model in the BSP, and the compilers do not trace against
+  // it unless "_shadow" "1" asks them to; the world itself, and the brushes merged into
+  // it by func_detail and func_group, always cast unless "_shadow" "-1" says otherwise.
+  const auto& classname = entityNode->entity().classname();
+  const auto partOfWorld = classname == mdl::EntityPropertyValues::WorldspawnClassname
+                           || startsWithIgnoringCase(classname, "func_detail")
+                           || startsWithIgnoringCase(classname, "func_group");
+
+  const auto shadow = number("_shadow").value_or(0.0f);
+  result.castsShadows = shadow > 0.0f ? true : shadow < 0.0f ? false : partOfWorld;
 
   if (const auto lightIgnore = number("_lightignore"))
   {

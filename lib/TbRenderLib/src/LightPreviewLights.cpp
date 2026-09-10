@@ -499,11 +499,13 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
   result.defaultAngleScale = std::clamp(
     floatProperty(worldspawn, {"_anglescale", "_anglesense"}).value_or(0.5f), 0.0f, 1.0f);
 
-  result.bounceEnabled = intProperty(worldspawn, {"_bounce"}).value_or(1) != 0;
+  // The compilers do not bounce light unless they are asked to, and when they do, the
+  // bounce ignores the colour of the surface it came off unless that is asked for too.
+  result.bounceEnabled = intProperty(worldspawn, {"_bounce"}).value_or(0) != 0;
   result.bounceScale =
     std::max(floatProperty(worldspawn, {"_bouncescale"}).value_or(1.0f), 0.0f);
   result.bounceColorScale = std::clamp(
-    floatProperty(worldspawn, {"_bouncecolorscale"}).value_or(1.0f), 0.0f, 1.0f);
+    floatProperty(worldspawn, {"_bouncecolorscale"}).value_or(0.0f), 0.0f, 1.0f);
 
   result.surfaceLightScale =
     std::max(floatProperty(worldspawn, {"_surflightscale"}).value_or(1.0f), 0.0f);

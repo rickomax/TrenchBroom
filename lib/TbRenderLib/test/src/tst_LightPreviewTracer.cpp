@@ -168,6 +168,7 @@ public:
 
     auto settings = PreviewTraceSettings{};
     settings.maxBounces = m_bounces;
+    settings.indirectLight = PreviewIndirectLight::On;
 
     auto sum = vm::vec3f{0, 0, 0};
     for (auto i = 0; i < samples; ++i)
@@ -234,6 +235,17 @@ TEST_CASE("tracePreviewPixel")
       CHECK(test.shade(256) == Catch::Approx(display(150.0f)).margin(0.01));
     }
 
+    SECTION("_falloff is ignored on anything but a linear light")
+    {
+      auto test = TestScene{};
+      auto light = TestScene::makePointLight(300.0f, PreviewAttenuation::None);
+      light.falloff = 200.0f;
+      test.scene.lights.push_back(light);
+      test.finish();
+
+      CHECK(test.shade(256) == Catch::Approx(display(300.0f)).margin(0.01));
+    }
+
     SECTION("a negative light subtracts from what other lights put down")
     {
       auto test = TestScene{};
@@ -247,17 +259,37 @@ TEST_CASE("tracePreviewPixel")
 
   SECTION("_anglescale mixes the cosine towards a flat response")
   {
-    auto test = TestScene{};
-    auto light = TestScene::makePointLight(300.0f, PreviewAttenuation::None);
-    light.origin = vm::vec3f{100, 0, 100};
-    light.angleScale = 0.5f;
-    test.scene.lights.push_back(light);
-    test.finish();
-
+    // The light sits at 45 degrees from the point being shaded.
     const auto cosTheta = 1.0f / std::sqrt(2.0f);
-    CHECK(
-      test.shade(256)
-      == Catch::Approx(display(300.0f * (0.5f + 0.5f * cosTheta))).margin(0.02));
+
+    const auto shadeAtAngleScale = [&](const float angleScale) {
+      auto test = TestScene{};
+      auto light = TestScene::makePointLight(300.0f, PreviewAttenuation::None);
+      light.origin = vm::vec3f{100, 0, 100};
+      light.angleScale = angleScale;
+      test.scene.lights.push_back(light);
+      test.finish();
+      return test.shade(256);
+    };
+
+    SECTION("half way, which is the default")
+    {
+      CHECK(
+        shadeAtAngleScale(0.5f)
+        == Catch::Approx(display(300.0f * (0.5f + 0.5f * cosTheta))).margin(0.02));
+    }
+
+    SECTION("one uses the plain cosine")
+    {
+      CHECK(
+        shadeAtAngleScale(1.0f)
+        == Catch::Approx(display(300.0f * cosTheta)).margin(0.02));
+    }
+
+    SECTION("zero means the angle has no effect at all")
+    {
+      CHECK(shadeAtAngleScale(0.0f) == Catch::Approx(display(300.0f)).margin(0.02));
+    }
   }
 
   SECTION("shadows")
@@ -409,6 +441,52 @@ TEST_CASE("tracePreviewPixel")
       2.0f / vm::constants<float>::pi() * 2.0f * (ratio / root) * std::atan(ratio / root);
 
     CHECK(test.shade(30000, 50.0f) == Catch::Approx(0.5f * formFactor).margin(0.02));
+  }
+
+  SECTION("indirect light follows the map unless the preview overrides it")
+  {
+    const auto shadeWith =
+      [](const bool mapBounceEnabled, const PreviewIndirectLight indirect) {
+        auto test = TestScene{};
+        test.scene.globals.bounceEnabled = mapBounceEnabled;
+        test.scene.globals.skyDome = vm::vec3f{100, 100, 100};
+        test.addQuad(
+          vm::vec3f{-20000, -20000, 500},
+          vm::vec3f{40000, 0, 0},
+          vm::vec3f{0, 40000, 0},
+          vm::vec3f{0, 0, -1},
+          PreviewSurfaceKind::Sky);
+        test.finish();
+
+        auto camera = PreviewCamera{};
+        camera.position = vm::vec3f{0, 0, 200};
+        camera.forward = vm::vec3f{0, 0, -1};
+        camera.right = vm::vec3f{1, 0, 0};
+        camera.up = vm::vec3f{0, 1, 0};
+        camera.halfWidth = camera.halfHeight = 0.0002f;
+        camera.width = camera.height = 1;
+
+        auto settings = PreviewTraceSettings{};
+        settings.maxBounces = 1;
+        settings.indirectLight = indirect;
+
+        auto sum = vm::vec3f{0, 0, 0};
+        const auto samples = 4000;
+        for (auto i = 0; i < samples; ++i)
+        {
+          sum = sum + tracePreviewPixel(test.scene, camera, settings, 0, 0, uint32_t(i));
+        }
+        return (sum / float(samples)).x();
+      };
+
+    // The dome only reaches a surface by way of a bounce, so it is a direct readout of
+    // whether indirect light was computed.
+    CHECK(
+      shadeWith(false, PreviewIndirectLight::FromMap)
+      == Catch::Approx(0.0).margin(0.001));
+    CHECK(shadeWith(true, PreviewIndirectLight::FromMap) > 0.3f);
+    CHECK(shadeWith(false, PreviewIndirectLight::On) > 0.3f);
+    CHECK(shadeWith(true, PreviewIndirectLight::Off) == Catch::Approx(0.0).margin(0.001));
   }
 
   SECTION("the sky dome lights whatever can see sky")

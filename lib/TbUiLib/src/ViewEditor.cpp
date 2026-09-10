@@ -683,9 +683,17 @@ void ViewEditor::refreshLightPreviewPanel()
 
   m_lightPreviewModelsCheckBox->setChecked(pref(Preferences::LightPreviewShowModels));
 
-  // Neither setting does anything until the preview is switched on.
+  // None of these do anything until the preview is switched on.
   m_lightPreviewModelsCheckBox->setEnabled(showLightPreview);
+  m_lightPreviewIndirectComboBox->setEnabled(showLightPreview);
   m_lightPreviewQualityComboBox->setEnabled(showLightPreview);
+
+  const auto indirect = QString::fromStdString(pref(Preferences::LightPreviewIndirect));
+  if (const auto index = m_lightPreviewIndirectComboBox->findData(indirect); index >= 0)
+  {
+    const auto blocker = QSignalBlocker{m_lightPreviewIndirectComboBox};
+    m_lightPreviewIndirectComboBox->setCurrentIndex(index);
+  }
 
   const auto quality = QString::fromStdString(pref(Preferences::LightPreviewQuality));
   if (const auto index = m_lightPreviewQualityComboBox->findData(quality); index >= 0)
@@ -710,6 +718,20 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
     "Lights entity models along with the brushwork. They never cast shadows, since a "
     "model entity is not part of the BSP and so never reaches the compiled lightmap."));
 
+  m_lightPreviewIndirectComboBox = new QComboBox{};
+  m_lightPreviewIndirectComboBox->addItem(
+    tr("Indirect light from map"),
+    QString::fromStdString(Preferences::LightPreviewIndirectFromMap));
+  m_lightPreviewIndirectComboBox->addItem(
+    tr("Indirect light on"), QString::fromStdString(Preferences::LightPreviewIndirectOn));
+  m_lightPreviewIndirectComboBox->addItem(
+    tr("Indirect light off"),
+    QString::fromStdString(Preferences::LightPreviewIndirectOff));
+  m_lightPreviewIndirectComboBox->setToolTip(
+    tr("The compilers do not bounce light unless the map's \"_bounce\" key asks them to, "
+       "which is what \"from map\" follows. Overriding it is the preview's equivalent of "
+       "passing \"-bounce\" on the command line."));
+
   m_lightPreviewQualityComboBox = new QComboBox{};
   m_lightPreviewQualityComboBox->addItem(
     tr("Low quality"), QString::fromStdString(Preferences::LightPreviewQualityLow));
@@ -731,6 +753,11 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
     this,
     &ViewEditor::lightPreviewModelsChanged);
   connect(
+    m_lightPreviewIndirectComboBox,
+    &QComboBox::currentIndexChanged,
+    this,
+    &ViewEditor::lightPreviewIndirectChanged);
+  connect(
     m_lightPreviewQualityComboBox,
     &QComboBox::currentIndexChanged,
     this,
@@ -741,6 +768,7 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
   layout->setSpacing(0);
   layout->addWidget(m_showLightPreviewCheckBox);
   layout->addWidget(m_lightPreviewModelsCheckBox);
+  layout->addWidget(m_lightPreviewIndirectComboBox);
   layout->addWidget(m_lightPreviewQualityComboBox);
 
   inner->setLayout(layout);
@@ -872,6 +900,16 @@ void ViewEditor::lightPreviewModelsChanged(const bool checked)
   setPref(Preferences::LightPreviewShowModels, checked);
 }
 
+void ViewEditor::lightPreviewIndirectChanged(const int index)
+{
+  if (index >= 0)
+  {
+    setPref(
+      Preferences::LightPreviewIndirect,
+      m_lightPreviewIndirectComboBox->itemData(index).toString().toStdString());
+  }
+}
+
 void ViewEditor::lightPreviewQualityChanged(const int index)
 {
   if (index >= 0)
@@ -901,6 +939,7 @@ void ViewEditor::restoreDefaultsClicked()
   prefs.resetToDefault(Preferences::ShowLightPreview);
   prefs.resetToDefault(Preferences::LightPreviewQuality);
   prefs.resetToDefault(Preferences::LightPreviewShowModels);
+  prefs.resetToDefault(Preferences::LightPreviewIndirect);
   prefs.resetToDefault(Preferences::LightPreviewExposure);
   prefs.saveChanges();
 }

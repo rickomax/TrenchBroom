@@ -406,6 +406,25 @@ TEST_CASE("extractLighting")
       CHECK(lighting.globals.minLight == vm::approx{vm::vec3f{25, 0, 0}, 0.01f});
     }
 
+    SECTION("the compilers do not bounce light unless the map asks them to")
+    {
+      setWorldspawn(map, {});
+
+      const auto defaults = extractLighting(map).globals;
+      CHECK_FALSE(defaults.bounceEnabled);
+      // Nor does a bounce pick up the colour of the surface it came off by default.
+      CHECK(defaults.bounceColorScale == Catch::Approx(0.0));
+      CHECK(defaults.bounceScale == Catch::Approx(1.0));
+
+      setWorldspawn(
+        map, {{"_bounce", "1"}, {"_bouncecolorscale", "1"}, {"_bouncescale", "0.5"}});
+
+      const auto enabled = extractLighting(map).globals;
+      CHECK(enabled.bounceEnabled);
+      CHECK(enabled.bounceColorScale == Catch::Approx(1.0));
+      CHECK(enabled.bounceScale == Catch::Approx(0.5));
+    }
+
     SECTION("tone and scale controls")
     {
       setWorldspawn(

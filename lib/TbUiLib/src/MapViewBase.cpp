@@ -1038,11 +1038,17 @@ void MapViewBase::renderContents(gl::Gl& gl)
   renderPointFile(renderContext, renderBatch);
   renderPortalFile(renderContext, renderBatch);
   renderCompass(renderBatch);
-  renderHeadsUp(renderContext, renderBatch);
 
   renderBatch.render(renderContext);
 
   renderOverlay(renderContext);
+
+  // The heads up display is drawn after the overlay rather than with everything else,
+  // since the light preview covers the whole view and would otherwise bury the very
+  // readout that says how far along it is.
+  auto headsUpBatch = render::RenderBatch{vboManager()};
+  renderHeadsUp(renderContext, headsUpBatch);
+  headsUpBatch.render(renderContext);
 }
 
 void MapViewBase::renderOverlay(render::RenderContext&) {}
