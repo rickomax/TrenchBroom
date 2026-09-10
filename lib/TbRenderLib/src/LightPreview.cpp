@@ -35,6 +35,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -489,8 +490,18 @@ std::string LightPreview::statusText() const
   }
 
   const auto passes = m_job->minimumPasses();
-  return passes >= MaxPasses ? "Light preview: converged"
-                             : "Light preview: " + std::to_string(passes) + " samples";
+  auto result = passes >= MaxPasses
+                  ? std::string{"Light preview: converged"}
+                  : "Light preview: " + std::to_string(passes) + " samples";
+
+  // Say what the bounce settings came out as. Indirect light is a small effect next to
+  // the light that arrives directly, so without this there is no way to tell a setting
+  // that is doing very little from one that never took.
+  const auto bounces = effectiveBounces(*m_scene, m_job->settings);
+  result += bounces == 0   ? ", direct light only"
+            : bounces == 1 ? ", 1 bounce"
+                           : ", " + std::to_string(bounces) + " bounces";
+  return result;
 }
 
 int LightPreview::resolutionDivisor() const

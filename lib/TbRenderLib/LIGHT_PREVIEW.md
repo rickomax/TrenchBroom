@@ -28,6 +28,14 @@ pass where the compiler pays once. The "Indirect light" setting in View Options 
 the map the same way passing `-bounce` does, and the bounce count next to it is the count
 that override uses.
 
+Indirect light is a small effect and it is meant to be. Each bounce is dimmed by the
+reflectivity of the texture it came off, and Quake textures are dark: at an albedo around
+0.25, turning bouncing on lifts a closed room by roughly a quarter, the second bounce adds
+about a twentieth on top of that, and the fourth and eighth are below what the eye can
+pick out of the noise. So the bounce count only really reads between zero and one, and the
+status line under the preview names the count in force so that a setting doing very little
+can be told apart from one that never took.
+
 Brush models cast shadows only where the compilers do: the world and the brushes merged
 into it by `func_detail` and `func_group` always cast unless `_shadow` `-1` says
 otherwise, and a separate brush model casts only when `_shadow` `1` asks it to.

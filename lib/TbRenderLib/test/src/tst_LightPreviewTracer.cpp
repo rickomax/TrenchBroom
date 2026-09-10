@@ -488,6 +488,47 @@ TEST_CASE("tracePreviewPixel")
     CHECK(shadeWith(1, PreviewIndirectLight::Off) == Catch::Approx(0.0).margin(0.001));
   }
 
+  SECTION("a light's own \"_bouncescale\" scales only what it contributes to a bounce")
+  {
+    // A ceiling above the light bounces onto the floor the camera is looking at, so the
+    // shade is direct light plus a bounce, and only the bounce carries "_bouncescale".
+    const auto shadeWith = [](const float bounceScale) {
+      auto test = TestScene{};
+      test.addQuad(
+        vm::vec3f{-400, -400, 0},
+        vm::vec3f{800, 0, 0},
+        vm::vec3f{0, 800, 0},
+        vm::vec3f{0, 0, 1},
+        PreviewSurfaceKind::Solid,
+        vm::vec3f{0.6f, 0.6f, 0.6f});
+      test.addQuad(
+        vm::vec3f{-400, -400, 400},
+        vm::vec3f{800, 0, 0},
+        vm::vec3f{0, 800, 0},
+        vm::vec3f{0, 0, -1},
+        PreviewSurfaceKind::Solid,
+        vm::vec3f{0.6f, 0.6f, 0.6f});
+
+      auto light = TestScene::makePointLight(400.0f, PreviewAttenuation::Linear);
+      light.bounceScale = bounceScale;
+      test.scene.lights.push_back(light);
+
+      test.setBounces(1);
+      test.finish();
+      return test.shade(6000);
+    };
+
+    const auto none = shadeWith(0.0f);
+    const auto half = shadeWith(0.5f);
+    const auto full = shadeWith(1.0f);
+
+    // Turning the light's bounce off leaves the direct light it casts untouched.
+    CHECK(none > 0.0f);
+    CHECK(full > none);
+    // What the bounce adds is proportional to the scale.
+    CHECK(half - none == Catch::Approx(0.5f * (full - none)).epsilon(0.05));
+  }
+
   SECTION("the sky dome lights whatever can see sky")
   {
     auto test = TestScene{};

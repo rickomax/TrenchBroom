@@ -99,6 +99,12 @@ struct PreviewTraceSettings
 };
 
 /**
+ * How many bounces the given scene and settings come out to, which is the map's own
+ * "_bounce" count unless the settings override it.
+ */
+int32_t effectiveBounces(const PreviewScene& scene, const PreviewTraceSettings& settings);
+
+/**
  * Traces one path through the given pixel and returns its radiance, where 1 is a fully
  * lit white surface.
  *

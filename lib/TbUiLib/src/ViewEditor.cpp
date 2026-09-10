@@ -755,8 +755,9 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
   }
   m_lightPreviewBouncesComboBox->setToolTip(
     tr("How many times light may bounce when indirect light is turned on here, the same "
-       "as the number given to \"_bounce\". More bounces reach further into the corners "
-       "a light does not see directly, and take longer to settle."));
+       "as the number given to \"_bounce\". Each bounce is dimmer than the last by the "
+       "brightness of the texture it came off, so on the dark textures most maps use, "
+       "the first bounce is the one that shows and the rest are hard to see."));
 
   m_lightPreviewQualityComboBox = new QComboBox{};
   m_lightPreviewQualityComboBox->addItem(

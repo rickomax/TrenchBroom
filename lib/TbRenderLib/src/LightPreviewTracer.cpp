@@ -509,6 +509,7 @@ vm::vec3f gatherDirectLight(
   const vm::vec3f& position,
   const vm::vec3f& normal,
   const PreviewTriangleShading& shading,
+  const bool bounceSource,
   vm::vec3f& localMinLight,
   Rng& rng)
 {
@@ -567,7 +568,11 @@ vm::vec3f gatherDirectLight(
     }
     else
     {
-      result = result + candidate.contribution * scale;
+      // A light's own "_bouncescale" says how much of it is allowed to bounce, so it
+      // applies to the light landing on a surface the path is about to bounce off, not
+      // to the light the camera sees directly.
+      const auto bounceScale = bounceSource ? light.bounceScale : 1.0f;
+      result = result + candidate.contribution * (scale * bounceScale);
     }
   };
 
@@ -737,6 +742,19 @@ PreviewCamera makePreviewCamera(
   return result;
 }
 
+int32_t effectiveBounces(const PreviewScene& scene, const PreviewTraceSettings& settings)
+{
+  // Following the map means using the map's own bounce count, which is zero unless the
+  // mapper set "_bounce". Overriding it uses the preview's count instead, so a mapper can
+  // see what bouncing would do before committing the key.
+  return std::clamp(
+    settings.indirectLight == PreviewIndirectLight::On    ? settings.maxBounces
+    : settings.indirectLight == PreviewIndirectLight::Off ? 0
+                                                          : scene.globals.bounces,
+    0,
+    MaxPreviewBounces);
+}
+
 vm::vec3f tracePreviewPixel(
   const PreviewScene& scene,
   const PreviewCamera& camera,
@@ -758,15 +776,7 @@ vm::vec3f tracePreviewPixel(
   auto radiance = vm::vec3f{0, 0, 0};
   auto throughput = vm::vec3f{1, 1, 1};
 
-  // Following the map means using the map's own bounce count, which is zero unless the
-  // mapper set "_bounce". Overriding it uses the preview's count instead, so a mapper can
-  // see what bouncing would do before committing the key.
-  const auto maxBounces = std::clamp(
-    settings.indirectLight == PreviewIndirectLight::On    ? settings.maxBounces
-    : settings.indirectLight == PreviewIndirectLight::Off ? 0
-                                                          : scene.globals.bounces,
-    0,
-    MaxPreviewBounces);
+  const auto maxBounces = effectiveBounces(scene, settings);
 
   auto depth = 0;
   auto passThroughs = 0;
@@ -824,8 +834,8 @@ vm::vec3f tracePreviewPixel(
 
     if (shading.receivesLight)
     {
-      irradiance =
-        gatherDirectLight(scene, settings, position, normal, shading, localMinLight, rng);
+      irradiance = gatherDirectLight(
+        scene, settings, position, normal, shading, depth > 0, localMinLight, rng);
     }
 
     // "_range" scales every light's brightness without changing how far it reaches.
