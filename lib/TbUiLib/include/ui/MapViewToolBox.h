@@ -51,6 +51,8 @@ class VertexTool;
 class EdgeTool;
 class FaceTool;
 class ControlPointTool;
+class SplineTool;
+class TerrainTool;
 
 class MapViewToolBox : public ToolBox
 {
@@ -70,6 +72,8 @@ private:
   std::unique_ptr<EdgeTool> m_edgeTool;
   std::unique_ptr<FaceTool> m_faceTool;
   std::unique_ptr<ControlPointTool> m_controlPointTool;
+  std::unique_ptr<SplineTool> m_splineTool;
+  std::unique_ptr<TerrainTool> m_terrainTool;
 
   NotifierConnection m_notifierConnection;
 
@@ -117,6 +121,12 @@ public: // tools
   const ControlPointTool& controlPointTool() const;
   ControlPointTool& controlPointTool();
 
+  const SplineTool& splineTool() const;
+  SplineTool& splineTool();
+
+  const TerrainTool& terrainTool() const;
+  TerrainTool& terrainTool();
+
   bool canToggleAssembleBrushTool() const;
   void toggleAssembleBrushTool();
   bool assembleBrushToolActive() const;
@@ -161,9 +171,18 @@ public: // tools
   void toggleControlPointTool();
   bool controlPointToolActive() const;
 
+  bool canToggleSplineTool() const;
+  void toggleSplineTool();
+  bool splineToolActive() const;
+
+  bool canToggleTerrainTool() const;
+  void toggleTerrainTool();
+  bool terrainToolActive() const;
+
   bool anyModalToolActive() const;
 
   void moveNodeHandles(const vm::vec3d& delta);
+  void moveSplinePoint(const vm::vec3d& delta);
 
 private: // Tool related methods
   void createTools(QStackedLayout* bookCtrl);

@@ -125,6 +125,7 @@ target_sources(TbMdlLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MapHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MapParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MapReader.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/MapSidecar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MaterialUtils.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MissingClassnameValidator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MissingDefinitionValidator.cpp
@@ -177,6 +178,13 @@ target_sources(TbMdlLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SetVisibilityCommand.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SoftMapBounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SoftMapBoundsValidator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Spline.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineBrushes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineEntity.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/Terrain.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TerrainHeightmap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TerrainBrushes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/TerrainEntity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/StandardMapParser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SwapNodeContentsCommand.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Tag.cpp

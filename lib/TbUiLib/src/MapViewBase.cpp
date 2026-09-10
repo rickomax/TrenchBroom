@@ -226,7 +226,11 @@ void MapViewBase::selectionDidChange(const mdl::SelectionChange&)
 void MapViewBase::toolChanged(Tool&)
 {
   updatePickResult();
-  updateActionStates();
+  // Defer the action state update: when a new document is loaded while a tool is
+  // active, the tool is deactivated by MapViewToolBox before createActions() has
+  // rebuilt m_shortcuts, so updating synchronously here would dereference dangling
+  // pointers to the previous document's cached tag / entity definition actions.
+  updateActionStatesDelayed();
   update();
 }
 
@@ -365,6 +369,10 @@ void MapViewBase::move(const vm::direction direction)
   {
     moveNodeHandles(direction);
   }
+  else if ((actionContext() & ActionContext::SplineTool) != 0)
+  {
+    moveSplinePoint(direction);
+  }
   else if ((actionContext() & ActionContext::NodeSelection) != 0)
   {
     moveObjects(direction);
@@ -386,6 +394,14 @@ void MapViewBase::moveNodeHandles(const vm::direction direction)
   const auto& grid = map.grid();
   const auto delta = moveDirection(direction) * double(grid.actualSize());
   m_toolBox.moveNodeHandles(delta);
+}
+
+void MapViewBase::moveSplinePoint(const vm::direction direction)
+{
+  const auto& map = m_document.map();
+  const auto& grid = map.grid();
+  const auto delta = moveDirection(direction) * double(grid.actualSize());
+  m_toolBox.moveSplinePoint(delta);
 }
 
 void MapViewBase::moveObjects(const vm::direction direction)
@@ -906,6 +922,8 @@ ActionContext::Type MapViewBase::actionContext() const
     : m_toolBox.clipToolActive()         ? ActionContext::ClipTool
     : m_toolBox.anyVertexToolActive()    ? ActionContext::AnyVertexTool
     : m_toolBox.controlPointToolActive() ? ActionContext::ControlPointTool
+    : m_toolBox.splineToolActive()       ? ActionContext::SplineTool
+    : m_toolBox.terrainToolActive()      ? ActionContext::TerrainTool
     : m_toolBox.rotateToolActive()       ? ActionContext::RotateTool
     : m_toolBox.scaleToolActive()        ? ActionContext::ScaleTool
     : m_toolBox.shearToolActive()        ? ActionContext::ShearTool

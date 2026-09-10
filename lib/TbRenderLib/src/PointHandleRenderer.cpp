@@ -34,9 +34,9 @@
 namespace tb::render
 {
 
-PointHandleRenderer::PointHandleRenderer()
-  : m_handle{pref(Preferences::HandleRadius), 16, true}
-  , m_highlight{2.0f * pref(Preferences::HandleRadius), 16, false}
+PointHandleRenderer::PointHandleRenderer(const float radiusScale)
+  : m_handle{radiusScale * pref(Preferences::HandleRadius), 16, true}
+  , m_highlight{2.0f * radiusScale * pref(Preferences::HandleRadius), 16, false}
 {
 }
 

@@ -81,10 +81,12 @@ if(APPLE)
     set(APP_SOURCE ${APP_SOURCE} ${LIB_UPDATE_SCRIPT})
 
     # Configure manual files
-    set_source_files_properties(${INDEX_OUTPUT_PATH} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
-    set_source_files_properties(${DOC_MANUAL_TARGET_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
-    set_source_files_properties(${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
-    set_source_files_properties(${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual/images)
+    if(TB_BUILD_MANUAL)
+        set_source_files_properties(${INDEX_OUTPUT_PATH} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
+        set_source_files_properties(${DOC_MANUAL_TARGET_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
+        set_source_files_properties(${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual)
+        set_source_files_properties(${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE} PROPERTIES MACOSX_PACKAGE_LOCATION Resources/manual/images)
+    endif()
 endif()
 
 # Set up resource compilation for Windows
@@ -200,14 +202,23 @@ if(WIN32)
             COMMAND ${CMAKE_COMMAND} -E copy "${TB_RESOURCE_DIR}/win32/icons/DocIcon.ico"    "${CMAKE_CURRENT_BINARY_DIR}"
             COMMAND ${CMAKE_COMMAND} -E copy "${TB_RESOURCE_DIR}/win32/icons/WindowIcon.ico" "${CMAKE_CURRENT_BINARY_DIR}")
 
-    # Copy DLLs to app directory
+    # Copy the whole transitive runtime-DLL closure into the build output directory so
+    # that TrenchBroom can be run in place from the build tree. A hand-maintained list
+    # (assimp, freeimage, freetype, tinyxml2, miniz) is not enough: freeimage pulls in
+    # tiff, zlib, openexr, imath, libjpeg-turbo, libpng, openjpeg, jxrlib, libraw and
+    # libwebp, and some of these (e.g. libraw / rawd.dll) are imported deep inside
+    # freeimage.dll rather than linked by TrenchBroom, so even $<TARGET_RUNTIME_DLLS>
+    # misses them. Resolve the closure from the actual PE import tables instead, the
+    # same way the install / CPack step does. The vcpkg bin directory for the current
+    # configuration (Debug or Release) is derived from a dependency's imported
+    # location and passed as a search directory.
     add_custom_command(TARGET TrenchBroom POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:assimp::assimp>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:freeimage::FreeImage>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:freetype>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:tinyxml2::tinyxml2>" "$<TARGET_FILE_DIR:TrenchBroom>"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:miniz::miniz>" "$<TARGET_FILE_DIR:TrenchBroom>"
-    )
+            COMMAND ${CMAKE_COMMAND}
+                    "-DTB_EXECUTABLE=$<TARGET_FILE:TrenchBroom>"
+                    "-DTB_DEST_DIR=$<TARGET_FILE_DIR:TrenchBroom>"
+                    "-DTB_SEARCH_DIRS=$<TARGET_FILE_DIR:freeimage::FreeImage>|$<TARGET_FILE_DIR:assimp::assimp>|$<TARGET_FILE_DIR:freetype>|$<TARGET_FILE_DIR:tinyxml2::tinyxml2>|$<TARGET_FILE_DIR:miniz::miniz>"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CopyRuntimeDependencies.cmake"
+            VERBATIM)
 
     # Run windeployqt which copies the Qt dlls into the deployable folder, along with necessary runtime dlls by the compiler
     # Only copy translations on release builds, as deploying them takes significantly longer
@@ -229,9 +240,16 @@ if(WIN32)
     endif()
 endif()
 
-# Generate a small stripped PDB for release builds so we get stack traces with symbols
+# Generate a small stripped PDB for release builds so we get stack traces with symbols.
+# Use an absolute path for the stripped PDB: a relative path is resolved against the
+# linker's working directory, which depends on the generator, and the linker fails
+# with a write error if the resulting directory does not exist.
 if(COMPILER_IS_MSVC)
-    set_target_properties(TrenchBroom PROPERTIES LINK_FLAGS_RELEASE "/DEBUG /PDBSTRIPPED:app/TrenchBroom/TrenchBroom-stripped.pdb /PDBALTPATH:TrenchBroom-stripped.pdb")
+    target_link_options(TrenchBroom PRIVATE
+        "$<$<CONFIG:Release>:/DEBUG>"
+        "$<$<CONFIG:Release>:/PDBSTRIPPED:${CMAKE_CURRENT_BINARY_DIR}/TrenchBroom-stripped.pdb>"
+        "$<$<CONFIG:Release>:/PDBALTPATH:TrenchBroom-stripped.pdb>"
+    )
 endif()
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
@@ -306,18 +324,20 @@ if(WIN32 OR ${CMAKE_SYSTEM_NAME} MATCHES "Linux|FreeBSD")
     tb_add_post_build_copy_files(TrenchBroom "${APP_RESOURCE_DEST_DIR}/update" "${LIB_UPDATE_SCRIPT}")
 
     # Copy manual files to resource directory
-    tb_add_post_build_copy_files(
-        TrenchBroom
-        "${APP_RESOURCE_DEST_DIR}/manual"
-        "${INDEX_OUTPUT_PATH}"
-        "${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE}"
-        ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
-    )
-    tb_add_post_build_copy_files(
-        TrenchBroom
-        "${APP_RESOURCE_DEST_DIR}/manual/images"
-        ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
-    )
+    if(TB_BUILD_MANUAL)
+        tb_add_post_build_copy_files(
+            TrenchBroom
+            "${APP_RESOURCE_DEST_DIR}/manual"
+            "${INDEX_OUTPUT_PATH}"
+            "${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE}"
+            ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
+        )
+        tb_add_post_build_copy_files(
+            TrenchBroom
+            "${APP_RESOURCE_DEST_DIR}/manual/images"
+            ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
+        )
+    endif()
 endif()
 
 # Common CPack configuration
@@ -337,7 +357,7 @@ if(WIN32)
             DESTINATION . COMPONENT TrenchBroom
             CONFIGURATIONS Debug RelWithDebInfo)
         install(FILES
-            "$<TARGET_FILE_DIR:TrenchBroom>/TrenchBroom-stripped.pdb"
+            "${CMAKE_CURRENT_BINARY_DIR}/TrenchBroom-stripped.pdb"
             DESTINATION . COMPONENT TrenchBroom
             CONFIGURATIONS Release)
     endif()
@@ -367,14 +387,16 @@ if(WIN32)
 
     
     #Manual
-    install(FILES ${INDEX_OUTPUT_PATH} DESTINATION manual COMPONENT TrenchBroom)
-    install(FILES ${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} DESTINATION manual COMPONENT TrenchBroom)
-    install(FILES
-            ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
-            DESTINATION manual COMPONENT TrenchBroom)
-    install(FILES
-            ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
-            DESTINATION manual/images COMPONENT TrenchBroom)
+    if(TB_BUILD_MANUAL)
+        install(FILES ${INDEX_OUTPUT_PATH} DESTINATION manual COMPONENT TrenchBroom)
+        install(FILES ${DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE} DESTINATION manual COMPONENT TrenchBroom)
+        install(FILES
+                ${DOC_MANUAL_TARGET_FILES_ABSOLUTE}
+                DESTINATION manual COMPONENT TrenchBroom)
+        install(FILES
+                ${DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE}
+                DESTINATION manual/images COMPONENT TrenchBroom)
+    endif()
     install(DIRECTORY
             "${TB_RESOURCE_DIR}/defaults"
             "${TB_RESOURCE_DIR}/fonts"
@@ -458,7 +480,9 @@ elseif(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fonts"           DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/defaults"        DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/games"           DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
-    install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/manual"          DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
+    if(TB_BUILD_MANUAL)
+        install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/manual"      DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
+    endif()
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/images"          DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/shader"          DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)
     install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/stylesheets"     DESTINATION ${LINUX_RESOURCE_LOCATION} COMPONENT TrenchBroom)

@@ -1,5 +1,16 @@
 # Generate help documents
 
+if(NOT TB_BUILD_MANUAL)
+    # Pandoc is not available. Provide an empty GenerateManual target so that the
+    # TrenchBroom target can depend on it unconditionally, and no manual files.
+    add_custom_target(GenerateManual)
+    set(INDEX_OUTPUT_PATH "")
+    set(DOC_MANUAL_TARGET_FILES_ABSOLUTE "")
+    set(DOC_MANUAL_SHORTCUTS_JS_TARGET_ABSOLUTE "")
+    set(DOC_MANUAL_TARGET_IMAGE_FILES_ABSOLUTE "")
+    return()
+endif()
+
 # Create the cmake script for adding the version information to the manual
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AddVersionToManual.cmake.in" "${CMAKE_CURRENT_BINARY_DIR}/AddVersionToManual.cmake" @ONLY)
 

@@ -22,14 +22,15 @@ target_link_libraries(DumpShortcuts
 set_target_properties(DumpShortcuts PROPERTIES AUTOMOC TRUE)
 
 if(WIN32)
-    # Copy DLLs to app directory
+    # Copy all transitive runtime DLL dependencies next to the executable so it can run
+    # in place (DumpShortcuts is executed during the build to generate the manual).
     add_custom_command(TARGET DumpShortcuts POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:assimp::assimp>" "$<TARGET_FILE_DIR:DumpShortcuts>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:freeimage::FreeImage>" "$<TARGET_FILE_DIR:DumpShortcuts>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:freetype>" "$<TARGET_FILE_DIR:DumpShortcuts>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:tinyxml2::tinyxml2>" "$<TARGET_FILE_DIR:DumpShortcuts>"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:miniz::miniz>" "$<TARGET_FILE_DIR:DumpShortcuts>"
-    )
+            COMMAND ${CMAKE_COMMAND}
+                    "-DTB_EXECUTABLE=$<TARGET_FILE:DumpShortcuts>"
+                    "-DTB_DEST_DIR=$<TARGET_FILE_DIR:DumpShortcuts>"
+                    "-DTB_SEARCH_DIRS=$<TARGET_FILE_DIR:freeimage::FreeImage>|$<TARGET_FILE_DIR:assimp::assimp>|$<TARGET_FILE_DIR:freetype>|$<TARGET_FILE_DIR:tinyxml2::tinyxml2>|$<TARGET_FILE_DIR:miniz::miniz>"
+                    -P "${CMAKE_SOURCE_DIR}/app/TrenchBroom/cmake/CopyRuntimeDependencies.cmake"
+            VERBATIM)
     
     # Run windeployqt which copies the Qt dlls into the deployable folder, along with necessary runtime dlls by the compiler
     if(NOT TB_SKIP_WINDEPLOYQT)

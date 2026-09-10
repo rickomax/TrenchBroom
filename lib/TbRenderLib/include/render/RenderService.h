@@ -77,6 +77,12 @@ public:
   void setBackgroundColor(const Color& backgroundColor);
   void setLineWidth(float lineWidth);
 
+  /**
+   * Sets the scale applied to the radius of point handles. Must be called before any
+   * handles are rendered with this render service.
+   */
+  void setPointHandleScale(float scale);
+
   void setShowOccludedObjects();
   void setShowOccludedObjectsTransparent();
   void setHideOccludedObjects();

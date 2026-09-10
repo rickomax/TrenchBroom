@@ -160,6 +160,26 @@ inline auto ClipHandleColor =
 inline auto ClipFaceColor =
   Preference<Color>{"render/Colors/Clip face", RgbaF{0.6f, 0.4f, 0.0f, 0.35f}};
 
+inline auto SplineLineColor =
+  Preference<Color>{"render/Colors/Spline line", RgbF{1.0f, 0.5f, 0.0f}};
+inline auto SplineLockedHandleColor =
+  Preference<Color>{"render/Colors/Spline locked handle", RgbF{0.6f, 0.6f, 0.65f}};
+inline auto TerrainBoundsColor =
+  Preference<Color>{"render/Colors/Terrain bounds", RgbF{0.3f, 0.6f, 1.0f}};
+inline auto TerrainBrushColor =
+  Preference<Color>{"render/Colors/Terrain brush", RgbF{0.2f, 0.5f, 1.0f}};
+inline auto TerrainBrushFillColor =
+  Preference<Color>{"render/Colors/Terrain brush fill", RgbaF{0.2f, 0.5f, 1.0f, 0.25f}};
+inline auto TerrainPreviewColor =
+  Preference<Color>{"render/Colors/Terrain preview", RgbaF{1.0f, 1.0f, 1.0f, 0.6f}};
+inline auto TerrainPreviewFillColor =
+  Preference<Color>{"render/Colors/Terrain preview fill", RgbaF{0.6f, 0.8f, 1.0f, 0.4f}};
+
+inline auto SplineTangentHandleColor =
+  Preference<Color>{"render/Colors/Spline tangent handle", RgbF{0.0f, 0.85f, 0.0f}};
+inline auto SplineInactiveTangentHandleColor = Preference<Color>{
+  "render/Colors/Spline inactive tangent handle", RgbF{0.0f, 0.4f, 0.0f}};
+
 inline auto ExtrudeHandleColor =
   Preference<Color>{"render/Colors/Resize handle", RgbB{248, 230, 60}};
 inline auto RotateHandleRadius =

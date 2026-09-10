@@ -63,6 +63,7 @@ private:
   ObjectNo m_brushNo = 0;
   bool m_exporting = false;
   bool m_stripTbProperties = false;
+  bool m_omitSidecarProperties = false;
 
 public:
   virtual ~NodeSerializer();
@@ -77,6 +78,11 @@ public:
 
   bool stripTbProperties() const;
   void setStripTbProperties(bool stripTbProperties);
+
+  /** Whether to leave out the properties that are written to the map's sidecar file
+   * instead; see mdl::isSidecarPropertyKey. */
+  bool omitSidecarProperties() const;
+  void setOmitSidecarProperties(bool omitSidecarProperties);
 
 public:
   /**

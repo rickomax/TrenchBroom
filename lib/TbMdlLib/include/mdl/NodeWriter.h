@@ -55,6 +55,7 @@ public:
 
   void setExporting(bool exporting);
   void setStripTbProperties(bool stripTbProperties);
+  void setOmitSidecarProperties(bool omitSidecarProperties);
   void writeMap(kdl::task_manager& taskManager);
 
 private:

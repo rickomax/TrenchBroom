@@ -189,9 +189,9 @@ void ActionManager::createViewActions()
   addAction(Action{
     std::filesystem::path{"Controls/Map view/Move objects up; Move objects forward"},
     QObject::tr("Move Forward"),
-    ActionContext::AnyView | ActionContext::NodeSelection
+    ActionContext::AnyView | ActionContext::NodeSelection | ActionContext::NoSelection
       | ActionContext::AnyNodeHandleTool | ActionContext::RotateTool
-      | ActionContext::NoTool,
+      | ActionContext::SplineTool | ActionContext::NoTool,
     QKeySequence{Qt::Key_Up},
     [](auto& context) { context.mapView().move(vm::direction::forward); },
     [](const auto& context) { return context.hasDocument(); },
@@ -199,9 +199,9 @@ void ActionManager::createViewActions()
   addAction(Action{
     std::filesystem::path{"Controls/Map view/Move objects down; Move objects backward"},
     QObject::tr("Move Backward"),
-    ActionContext::AnyView | ActionContext::NodeSelection
+    ActionContext::AnyView | ActionContext::NodeSelection | ActionContext::NoSelection
       | ActionContext::AnyNodeHandleTool | ActionContext::RotateTool
-      | ActionContext::NoTool,
+      | ActionContext::SplineTool | ActionContext::NoTool,
     QKeySequence{Qt::Key_Down},
     [](auto& context) { context.mapView().move(vm::direction::backward); },
     [](const auto& context) { return context.hasDocument(); },
@@ -209,9 +209,9 @@ void ActionManager::createViewActions()
   addAction(Action{
     std::filesystem::path{"Controls/Map view/Move objects left"},
     QObject::tr("Move Left"),
-    ActionContext::AnyView | ActionContext::NodeSelection
+    ActionContext::AnyView | ActionContext::NodeSelection | ActionContext::NoSelection
       | ActionContext::AnyNodeHandleTool | ActionContext::RotateTool
-      | ActionContext::NoTool,
+      | ActionContext::SplineTool | ActionContext::NoTool,
     QKeySequence{Qt::Key_Left},
     [](auto& context) { context.mapView().move(vm::direction::left); },
     [](const auto& context) { return context.hasDocument(); },
@@ -219,9 +219,9 @@ void ActionManager::createViewActions()
   addAction(Action{
     std::filesystem::path{"Controls/Map view/Move objects right"},
     QObject::tr("Move Right"),
-    ActionContext::AnyView | ActionContext::NodeSelection
+    ActionContext::AnyView | ActionContext::NodeSelection | ActionContext::NoSelection
       | ActionContext::AnyNodeHandleTool | ActionContext::RotateTool
-      | ActionContext::NoTool,
+      | ActionContext::SplineTool | ActionContext::NoTool,
     QKeySequence{Qt::Key_Right},
     [](auto& context) { context.mapView().move(vm::direction::right); },
     [](const auto& context) { return context.hasDocument(); },
@@ -229,9 +229,9 @@ void ActionManager::createViewActions()
   addAction(Action{
     std::filesystem::path{"Controls/Map view/Move objects backward; Move objects up"},
     QObject::tr("Move Up"),
-    ActionContext::AnyView | ActionContext::NodeSelection
+    ActionContext::AnyView | ActionContext::NodeSelection | ActionContext::NoSelection
       | ActionContext::AnyNodeHandleTool | ActionContext::RotateTool
-      | ActionContext::NoTool,
+      | ActionContext::SplineTool | ActionContext::NoTool,
     QKeySequence{Qt::Key_PageUp},
     [](auto& context) { context.mapView().move(vm::direction::up); },
     [](const auto& context) { return context.hasDocument(); },
@@ -239,9 +239,9 @@ void ActionManager::createViewActions()
   addAction(Action{
     std::filesystem::path{"Controls/Map view/Move objects forward; Move objects down"},
     QObject::tr("Move Down"),
-    ActionContext::AnyView | ActionContext::NodeSelection
+    ActionContext::AnyView | ActionContext::NodeSelection | ActionContext::NoSelection
       | ActionContext::AnyNodeHandleTool | ActionContext::RotateTool
-      | ActionContext::NoTool,
+      | ActionContext::SplineTool | ActionContext::NoTool,
     QKeySequence{Qt::Key_PageDown},
     [](auto& context) { context.mapView().move(vm::direction::down); },
     [](const auto& context) { return context.hasDocument(); },
@@ -1522,6 +1522,36 @@ void ActionManager::createToolsMenu()
     std::filesystem::path{"ControlPointTool.svg"},
   }));
   toolsMenu.addItem(addAction(Action{
+    "Menu/Edit/Tools/Spline Tool",
+    QObject::tr("Spline Tool"),
+    ActionContext::Any,
+    QKeySequence{Qt::Key_Y},
+    [](auto& context) { context.mapWindow().toolBox().toggleSplineTool(); },
+    [](const auto& context) {
+      return context.hasDocument()
+             && context.mapWindow().toolBox().canToggleSplineTool();
+    },
+    [](const auto& context) {
+      return context.hasDocument() && context.mapWindow().toolBox().splineToolActive();
+    },
+    std::filesystem::path{"SplineTool.svg"},
+  }));
+  toolsMenu.addItem(addAction(Action{
+    "Menu/Edit/Tools/Terrain Tool",
+    QObject::tr("Terrain Tool"),
+    ActionContext::Any,
+    QKeySequence{Qt::Key_U},
+    [](auto& context) { context.mapWindow().toolBox().toggleTerrainTool(); },
+    [](const auto& context) {
+      return context.hasDocument()
+             && context.mapWindow().toolBox().canToggleTerrainTool();
+    },
+    [](const auto& context) {
+      return context.hasDocument() && context.mapWindow().toolBox().terrainToolActive();
+    },
+    std::filesystem::path{"TerrainTool.svg"},
+  }));
+  toolsMenu.addItem(addAction(Action{
     "Controls/Map view/Deactivate current tool",
     QObject::tr("Deactivate Current Tool"),
     ActionContext::Any,
@@ -2022,6 +2052,8 @@ void ActionManager::createToolbar()
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Edge Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Face Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Control Point Tool"));
+  m_toolBar.addItem(existingAction("Menu/Edit/Tools/Spline Tool"));
+  m_toolBar.addItem(existingAction("Menu/Edit/Tools/Terrain Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Rotate Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Scale Tool"));
   m_toolBar.addItem(existingAction("Menu/Edit/Tools/Shear Tool"));

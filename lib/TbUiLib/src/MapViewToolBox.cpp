@@ -35,6 +35,8 @@
 #include "ui/RotateTool.h"
 #include "ui/ScaleTool.h"
 #include "ui/ShearTool.h"
+#include "ui/SplineTool.h"
+#include "ui/TerrainTool.h"
 #include "ui/VertexTool.h"
 
 #include "kd/contracts.h"
@@ -174,6 +176,26 @@ const ControlPointTool& MapViewToolBox::controlPointTool() const
 ControlPointTool& MapViewToolBox::controlPointTool()
 {
   return KDL_CONST_OVERLOAD(controlPointTool());
+}
+
+const SplineTool& MapViewToolBox::splineTool() const
+{
+  return *m_splineTool;
+}
+
+SplineTool& MapViewToolBox::splineTool()
+{
+  return KDL_CONST_OVERLOAD(splineTool());
+}
+
+const TerrainTool& MapViewToolBox::terrainTool() const
+{
+  return *m_terrainTool;
+}
+
+TerrainTool& MapViewToolBox::terrainTool()
+{
+  return KDL_CONST_OVERLOAD(terrainTool());
 }
 
 bool MapViewToolBox::canToggleAssembleBrushTool() const
@@ -395,6 +417,42 @@ bool MapViewToolBox::controlPointToolActive() const
   return m_controlPointTool->active();
 }
 
+bool MapViewToolBox::canToggleSplineTool() const
+{
+  return true;
+}
+
+void MapViewToolBox::toggleSplineTool()
+{
+  if (canToggleSplineTool())
+  {
+    toggleTool(splineTool());
+  }
+}
+
+bool MapViewToolBox::splineToolActive() const
+{
+  return m_splineTool->active();
+}
+
+bool MapViewToolBox::canToggleTerrainTool() const
+{
+  return true;
+}
+
+void MapViewToolBox::toggleTerrainTool()
+{
+  if (canToggleTerrainTool())
+  {
+    toggleTool(terrainTool());
+  }
+}
+
+bool MapViewToolBox::terrainToolActive() const
+{
+  return m_terrainTool->active();
+}
+
 bool MapViewToolBox::anyModalToolActive() const
 {
   return rotateToolActive() || scaleToolActive() || shearToolActive()
@@ -423,6 +481,13 @@ void MapViewToolBox::moveNodeHandles(const vm::vec3d& delta)
   }
 }
 
+void MapViewToolBox::moveSplinePoint(const vm::vec3d& delta)
+{
+  contract_pre(splineToolActive());
+
+  splineTool().moveSelectedPoint(delta);
+}
+
 void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
 {
   m_clipTool = std::make_unique<ClipTool>(m_document);
@@ -438,6 +503,8 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   m_edgeTool = std::make_unique<EdgeTool>(m_document);
   m_faceTool = std::make_unique<FaceTool>(m_document);
   m_controlPointTool = std::make_unique<ControlPointTool>(m_document);
+  m_splineTool = std::make_unique<SplineTool>(m_document);
+  m_terrainTool = std::make_unique<TerrainTool>(m_document);
 
   addExclusiveToolGroup(
     assembleBrushTool(),
@@ -447,7 +514,9 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
     controlPointTool(),
     edgeTool(),
     faceTool(),
-    clipTool());
+    clipTool(),
+    splineTool(),
+    terrainTool());
 
   addExclusiveToolGroup(
     assembleBrushTool(),
@@ -455,7 +524,9 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
     edgeTool(),
     faceTool(),
     controlPointTool(),
-    clipTool());
+    clipTool(),
+    splineTool(),
+    terrainTool());
 
   suppressWhileActive(
     assembleBrushTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
@@ -468,6 +539,8 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   suppressWhileActive(
     controlPointTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
   suppressWhileActive(clipTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
+  suppressWhileActive(splineTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
+  suppressWhileActive(terrainTool(), moveObjectsTool(), extrudeTool(), drawShapeTool());
 
   registerTool(moveObjectsTool(), bookCtrl);
   registerTool(rotateTool(), bookCtrl);
@@ -480,6 +553,8 @@ void MapViewToolBox::createTools(QStackedLayout* bookCtrl)
   registerTool(edgeTool(), bookCtrl);
   registerTool(faceTool(), bookCtrl);
   registerTool(controlPointTool(), bookCtrl);
+  registerTool(splineTool(), bookCtrl);
+  registerTool(terrainTool(), bookCtrl);
   registerTool(createEntityTool(), bookCtrl);
   registerTool(drawShapeTool(), bookCtrl);
 
@@ -567,6 +642,14 @@ void MapViewToolBox::updateToolPage()
   else if (clipToolActive())
   {
     clipTool().showPage();
+  }
+  else if (splineToolActive())
+  {
+    splineTool().showPage();
+  }
+  else if (terrainToolActive())
+  {
+    terrainTool().showPage();
   }
   else
   {
