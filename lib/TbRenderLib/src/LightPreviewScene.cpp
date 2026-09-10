@@ -19,6 +19,8 @@
 
 #include "render/LightPreviewScene.h"
 
+#include "PreferenceManager.h"
+#include "Preferences.h"
 #include "gl/GlInterface.h"
 #include "gl/Material.h"
 #include "gl/Texture.h"
@@ -27,6 +29,7 @@
 #include "mdl/BrushNode.h"
 #include "mdl/EditorContext.h"
 #include "mdl/Entity.h"
+#include "mdl/EntityModel.h"
 #include "mdl/EntityNode.h"
 #include "mdl/EntityNodeBase.h"
 #include "mdl/GameConfig.h"
@@ -73,6 +76,17 @@ std::string materialBaseName(const std::string& name)
 {
   const auto slash = name.find_last_of("/\\");
   return toLower(slash == std::string::npos ? name : name.substr(slash + 1));
+}
+
+/**
+ * Whether a texture name marks a liquid.
+ *
+ * Quake names its liquid textures with a leading asterisk, and the compilers never put
+ * those in the solid hull, so light crosses them as if they were not there.
+ */
+bool isLiquidMaterialName(const std::string& name)
+{
+  return materialBaseName(name).starts_with("*");
 }
 
 /**
@@ -247,6 +261,8 @@ struct MaterialLookup
   {
     return cache.indexOf(material, gl, maxTextureSize);
   }
+
+  const PreviewMaterial& at(const uint32_t index) const { return cache.at(index); }
 };
 
 /**
@@ -390,6 +406,7 @@ void addBrushFace(
   const BrushModelLighting& brushModel,
   const SkyClassifier& skyClassifier,
   const int lightSurfaceFlag,
+  const float transparentAlpha,
   MaterialLookup& materials,
   TriangleSink& sink)
 {
@@ -412,10 +429,20 @@ void addBrushFace(
     // Water, slime, lava, triggers, clip and hint brushes are all outside the solid hull
     // the compiler traces against, so light passes straight through them. TrenchBroom
     // already knows which those are: the game config tags them transparent.
+    //
+    // A texture whose name starts with an asterisk is a liquid, and that holds whether or
+    // not the game config happens to carry the tag for it, so it is checked directly. The
+    // name comes from the face rather than from the material, so that it still applies
+    // when the material itself could not be resolved.
     const auto nonSolid = brushNode.hasAttribute(mdl::TagAttributes::Transparency)
-                          || face.hasAttribute(mdl::TagAttributes::Transparency);
+                          || face.hasAttribute(mdl::TagAttributes::Transparency)
+                          || isLiquidMaterialName(face.attributes().materialName());
     shading.kind = nonSolid ? PreviewSurfaceKind::NonSolid : PreviewSurfaceKind::Solid;
     shading.occludes = !nonSolid && brushModel.castsShadows;
+
+    // Drawn as see-through as the editor draws it, so that the preview shows the same
+    // pool of water the view underneath it does. Light ignores it either way.
+    shading.alpha = nonSolid ? transparentAlpha : 1.0f;
   }
 
   // Quake 2 marks emissive faces with a surface flag and puts the brightness in the
@@ -427,7 +454,9 @@ void addBrushFace(
     const auto value = face.resolvedSurfaceValue();
     if (value > 0.0f)
     {
-      const auto color = sink.scene.materials[shading.materialIndex]->averageColor;
+      // The scene's own list is not filled in until the walk is over, so the colour comes
+      // from the cache the walk is populating.
+      const auto color = materials.at(shading.materialIndex).averageColor;
       shading.emission = color * value * PreviewLightUnitScale;
     }
   }
@@ -531,6 +560,75 @@ void addPatch(
       addQuadTriangle(p00, p01, p11);
       addQuadTriangle(p11, p10, p00);
     }
+  }
+}
+
+/**
+ * Adds an entity's model to the scene, so that monsters, torches and pickups are lit
+ * along with the brushwork around them.
+ *
+ * The model contributes its shape and one colour, not its skin: the geometry comes from
+ * the triangles the frame keeps for hit testing, which carry no UV coordinates, so the
+ * albedo is the average colour of the skin the frame would be drawn with.
+ *
+ * NOTE: models are lit but do not cast shadows, which is what the compilers do. A model
+ * entity is not part of the BSP, so nothing about it reaches the lightmap; a preview that
+ * let one cast a shadow would be showing something the compiled map will not have.
+ */
+void addEntityModel(
+  const mdl::EntityNode& entityNode, MaterialLookup& materials, TriangleSink& sink)
+{
+  const auto& entity = entityNode.entity();
+
+  const auto* model = entity.model();
+  const auto* modelData = model ? model->data() : nullptr;
+  const auto* frame = entity.modelFrame();
+  if (!modelData || !frame)
+  {
+    return;
+  }
+
+  // Anything but Oriented is a sprite, turned to face the camera as it is drawn. It has
+  // no fixed shape to trace against, so it is left out rather than dropped into the scene
+  // at whatever angle it happens to be modelled at.
+  if (modelData->orientation() != mdl::Orientation::Oriented)
+  {
+    return;
+  }
+
+  const auto& triangles = frame->triangles();
+  if (triangles.size() < 3)
+  {
+    return;
+  }
+
+  const auto transformation = vm::mat4x4f{entity.modelTransformation(
+    entityNode.entityPropertyConfig().defaultModelScaleExpression)};
+
+  const auto* skin = modelData->surfaceCount() > 0
+                       ? modelData->surface(0).skin(frame->skinOffset())
+                       : nullptr;
+
+  auto shading = PreviewTriangleShading{};
+  shading.materialIndex = materials.indexOf(skin);
+  shading.kind = PreviewSurfaceKind::NonSolid;
+  shading.occludes = false;
+
+  const auto uv = vm::vec2f{0, 0};
+
+  for (size_t i = 0; i + 2 < triangles.size(); i += 3)
+  {
+    const auto p0 = transformation * triangles[i];
+    const auto p1 = transformation * triangles[i + 1];
+    const auto p2 = transformation * triangles[i + 2];
+
+    auto normal = vm::cross(p1 - p0, p2 - p0);
+    if (vm::squared_length(normal) < vm::constants<float>::almost_zero())
+    {
+      continue;
+    }
+
+    sink.add(p0, p1, p2, uv, uv, uv, vm::normalize(normal), shading);
   }
 }
 
@@ -642,6 +740,20 @@ uint32_t PreviewMaterialCache::indexOf(
 
   if (const auto it = m_indices.find(material); it != m_indices.end())
   {
+    // Materials are read as the preview meets them, which on a map that has just been
+    // opened can be before their textures have finished uploading. Such a material is
+    // read again here rather than staying flat for the life of the cache. Replacing the
+    // entry is safe while a trace is running: the scene it is tracing holds its own
+    // pointer to the old albedo, and keeps it until the trace is thrown away.
+    if (m_materials[it->second]->texels.empty())
+    {
+      auto reread = readMaterial(*material, gl, maxTextureSize);
+      if (!reread.texels.empty())
+      {
+        m_materials[it->second] =
+          std::make_shared<const PreviewMaterial>(std::move(reread));
+      }
+    }
     return it->second;
   }
 
@@ -651,6 +763,11 @@ uint32_t PreviewMaterialCache::indexOf(
   m_indices.emplace(material, index);
   m_indicesByName.emplace(materialBaseName(material->name()), index);
   return index;
+}
+
+const PreviewMaterial& PreviewMaterialCache::at(const uint32_t index) const
+{
+  return *m_materials[index];
 }
 
 std::optional<uint32_t> PreviewMaterialCache::findByName(const std::string& name) const
@@ -716,6 +833,8 @@ PreviewScene buildPreviewScene(
   const auto skyClassifier = SkyClassifier{gameConfig};
   const auto lightSurfaceFlag =
     gameConfig.faceAttribsConfig.surfaceFlags.flagValue("light");
+  const auto transparentAlpha =
+    std::clamp(pref(Preferences::TransparentFaceAlpha), 0.0f, 1.0f);
 
   auto materials = MaterialLookup{materialCache, gl, maxTextureSize};
   auto sink = TriangleSink{scene, {}};
@@ -739,6 +858,7 @@ PreviewScene buildPreviewScene(
     [&](auto&& thisLambda, const mdl::EntityNode& node) {
       if (editorContext.visible(node))
       {
+        addEntityModel(node, materials, sink);
         node.visitChildren(thisLambda);
       }
     },
@@ -754,7 +874,14 @@ PreviewScene buildPreviewScene(
         if (editorContext.visible(node, face))
         {
           addBrushFace(
-            node, face, brushModel, skyClassifier, lightSurfaceFlag, materials, sink);
+            node,
+            face,
+            brushModel,
+            skyClassifier,
+            lightSurfaceFlag,
+            transparentAlpha,
+            materials,
+            sink);
         }
       }
     },

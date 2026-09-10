@@ -151,6 +151,14 @@ public:
   std::optional<float> intersect(const vm::ray3f& ray) const;
 
   /**
+   * Returns this frame's triangles, three vertices at a time, in model space.
+   *
+   * These are the same triangles the frame is hit tested against, so they carry no
+   * material or UV coordinates; they describe the shape of the frame and nothing else.
+   */
+  const std::vector<vm::vec3f>& triangles() const;
+
+  /**
    * Adds the given primitives to the spacial tree for this frame.
    *
    * @param vertices the vertices

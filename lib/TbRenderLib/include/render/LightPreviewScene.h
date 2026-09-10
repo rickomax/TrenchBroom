@@ -102,6 +102,12 @@ struct PreviewTriangleShading
   PreviewSurfaceKind kind = PreviewSurfaceKind::Solid;
   /** Whether shadow rays are blocked by this triangle. */
   bool occludes = true;
+  /**
+   * How much of this surface a ray sees, with the rest coming from whatever is behind it.
+   * Liquids are drawn partly see-through, so a ray carries on past them even though they
+   * are solid enough to be shaded.
+   */
+  float alpha = 1.0f;
   /** Whether this triangle receives light from light entities (_lightignore). */
   bool receivesLight = true;
   /** Channel mask of the brush model this triangle belongs to (_object_channel_mask). */
@@ -136,10 +142,17 @@ public:
 
   /**
    * Returns the index of the given material, reading its albedo back the first time it is
-   * seen. A null material, or one whose texture cannot be read, maps to index 0, which
-   * holds a neutral grey.
+   * seen. A null material maps to index 0, which holds a neutral grey.
+   *
+   * A material whose texture had not finished uploading when it was first seen keeps its
+   * index but is read again on every later call, until it yields something. Caching that
+   * first failure permanently is what made a freshly opened map preview untextured until
+   * it was opened a second time.
    */
   uint32_t indexOf(const gl::Material* material, gl::Gl& gl, size_t maxTextureSize);
+
+  /** The albedo stored at the given index. */
+  const PreviewMaterial& at(uint32_t index) const;
 
   /** Looks up a material by the name a light entity would refer to it by. */
   std::optional<uint32_t> findByName(const std::string& name) const;

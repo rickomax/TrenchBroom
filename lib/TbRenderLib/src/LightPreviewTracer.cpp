@@ -54,6 +54,15 @@ constexpr auto MaxLightCandidates = size_t(256);
 constexpr auto MaxRayDistance = 1.0e7f;
 
 /**
+ * How many see-through surfaces one path may cross. A stack of water brushes must not be
+ * able to keep a path going forever, and past a few layers there is nothing left to see.
+ */
+constexpr auto MaxPassThroughs = 8;
+
+/** Below this, what is left of a path is too dim to be worth following. */
+constexpr auto MinThroughput = 1.0e-3f;
+
+/**
  * A small, fast generator. The preview needs a different sequence for every pixel and
  * every pass, and it needs it without touching shared state, so the stream is derived
  * from the pixel and pass numbers rather than carried between them.
@@ -196,10 +205,14 @@ vm::vec3f sampleBall(const float radius, Rng& rng)
  * the triangle it came from. The offset grows with distance from the world origin because
  * that is where floating point precision goes.
  */
+float rayEpsilon(const vm::vec3f& position)
+{
+  return 0.05f * (1.0f + vm::length(position) * (1.0f / 1024.0f));
+}
+
 vm::vec3f offsetOrigin(const vm::vec3f& position, const vm::vec3f& normal)
 {
-  const auto scale = 1.0f + vm::length(position) * (1.0f / 1024.0f);
-  return position + normal * (0.05f * scale);
+  return position + normal * rayEpsilon(position);
 }
 
 /**
@@ -746,7 +759,10 @@ vm::vec3f tracePreviewPixel(
   const auto maxBounces =
     scene.globals.bounceEnabled ? std::max(settings.maxBounces, 0) : 0;
 
-  for (auto depth = 0; depth <= maxBounces; ++depth)
+  auto depth = 0;
+  auto passThroughs = 0;
+
+  while (true)
   {
     const auto ray = PreviewRay{origin, direction};
     const auto hit = scene.bvh.intersect(
@@ -792,10 +808,7 @@ vm::vec3f tracePreviewPixel(
     const auto uv = shading.uv0 * w + shading.uv1 * hit->u + shading.uv2 * hit->v;
     const auto albedo = scene.materials[shading.materialIndex]->sample(uv);
 
-    if (depth == 0)
-    {
-      radiance = radiance + multiply(throughput, shading.emission);
-    }
+    auto surface = depth == 0 ? shading.emission : vm::vec3f{0, 0, 0};
 
     auto irradiance = vm::vec3f{0, 0, 0};
     auto localMinLight = vm::vec3f{0, 0, 0};
@@ -835,7 +848,24 @@ vm::vec3f tracePreviewPixel(
       outgoing = outgoing + gatherEmitters(scene, position, normal, rng);
     }
 
-    radiance = radiance + multiply(throughput, multiply(albedo, outgoing));
+    surface = surface + multiply(albedo, outgoing);
+    radiance = radiance + multiply(throughput, surface * shading.alpha);
+
+    // A liquid is drawn partly see-through, so the ray carries on behind it with whatever
+    // of it is left over. Crossing one is not a bounce: a couple of pools of water in a
+    // row must not use up everything the path was going to spend on indirect light.
+    if (shading.alpha < 1.0f)
+    {
+      throughput = throughput * (1.0f - shading.alpha);
+      ++passThroughs;
+      if (passThroughs >= MaxPassThroughs || luminance(throughput) < MinThroughput)
+      {
+        break;
+      }
+
+      origin = position + direction * rayEpsilon(position);
+      continue;
+    }
 
     if (depth == maxBounces)
     {
@@ -855,13 +885,14 @@ vm::vec3f tracePreviewPixel(
 
     throughput = multiply(throughput, bounceAlbedo * scene.globals.bounceScale);
 
-    if (luminance(throughput) < 1.0e-3f)
+    if (luminance(throughput) < MinThroughput)
     {
       break;
     }
 
     direction = sampleCosineHemisphere(normal, rng);
     origin = offsetOrigin(position, normal);
+    ++depth;
   }
 
   return radiance * settings.exposure;

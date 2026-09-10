@@ -24,6 +24,7 @@
 
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include <catch2/catch_approx.hpp>
@@ -67,22 +68,35 @@ public:
       vm::vec3f{0, 0, 1});
   }
 
+  /** Adds a material with the given colour and returns its index. */
+  uint32_t addMaterial(const vm::vec3f& color)
+  {
+    auto material = PreviewMaterial{};
+    material.averageColor = color;
+    scene.materials.push_back(
+      std::make_shared<const PreviewMaterial>(std::move(material)));
+    return uint32_t(scene.materials.size() - 1);
+  }
+
   void addQuad(
     const vm::vec3f& origin,
     const vm::vec3f& edgeU,
     const vm::vec3f& edgeV,
     const vm::vec3f& normal,
     const PreviewSurfaceKind kind = PreviewSurfaceKind::Solid,
-    const vm::vec3f& emission = vm::vec3f{0, 0, 0})
+    const vm::vec3f& emission = vm::vec3f{0, 0, 0},
+    const float alpha = 1.0f,
+    const std::optional<uint32_t> materialIndex = std::nullopt)
   {
     const auto addTriangle =
       [&](const vm::vec3f& p0, const vm::vec3f& p1, const vm::vec3f& p2) {
         auto shading = PreviewTriangleShading{};
         shading.normal = normal;
-        shading.materialIndex = white;
+        shading.materialIndex = materialIndex.value_or(white);
         shading.kind = kind;
         shading.occludes = kind == PreviewSurfaceKind::Solid;
         shading.emission = emission;
+        shading.alpha = alpha;
 
         scene.trianglePositions.push_back(PreviewTrianglePos{p0, p1 - p0, p2 - p0});
         scene.triangleShading.push_back(shading);
@@ -276,6 +290,50 @@ TEST_CASE("tracePreviewPixel")
 
       CHECK(test.shade(256, 25.0f) == Catch::Approx(display(300.0f)).margin(0.01));
     }
+  }
+
+  SECTION("a liquid is seen through as well as lit through")
+  {
+    // A black surface over a white floor: whatever arrives is what came past the liquid,
+    // so the reading is the share of the floor the liquid let through.
+    const auto liquidAlpha = 0.4f;
+
+    auto test = TestScene{};
+    test.addPointLight(300.0f, PreviewAttenuation::None);
+    const auto black = test.addMaterial(vm::vec3f{0, 0, 0});
+    test.addQuad(
+      vm::vec3f{-50, -50, 50},
+      vm::vec3f{100, 0, 0},
+      vm::vec3f{0, 100, 0},
+      vm::vec3f{0, 0, 1},
+      PreviewSurfaceKind::NonSolid,
+      vm::vec3f{0, 0, 0},
+      liquidAlpha,
+      black);
+    test.finish();
+
+    CHECK(
+      test.shade(256)
+      == Catch::Approx(display(300.0f) * (1.0f - liquidAlpha)).margin(0.01));
+  }
+
+  SECTION("an opaque surface hides what is behind it")
+  {
+    auto test = TestScene{};
+    test.addPointLight(300.0f, PreviewAttenuation::None);
+    const auto black = test.addMaterial(vm::vec3f{0, 0, 0});
+    test.addQuad(
+      vm::vec3f{-50, -50, 50},
+      vm::vec3f{100, 0, 0},
+      vm::vec3f{0, 100, 0},
+      vm::vec3f{0, 0, 1},
+      PreviewSurfaceKind::NonSolid,
+      vm::vec3f{0, 0, 0},
+      1.0f,
+      black);
+    test.finish();
+
+    CHECK(test.shade(64) == Catch::Approx(0.0).margin(0.001));
   }
 
   SECTION("suns")

@@ -24,8 +24,18 @@ formulas, `wait`, `_falloff`, `_anglescale`, `_deviance`, `_softangle`, the Gold
 `_bounce`, `_bouncescale` and `_bouncecolorscale`.
 
 Faces the game config tags transparent (water, slime, lava, triggers, clip, hint) are
-shaded but do not block light, because the compiler only traces against the solid hull.
+shaded but do not block light, because the compiler only traces against the solid hull. A
+texture whose name starts with an asterisk counts as a liquid whether or not the game
+config carries a tag for it. Liquids are also drawn as see-through as the editor draws
+them, at the "Transparent faces" alpha, so a ray carries on to whatever is under the
+water even though light ignores the surface entirely.
+
 Sky faces are a hole into the sky rather than a surface.
+
+Entity models are lit along with the brushwork. They do not cast shadows, which is what
+the compilers do: a model entity is not part of the BSP, so nothing about it reaches the
+lightmap, and a preview that let one cast a shadow would show something the compiled map
+will not have.
 
 ## Where it deliberately differs, and what is missing
 
@@ -49,6 +59,14 @@ they can be checked against a real compile.
   flicker. `spawnflags` "start off" is ignored: the light is previewed lit, because a
   mapper switching the preview on usually wants to see where it lands.
 
+- *A model contributes its shape and one colour, not its skin.* The geometry comes from
+  the triangles a model frame keeps for hit testing, which carry no UV coordinates, so the
+  albedo is the average colour of the skin the frame would be drawn with. Getting the real
+  skin onto a model means exposing the mesh vertex data, which `EntityModelMesh` currently
+  keeps to itself.
+- *Sprites are left out.* Anything whose orientation is not `Oriented` is turned to face
+  the camera as it is drawn and has no fixed shape to trace against.
+
 **Not implemented**
 
 - Dirtmapping: `_dirt`, `_dirtmode`, `_dirtdepth`, `_dirtscale`, `_dirtgain`,
@@ -64,7 +82,6 @@ they can be checked against a real compile.
 - `_minlight_mottle`, `_minlight_exclude`, `_autominlight` and `_autominlight_target`.
 - `_lightmap_scale`, `_compilerstyle_start`, `_compilerstyle_max` and `_bouncestyled`,
   which describe how the lightmap is written rather than how light travels.
-- Entity models and sprites. Only brushes and patches are traced.
 
 **Deliberately not applicable**
 

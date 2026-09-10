@@ -158,6 +158,12 @@ void MapView3D::connectObservers()
     this, &MapView3D::invalidateLightPreviewMaterials);
   m_notifierConnection += m_document.nodeVisibilityDidChangeNotifier.connect(
     [this](const std::vector<mdl::Node*>&) { invalidateLightPreview(); });
+
+  // Textures and models are loaded in the background, so a map that has just been opened
+  // has neither by the time the preview first looks at it. Rebuilding as they arrive is
+  // what lets the preview pick up its albedo and its model geometry without being asked.
+  m_notifierConnection += m_document.resourcesWereProcessedNotifier.connect(
+    [this](const std::vector<gl::ResourceId>&) { invalidateLightPreview(); });
 }
 
 void MapView3D::invalidateLightPreview()
