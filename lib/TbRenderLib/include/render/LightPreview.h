@@ -79,6 +79,7 @@ private:
   float m_exposure = 1.0f;
   bool m_showModels = false;
   PreviewIndirectLight m_indirectLight = PreviewIndirectLight::FromMap;
+  int32_t m_maxBounces = 2;
 
   /** Set whenever the map changes, including while a scene is already being built. */
   bool m_sceneDirty = true;
@@ -131,6 +132,13 @@ public:
   /** Whether indirect light is computed, overriding the map's "_bounce" key. */
   PreviewIndirectLight indirectLight() const;
   void setIndirectLight(PreviewIndirectLight indirectLight);
+
+  /**
+   * How many times light may bounce, used when indirect light is forced on. Following the
+   * map uses the map's own "_bounce" count instead.
+   */
+  int32_t maxBounces() const;
+  void setMaxBounces(int32_t maxBounces);
 
   /**
    * Throws away the scene, so that the next frame collects the map's geometry and lights

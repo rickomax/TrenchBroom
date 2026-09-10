@@ -411,7 +411,7 @@ TEST_CASE("extractLighting")
       setWorldspawn(map, {});
 
       const auto defaults = extractLighting(map).globals;
-      CHECK_FALSE(defaults.bounceEnabled);
+      CHECK(defaults.bounces == 0);
       // Nor does a bounce pick up the colour of the surface it came off by default.
       CHECK(defaults.bounceColorScale == Catch::Approx(0.0));
       CHECK(defaults.bounceScale == Catch::Approx(1.0));
@@ -420,9 +420,21 @@ TEST_CASE("extractLighting")
         map, {{"_bounce", "1"}, {"_bouncecolorscale", "1"}, {"_bouncescale", "0.5"}});
 
       const auto enabled = extractLighting(map).globals;
-      CHECK(enabled.bounceEnabled);
+      CHECK(enabled.bounces == 1);
       CHECK(enabled.bounceColorScale == Catch::Approx(1.0));
       CHECK(enabled.bounceScale == Catch::Approx(0.5));
+
+      // "_bounce" is a count, not a switch: the number is how many bounces to make.
+      setWorldspawn(map, {{"_bounce", "5"}});
+      CHECK(extractLighting(map).globals.bounces == 5);
+
+      // A map asking for more than the preview will trace gets what the preview will
+      // trace, and a negative count is no bouncing at all.
+      setWorldspawn(map, {{"_bounce", "1000"}});
+      CHECK(extractLighting(map).globals.bounces == MaxPreviewBounces);
+
+      setWorldspawn(map, {{"_bounce", "-1"}});
+      CHECK(extractLighting(map).globals.bounces == 0);
     }
 
     SECTION("tone and scale controls")

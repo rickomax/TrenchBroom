@@ -331,6 +331,8 @@ inline constexpr auto LightPreviewIndirectOff = "off";
 inline auto LightPreviewIndirect =
   Preference<std::string>{"Map view/Light preview indirect", LightPreviewIndirectFromMap};
 
+inline auto LightPreviewBounces = Preference<int>{"Map view/Light preview bounces", 2};
+
 inline auto LightPreviewExposure =
   Preference<float>{"Map view/Light preview exposure", 1.0f};
 

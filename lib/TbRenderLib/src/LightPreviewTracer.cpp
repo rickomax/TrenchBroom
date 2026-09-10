@@ -758,10 +758,15 @@ vm::vec3f tracePreviewPixel(
   auto radiance = vm::vec3f{0, 0, 0};
   auto throughput = vm::vec3f{1, 1, 1};
 
-  const auto bounceEnabled =
-    settings.indirectLight == PreviewIndirectLight::On
-    || (settings.indirectLight == PreviewIndirectLight::FromMap && scene.globals.bounceEnabled);
-  const auto maxBounces = bounceEnabled ? std::max(settings.maxBounces, 0) : 0;
+  // Following the map means using the map's own bounce count, which is zero unless the
+  // mapper set "_bounce". Overriding it uses the preview's count instead, so a mapper can
+  // see what bouncing would do before committing the key.
+  const auto maxBounces = std::clamp(
+    settings.indirectLight == PreviewIndirectLight::On    ? settings.maxBounces
+    : settings.indirectLight == PreviewIndirectLight::Off ? 0
+                                                          : scene.globals.bounces,
+    0,
+    MaxPreviewBounces);
 
   auto depth = 0;
   auto passThroughs = 0;

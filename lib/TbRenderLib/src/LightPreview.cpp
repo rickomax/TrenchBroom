@@ -428,6 +428,21 @@ void LightPreview::setIndirectLight(const PreviewIndirectLight indirectLight)
   }
 }
 
+int32_t LightPreview::maxBounces() const
+{
+  return m_maxBounces;
+}
+
+void LightPreview::setMaxBounces(const int32_t maxBounces)
+{
+  const auto clamped = std::clamp(maxBounces, 0, MaxPreviewBounces);
+  if (m_maxBounces != clamped)
+  {
+    m_maxBounces = clamped;
+    cancelJob();
+  }
+}
+
 void LightPreview::invalidateMaterials()
 {
   m_materialCache->clear();
@@ -498,18 +513,20 @@ PreviewTraceSettings LightPreview::traceSettings() const
   settings.exposure = m_exposure;
   settings.indirectLight = m_indirectLight;
 
+  // How far light bounces is its own setting: it is about what the lighting does, not
+  // about how much work the preview puts into resolving it, which is what quality means.
+  // The tracer only reads it when indirect light is forced on.
+  settings.maxBounces = m_maxBounces;
+
   switch (m_quality)
   {
   case Quality::Low:
-    settings.maxBounces = 1;
     settings.maxShadowRays = 4;
     break;
   case Quality::Medium:
-    settings.maxBounces = 2;
     settings.maxShadowRays = 8;
     break;
   case Quality::High:
-    settings.maxBounces = 4;
     settings.maxShadowRays = 16;
     break;
   }

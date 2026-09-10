@@ -446,9 +446,9 @@ TEST_CASE("tracePreviewPixel")
   SECTION("indirect light follows the map unless the preview overrides it")
   {
     const auto shadeWith =
-      [](const bool mapBounceEnabled, const PreviewIndirectLight indirect) {
+      [](const int32_t mapBounces, const PreviewIndirectLight indirect) {
         auto test = TestScene{};
-        test.scene.globals.bounceEnabled = mapBounceEnabled;
+        test.scene.globals.bounces = mapBounces;
         test.scene.globals.skyDome = vm::vec3f{100, 100, 100};
         test.addQuad(
           vm::vec3f{-20000, -20000, 500},
@@ -482,11 +482,10 @@ TEST_CASE("tracePreviewPixel")
     // The dome only reaches a surface by way of a bounce, so it is a direct readout of
     // whether indirect light was computed.
     CHECK(
-      shadeWith(false, PreviewIndirectLight::FromMap)
-      == Catch::Approx(0.0).margin(0.001));
-    CHECK(shadeWith(true, PreviewIndirectLight::FromMap) > 0.3f);
-    CHECK(shadeWith(false, PreviewIndirectLight::On) > 0.3f);
-    CHECK(shadeWith(true, PreviewIndirectLight::Off) == Catch::Approx(0.0).margin(0.001));
+      shadeWith(0, PreviewIndirectLight::FromMap) == Catch::Approx(0.0).margin(0.001));
+    CHECK(shadeWith(1, PreviewIndirectLight::FromMap) > 0.3f);
+    CHECK(shadeWith(0, PreviewIndirectLight::On) > 0.3f);
+    CHECK(shadeWith(1, PreviewIndirectLight::Off) == Catch::Approx(0.0).margin(0.001));
   }
 
   SECTION("the sky dome lights whatever can see sky")

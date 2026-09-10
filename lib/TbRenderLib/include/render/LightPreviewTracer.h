@@ -71,9 +71,9 @@ PreviewCamera makePreviewCamera(const gl::Camera& camera, int width, int height)
  * Whether the preview computes indirect light, and whether the map gets to decide.
  *
  * The compilers do not bounce light unless "_bounce" asks them to, so following the map
- * means most maps preview without it. Overriding is the preview's equivalent of passing
- * "-bounce" on the command line, which is how a mapper sees what it would do before
- * committing the key.
+ * means most maps preview without it, and maps that do ask get the number of bounces
+ * they asked for. Overriding is the preview's equivalent of passing "-bounce" on the
+ * command line, which is how a mapper sees what it would do before committing the key.
  */
 enum class PreviewIndirectLight
 {
@@ -87,7 +87,10 @@ struct PreviewTraceSettings
   /** Whether indirect light is computed, overriding the map's "_bounce" key. */
   PreviewIndirectLight indirectLight = PreviewIndirectLight::FromMap;
 
-  /** How many times a ray may bounce after the surface the camera sees. */
+  /**
+   * How many times a ray may bounce after the surface the camera sees. Only used when
+   * indirect light is forced on: following the map uses the map's own "_bounce" count.
+   */
   int32_t maxBounces = 2;
   /** The largest number of shadow rays one shading point may spend on light entities. */
   int32_t maxShadowRays = 8;

@@ -22,8 +22,11 @@ formulas, `wait`, `_falloff`, `_anglescale`, `_deviance`, `_softangle`, the Gold
 `_cone`/`_cone2` cone spelling, `_light_channel_mask`, negative lights, and the
 `_dist`/`_range`/`_gamma`/`_maxlight` worldspawn controls. Indirect light, with
 `_bounce`, `_bouncescale` and `_bouncecolorscale`, which like the compilers is off unless
-the map turns it on; the "Indirect light" setting in View Options overrides that the same
-way passing `-bounce` does.
+the map turns it on. `_bounce` is a count, so a map that asks for it gets the number of
+bounces it asked for, capped at 16 because the preview pays for every bounce on every
+pass where the compiler pays once. The "Indirect light" setting in View Options overrides
+the map the same way passing `-bounce` does, and the bounce count next to it is the count
+that override uses.
 
 Brush models cast shadows only where the compilers do: the world and the brushes merged
 into it by `func_detail` and `func_group` always cast unless `_shadow` `-1` says

@@ -688,6 +688,20 @@ void ViewEditor::refreshLightPreviewPanel()
   m_lightPreviewIndirectComboBox->setEnabled(showLightPreview);
   m_lightPreviewQualityComboBox->setEnabled(showLightPreview);
 
+  // The count only applies to the override: following the map uses the map's own
+  // "_bounce" count, and off bounces nothing at all.
+  const auto indirectOn =
+    pref(Preferences::LightPreviewIndirect) == Preferences::LightPreviewIndirectOn;
+  m_lightPreviewBouncesComboBox->setEnabled(showLightPreview && indirectOn);
+
+  if (const auto index =
+        m_lightPreviewBouncesComboBox->findData(pref(Preferences::LightPreviewBounces));
+      index >= 0)
+  {
+    const auto blocker = QSignalBlocker{m_lightPreviewBouncesComboBox};
+    m_lightPreviewBouncesComboBox->setCurrentIndex(index);
+  }
+
   const auto indirect = QString::fromStdString(pref(Preferences::LightPreviewIndirect));
   if (const auto index = m_lightPreviewIndirectComboBox->findData(indirect); index >= 0)
   {
@@ -729,8 +743,20 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
     QString::fromStdString(Preferences::LightPreviewIndirectOff));
   m_lightPreviewIndirectComboBox->setToolTip(
     tr("The compilers do not bounce light unless the map's \"_bounce\" key asks them to, "
-       "which is what \"from map\" follows. Overriding it is the preview's equivalent of "
-       "passing \"-bounce\" on the command line."));
+       "and that key is also how many bounces they make, which is what \"from map\" "
+       "follows. Overriding it is the preview's equivalent of passing \"-bounce\" on the "
+       "command line."));
+
+  m_lightPreviewBouncesComboBox = new QComboBox{};
+  for (const auto bounces : {1, 2, 3, 4, 8})
+  {
+    m_lightPreviewBouncesComboBox->addItem(
+      bounces == 1 ? tr("1 bounce") : tr("%1 bounces").arg(bounces), bounces);
+  }
+  m_lightPreviewBouncesComboBox->setToolTip(
+    tr("How many times light may bounce when indirect light is turned on here, the same "
+       "as the number given to \"_bounce\". More bounces reach further into the corners "
+       "a light does not see directly, and take longer to settle."));
 
   m_lightPreviewQualityComboBox = new QComboBox{};
   m_lightPreviewQualityComboBox->addItem(
@@ -740,7 +766,8 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
   m_lightPreviewQualityComboBox->addItem(
     tr("High quality"), QString::fromStdString(Preferences::LightPreviewQualityHigh));
   m_lightPreviewQualityComboBox->setToolTip(
-    tr("Trades resolution and bounce count against how quickly the preview settles."));
+    tr("Trades resolution and the number of shadow rays each point spends against how "
+       "quickly the preview settles."));
 
   connect(
     m_showLightPreviewCheckBox,
@@ -758,6 +785,11 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
     this,
     &ViewEditor::lightPreviewIndirectChanged);
   connect(
+    m_lightPreviewBouncesComboBox,
+    &QComboBox::currentIndexChanged,
+    this,
+    &ViewEditor::lightPreviewBouncesChanged);
+  connect(
     m_lightPreviewQualityComboBox,
     &QComboBox::currentIndexChanged,
     this,
@@ -769,6 +801,7 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
   layout->addWidget(m_showLightPreviewCheckBox);
   layout->addWidget(m_lightPreviewModelsCheckBox);
   layout->addWidget(m_lightPreviewIndirectComboBox);
+  layout->addWidget(m_lightPreviewBouncesComboBox);
   layout->addWidget(m_lightPreviewQualityComboBox);
 
   inner->setLayout(layout);
@@ -910,6 +943,16 @@ void ViewEditor::lightPreviewIndirectChanged(const int index)
   }
 }
 
+void ViewEditor::lightPreviewBouncesChanged(const int index)
+{
+  if (index >= 0)
+  {
+    setPref(
+      Preferences::LightPreviewBounces,
+      m_lightPreviewBouncesComboBox->itemData(index).toInt());
+  }
+}
+
 void ViewEditor::lightPreviewQualityChanged(const int index)
 {
   if (index >= 0)
@@ -940,6 +983,7 @@ void ViewEditor::restoreDefaultsClicked()
   prefs.resetToDefault(Preferences::LightPreviewQuality);
   prefs.resetToDefault(Preferences::LightPreviewShowModels);
   prefs.resetToDefault(Preferences::LightPreviewIndirect);
+  prefs.resetToDefault(Preferences::LightPreviewBounces);
   prefs.resetToDefault(Preferences::LightPreviewExposure);
   prefs.saveChanges();
 }

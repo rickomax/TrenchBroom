@@ -111,6 +111,7 @@ private:
   QCheckBox* m_showLightPreviewCheckBox = nullptr;
   QCheckBox* m_lightPreviewModelsCheckBox = nullptr;
   QComboBox* m_lightPreviewIndirectComboBox = nullptr;
+  QComboBox* m_lightPreviewBouncesComboBox = nullptr;
   QComboBox* m_lightPreviewQualityComboBox = nullptr;
 
   NotifierConnection m_notifierConnection;
@@ -165,6 +166,7 @@ private:
   void showLightPreviewChanged(bool checked);
   void lightPreviewModelsChanged(bool checked);
   void lightPreviewIndirectChanged(int index);
+  void lightPreviewBouncesChanged(int index);
   void lightPreviewQualityChanged(int index);
   void restoreDefaultsClicked();
 };

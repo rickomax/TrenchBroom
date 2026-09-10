@@ -150,6 +150,13 @@ struct PreviewSurfaceLightTemplate
 };
 
 /**
+ * The most bounces the preview will trace, whatever the map or the user asks for. Every
+ * bounce costs a ray on every pass, and past a handful of them the image stops changing
+ * long before the cost does.
+ */
+constexpr auto MaxPreviewBounces = int32_t(16);
+
+/**
  * Lighting that has no position: the sky domes, the global minimum light, and the knobs
  * that scale every light in the map.
  */
@@ -175,8 +182,11 @@ struct PreviewGlobalLighting
   /** "_anglescale": the default angle of incidence response for lights that omit it. */
   float defaultAngleScale = 0.5f;
 
-  /** "_bounce": whether indirect light is computed at all. Off unless asked for. */
-  bool bounceEnabled = false;
+  /**
+   * "_bounce": how many times light bounces. Zero, the default, means the compilers
+   * compute no indirect light at all.
+   */
+  int32_t bounces = 0;
   /** "_bouncescale": how strong indirect light is. */
   float bounceScale = 1.0f;
   /** "_bouncecolorscale": how much indirect light picks up the colour of surfaces. */

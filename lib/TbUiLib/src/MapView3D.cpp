@@ -196,6 +196,7 @@ void MapView3D::updateLightPreviewSettings()
       ? render::PreviewIndirectLight::Off
       : render::PreviewIndirectLight::FromMap);
 
+  m_lightPreview->setMaxBounces(pref(Preferences::LightPreviewBounces));
   m_lightPreview->setExposure(pref(Preferences::LightPreviewExposure));
 }
 
