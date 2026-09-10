@@ -31,8 +31,6 @@
 namespace tb::mdl
 {
 
-VertexLighting::~VertexLighting() = default;
-
 BrushRendererBrushCache::CachedFace::CachedFace(
   const mdl::BrushFace* i_face, const size_t i_indexOfFirstVertexRelativeToBrush)
   : material{i_face->material()}
@@ -50,19 +48,14 @@ BrushRendererBrushCache::BrushRendererBrushCache()
 void BrushRendererBrushCache::invalidateVertexCache()
 {
   m_rendererCacheValid = false;
-  m_lightingRevision = 0;
   m_cachedVertices.clear();
   m_cachedEdges.clear();
   m_cachedFacesSortedByMaterial.clear();
 }
 
-void BrushRendererBrushCache::validateVertexCache(
-  const mdl::BrushNode& brushNode, const VertexLighting* lighting)
+void BrushRendererBrushCache::validateVertexCache(const mdl::BrushNode& brushNode)
 {
-  // The vertex colors carry the lighting, so the cache also has to be rebuilt when the
-  // lighting changes even though the brush itself has not.
-  const auto lightingRevision = lighting ? lighting->revision() : 0u;
-  if (m_rendererCacheValid && m_lightingRevision == lightingRevision)
+  if (m_rendererCacheValid)
   {
     return;
   }
@@ -95,12 +88,8 @@ void BrushRendererBrushCache::validateVertexCache(
       vertex->setPayload(static_cast<GLuint>(currentIndex));
 
       const auto& position = vertex->position();
-      const auto normal = vm::vec3f{face.boundary().normal};
-      const auto color = lighting
-                           ? lighting->lightingAt(vm::vec3f{position}, normal, &face)
-                           : vm::vec3f{1.0f, 1.0f, 1.0f};
       m_cachedVertices.emplace_back(
-        vm::vec3f{position}, normal, face.uvCoords(position), vm::vec4f{color, 1.0f});
+        vm::vec3f{position}, vm::vec3f{face.boundary().normal}, face.uvCoords(position));
 
       currentHalfEdge = currentHalfEdge->previous();
     }
@@ -139,7 +128,6 @@ void BrushRendererBrushCache::validateVertexCache(
   }
 
   m_rendererCacheValid = true;
-  m_lightingRevision = lightingRevision;
 }
 
 const std::vector<BrushRendererBrushCache::Vertex>& BrushRendererBrushCache::

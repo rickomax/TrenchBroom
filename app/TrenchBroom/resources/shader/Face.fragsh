@@ -33,12 +33,10 @@ uniform float GridAlpha;
 uniform vec3 GridColor;
 uniform bool ShadeFaces;
 uniform bool ShowFog;
-uniform bool ApplyLightPreview;
 
 varying vec4 modelCoordinates;
 varying vec3 modelNormal;
 varying vec4 faceColor;
-varying vec4 lightPreviewColor;
 varying vec3 viewVector;
 
 float grid(
@@ -54,11 +52,6 @@ void main()
   else
   {
     gl_FragColor = faceColor;
-  }
-
-  if (ApplyLightPreview)
-  {
-    gl_FragColor.rgb *= lightPreviewColor.rgb;
   }
 
   // Assume alpha masked or opaque.
@@ -86,9 +79,7 @@ void main()
     gl_FragColor = clamp(brightnessCorrection * gl_FragColor, 0.0, 1.0);
   }
 
-  // The light preview already shades the faces, so the angular dimming that stands in
-  // for lighting otherwise would only darken it twice.
-  if (ShadeFaces && !ApplyLightPreview)
+  if (ShadeFaces)
   {
     // angular dimming ( can be controlled with dimStrength )
     // TODO: make view option

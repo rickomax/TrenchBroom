@@ -21,9 +21,6 @@
 
 #include "gl/VertexType.h"
 
-#include "vm/vec.h"
-
-#include <cstdint>
 #include <vector>
 
 namespace tb
@@ -38,31 +35,10 @@ namespace mdl
 class BrushNode;
 class BrushFace;
 
-/**
- * Supplies the lighting baked into the cached vertex colors.
- *
- * The light preview that computes it lives in the render library, which depends on this
- * one rather than the other way round, so the cache reaches it through this interface.
- */
-class VertexLighting
-{
-public:
-  virtual ~VertexLighting();
-
-  /** The light reaching the given point of the given face, as a colour to modulate the
-   * face with. */
-  virtual vm::vec3f lightingAt(
-    const vm::vec3f& position, const vm::vec3f& normal, const BrushFace* face) const = 0;
-
-  /** Changes whenever the lighting would come out differently, so that caches can tell
-   * that they have to be rebuilt. */
-  virtual uint64_t revision() const = 0;
-};
-
 class BrushRendererBrushCache
 {
 public:
-  using VertexSpec = gl::VertexTypes::P3NT2C4;
+  using VertexSpec = gl::VertexTypes::P3NT2;
   using Vertex = VertexSpec::Vertex;
 
   struct CachedFace
@@ -88,8 +64,6 @@ private:
   std::vector<CachedEdge> m_cachedEdges;
   std::vector<CachedFace> m_cachedFacesSortedByMaterial;
   bool m_rendererCacheValid;
-  /** The lighting revision the cached vertex colors were built for. */
-  uint64_t m_lightingRevision = 0;
 
 public:
   BrushRendererBrushCache();
@@ -106,8 +80,7 @@ public:
    * different rendering styles (default/selected/locked), or need to re-evaluate the
    * BrushRenderer::Filter to exclude certain faces/edges.
    */
-  void validateVertexCache(
-    const BrushNode& brushNode, const VertexLighting* lighting = nullptr);
+  void validateVertexCache(const BrushNode& brushNode);
 
   /**
    * Returns all vertices for all faces of the brush.

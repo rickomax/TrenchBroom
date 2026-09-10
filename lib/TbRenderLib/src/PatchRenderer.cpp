@@ -34,7 +34,6 @@
 #include "gl/VertexType.h"
 #include "mdl/EditorContext.h"
 #include "mdl/PatchNode.h"
-#include "render/LightPreview.h"
 #include "render/RenderBatch.h"
 #include "render/RenderContext.h"
 
@@ -132,24 +131,11 @@ void PatchRenderer::invalidatePatch(const mdl::PatchNode&)
   invalidate();
 }
 
-void PatchRenderer::ensureLightingRevision(const RenderContext& renderContext)
-{
-  // The lighting is baked into the vertex colors, so a change to it invalidates the mesh
-  // even though no patch has been edited.
-  const auto revision = renderContext.lightPreviewRevision();
-  if (revision != m_lightingRevision)
-  {
-    m_lightingRevision = revision;
-    m_valid = false;
-  }
-}
-
 void PatchRenderer::render(RenderContext& renderContext, RenderBatch& renderBatch)
 {
-  ensureLightingRevision(renderContext);
   if (!m_valid)
   {
-    validate(renderContext.lightPreview());
+    validate();
   }
 
   if (renderContext.showFaces())
@@ -169,8 +155,7 @@ void PatchRenderer::render(RenderContext& renderContext, RenderBatch& renderBatc
 
 static gl::MaterialIndexArrayRenderer buildMeshRenderer(
   const std::vector<const mdl::PatchNode*>& patchNodes,
-  const mdl::EditorContext& editorContext,
-  const LightPreview* lightPreview)
+  const mdl::EditorContext& editorContext)
 {
   size_t vertexCount = 0u;
   auto indexArrayMapSize = gl::MaterialIndexArrayMap::Size{};
@@ -188,7 +173,7 @@ static gl::MaterialIndexArrayRenderer buildMeshRenderer(
     }
   }
 
-  using Vertex = gl::VertexTypes::P3NT2C4::Vertex;
+  using Vertex = gl::VertexTypes::P3NT2::Vertex;
   auto vertices = std::vector<Vertex>{};
   vertices.reserve(vertexCount);
 
@@ -203,18 +188,9 @@ static gl::MaterialIndexArrayRenderer buildMeshRenderer(
 
       const auto& grid = patchNode->grid();
       auto gridVertices =
-        grid.points | std::views::transform([&](const auto& p) {
-          // The patch does not shadow itself, so it is left out of the occlusion test.
-          const auto lightColor =
-            lightPreview
-              ? lightPreview->lightingAt(
-                  vm::vec3f{p.position}, vm::vec3f{p.normal}, nullptr, patchNode)
-              : vm::vec3f{1.0f, 1.0f, 1.0f};
+        grid.points | std::views::transform([](const auto& p) {
           return Vertex{
-            vm::vec3f{p.position},
-            vm::vec3f{p.normal},
-            vm::vec2f{p.uvCoords},
-            vm::vec4f{lightColor, 1.0f}};
+            vm::vec3f{p.position}, vm::vec3f{p.normal}, vm::vec2f{p.uvCoords}};
         })
         | kdl::ranges::to<std::vector>();
       kdl::vec_append(vertices, std::move(gridVertices));
@@ -327,12 +303,11 @@ static DirectEdgeRenderer buildEdgeRenderer(
   return DirectEdgeRenderer{std::move(vertexArray), std::move(indexRangeMap)};
 }
 
-void PatchRenderer::validate(const LightPreview* lightPreview)
+void PatchRenderer::validate()
 {
   if (!m_valid)
   {
-    m_patchMeshRenderer =
-      buildMeshRenderer(m_patchNodes.get_data(), m_editorContext, lightPreview);
+    m_patchMeshRenderer = buildMeshRenderer(m_patchNodes.get_data(), m_editorContext);
     m_edgeRenderer = buildEdgeRenderer(m_patchNodes.get_data(), m_editorContext);
 
     m_valid = true;
@@ -420,7 +395,6 @@ void PatchRenderer::render(RenderContext& context)
     shader.set("TintColor", m_tintColor);
   }
   shader.set("GrayScale", m_grayscale);
-  shader.set("ApplyLightPreview", context.lightPreview() != nullptr);
   shader.set("CameraPosition", context.camera().position());
   shader.set("ShadeFaces", shadeFaces);
   shader.set("ShowFog", showFog);

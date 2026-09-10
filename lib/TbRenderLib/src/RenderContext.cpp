@@ -20,7 +20,6 @@
 #include "render/RenderContext.h"
 
 #include "gl/Camera.h"
-#include "render/LightPreview.h"
 
 namespace tb::render
 {
@@ -259,21 +258,6 @@ bool RenderContext::tintSelection() const
 void RenderContext::clearTintSelection()
 {
   m_tintSelection = false;
-}
-
-const LightPreview* RenderContext::lightPreview() const
-{
-  return m_lightPreview.get();
-}
-
-uint64_t RenderContext::lightPreviewRevision() const
-{
-  return m_lightPreview ? m_lightPreview->revision() : 0u;
-}
-
-void RenderContext::setLightPreview(std::shared_ptr<const LightPreview> lightPreview)
-{
-  m_lightPreview = std::move(lightPreview);
 }
 
 bool RenderContext::showSelectionGuide() const

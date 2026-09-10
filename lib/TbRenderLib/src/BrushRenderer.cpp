@@ -28,7 +28,6 @@
 #include "mdl/Polyhedron.h"
 #include "mdl/TagAttribute.h"
 #include "render/BrushRendererArrays.h"
-#include "render/LightPreview.h"
 #include "render/RenderContext.h"
 
 #include "kd/contracts.h"
@@ -311,18 +310,6 @@ void BrushRenderer::setShowHiddenBrushes(const bool showHiddenBrushes)
   }
 }
 
-void BrushRenderer::ensureLightingRevision(const RenderContext& renderContext)
-{
-  // The lighting is baked into the vertex colors, so a change to it invalidates the
-  // brushes even though none of them has been edited.
-  const auto revision = renderContext.lightPreviewRevision();
-  if (revision != m_lightingRevision)
-  {
-    m_lightingRevision = revision;
-    invalidate();
-  }
-}
-
 void BrushRenderer::render(RenderContext& renderContext, RenderBatch& renderBatch)
 {
   renderOpaque(renderContext, renderBatch);
@@ -331,12 +318,11 @@ void BrushRenderer::render(RenderContext& renderContext, RenderBatch& renderBatc
 
 void BrushRenderer::renderOpaque(RenderContext& renderContext, RenderBatch& renderBatch)
 {
-  ensureLightingRevision(renderContext);
   if (!m_allBrushes.empty())
   {
     if (!valid())
     {
-      validate(renderContext.lightPreview());
+      validate();
     }
     if (renderContext.showFaces())
     {
@@ -352,12 +338,11 @@ void BrushRenderer::renderOpaque(RenderContext& renderContext, RenderBatch& rend
 void BrushRenderer::renderTransparent(
   RenderContext& renderContext, RenderBatch& renderBatch)
 {
-  ensureLightingRevision(renderContext);
   if (!m_allBrushes.empty())
   {
     if (!valid())
     {
-      validate(renderContext.lightPreview());
+      validate();
     }
     if (renderContext.showFaces())
     {
@@ -392,13 +377,13 @@ void BrushRenderer::renderEdges(RenderBatch& renderBatch)
   m_edgeRenderer.render(renderBatch, m_edgeColor);
 }
 
-void BrushRenderer::validate(const LightPreview* lightPreview)
+void BrushRenderer::validate()
 {
   contract_pre(!valid());
 
   for (auto* brushNode : m_invalidBrushes)
   {
-    validateBrush(*brushNode, lightPreview);
+    validateBrush(*brushNode);
   }
   m_invalidBrushes.clear();
 
@@ -525,8 +510,7 @@ bool BrushRenderer::shouldDrawFaceInTransparentPass(
   return false;
 }
 
-void BrushRenderer::validateBrush(
-  const mdl::BrushNode& brushNode, const LightPreview* lightPreview)
+void BrushRenderer::validateBrush(const mdl::BrushNode& brushNode)
 {
   contract_pre(m_allBrushes.find(&brushNode) != std::end(m_allBrushes));
   contract_pre(m_invalidBrushes.find(&brushNode) != std::end(m_invalidBrushes));
@@ -550,7 +534,7 @@ void BrushRenderer::validateBrush(
 
   // collect vertices
   auto& brushCache = brushNode.brushRendererBrushCache();
-  brushCache.validateVertexCache(brushNode, lightPreview);
+  brushCache.validateVertexCache(brushNode);
   const auto& cachedVertices = brushCache.cachedVertices();
   contract_assert(!cachedVertices.empty());
 
