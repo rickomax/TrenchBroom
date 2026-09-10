@@ -524,6 +524,11 @@ QWidget* ViewEditor::createRendererPanel(QWidget* parent)
 
   m_shadeFacesCheckBox = new QCheckBox{tr("Shade faces")};
   m_showFogCheckBox = new QCheckBox{tr("Use fog")};
+  m_showLightPreviewCheckBox = new QCheckBox{tr("Light preview")};
+  m_showLightPreviewCheckBox->setToolTip(
+    tr("Shade the 3D view with a rough preview of what the map's lights will do. This is "
+       "an approximation, not what a compiler would produce, and it costs a good deal of "
+       "performance on large maps."));
   m_showEdgesCheckBox = new QCheckBox{tr("Show edges")};
 
 
@@ -558,6 +563,11 @@ QWidget* ViewEditor::createRendererPanel(QWidget* parent)
     &ViewEditor::shadeFacesChanged);
   connect(
     m_showFogCheckBox, &QAbstractButton::clicked, this, &ViewEditor::showFogChanged);
+  connect(
+    m_showLightPreviewCheckBox,
+    &QAbstractButton::clicked,
+    this,
+    &ViewEditor::showLightPreviewChanged);
   connect(
     m_showEdgesCheckBox, &QAbstractButton::clicked, this, &ViewEditor::showEdgesChanged);
 
@@ -594,6 +604,7 @@ QWidget* ViewEditor::createRendererPanel(QWidget* parent)
 
   layout->addWidget(m_shadeFacesCheckBox);
   layout->addWidget(m_showFogCheckBox);
+  layout->addWidget(m_showLightPreviewCheckBox);
   layout->addWidget(m_showEdgesCheckBox);
 
   for (auto* button : m_entityLinkRadioGroup->buttons())
@@ -664,6 +675,7 @@ void ViewEditor::refreshRendererPanel()
     true);
   m_shadeFacesCheckBox->setChecked(pref(Preferences::ShadeFaces));
   m_showFogCheckBox->setChecked(pref(Preferences::ShowFog));
+  m_showLightPreviewCheckBox->setChecked(pref(Preferences::ShowLightPreview));
   m_showEdgesCheckBox->setChecked(pref(Preferences::ShowEdges));
   checkButtonInGroup(
     m_entityLinkRadioGroup,
@@ -753,6 +765,11 @@ void ViewEditor::shadeFacesChanged(const bool checked)
   setPref(Preferences::ShadeFaces, checked);
 }
 
+void ViewEditor::showLightPreviewChanged(const bool checked)
+{
+  setPref(Preferences::ShowLightPreview, checked);
+}
+
 void ViewEditor::showFogChanged(const bool checked)
 {
   setPref(Preferences::ShowFog, checked);
@@ -798,6 +815,7 @@ void ViewEditor::restoreDefaultsClicked()
   prefs.resetToDefault(Preferences::FaceRenderMode);
   prefs.resetToDefault(Preferences::ShadeFaces);
   prefs.resetToDefault(Preferences::ShowFog);
+  prefs.resetToDefault(Preferences::ShowLightPreview);
   prefs.resetToDefault(Preferences::ShowEdges);
   prefs.resetToDefault(Preferences::ShowSoftMapBounds);
   prefs.resetToDefault(Preferences::ShowPointEntities);

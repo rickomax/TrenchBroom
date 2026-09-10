@@ -26,6 +26,8 @@
 
 #include "kd/vector_set.h"
 
+#include <cstdint>
+
 namespace tb
 {
 namespace gl
@@ -41,6 +43,7 @@ class PatchNode;
 
 namespace render
 {
+class LightPreview;
 class RenderBatch;
 class RenderContext;
 
@@ -50,6 +53,8 @@ private:
   const mdl::EditorContext& m_editorContext;
 
   bool m_valid = true;
+  /** The lighting revision the baked vertex colors were built for. */
+  uint64_t m_lightingRevision = 0;
   kdl::vector_set<const mdl::PatchNode*> m_patchNodes;
 
   gl::MaterialIndexArrayRenderer m_patchMeshRenderer;
@@ -122,7 +127,8 @@ public:
   void render(RenderContext& renderContext, RenderBatch& renderBatch);
 
 private:
-  void validate();
+  void ensureLightingRevision(const RenderContext& renderContext);
+  void validate(const LightPreview* lightPreview);
 
 private: // implement IndexedRenderable interface
   void prepare(gl::Gl& gl, gl::VboManager& vboManager) override;

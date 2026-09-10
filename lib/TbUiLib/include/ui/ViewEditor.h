@@ -101,6 +101,7 @@ private:
   QButtonGroup* m_renderModeRadioGroup = nullptr;
   QCheckBox* m_shadeFacesCheckBox = nullptr;
   QCheckBox* m_showFogCheckBox = nullptr;
+  QCheckBox* m_showLightPreviewCheckBox = nullptr;
   QCheckBox* m_showEdgesCheckBox = nullptr;
 
   QButtonGroup* m_entityLinkRadioGroup = nullptr;
@@ -151,6 +152,7 @@ private:
   void faceRenderModeChanged(int id);
   void shadeFacesChanged(bool checked);
   void showFogChanged(bool checked);
+  void showLightPreviewChanged(bool checked);
   void showEdgesChanged(bool checked);
   void entityLinkModeChanged(int id);
   void showSoftMapBoundsChanged(bool checked);

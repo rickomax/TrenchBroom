@@ -21,6 +21,7 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QDateTime>
 #include <QDebug>
 #include <QMenu>
 #include <QMimeData>
@@ -68,6 +69,7 @@
 #include "mdl/UpdateBrushFaceAttributes.h"
 #include "mdl/WorldNode.h"
 #include "render/Compass.h"
+#include "render/LightPreview.h"
 #include "render/MapRenderer.h"
 #include "render/PrimitiveRenderer.h"
 #include "render/RenderBatch.h"
@@ -1022,6 +1024,16 @@ void MapViewBase::renderContents(gl::Gl& gl)
     pref(Preferences::ShowSoftMapBounds)
       ? vm::bbox3f{softMapBounds(map).bounds.value_or(vm::bbox3d{})}
       : vm::bbox3f{});
+
+  // Only the 3D view is shaded, and the preview is rebuilt every frame so that animated
+  // light styles run and edits show up straight away.
+  if (renderContext.render3D() && pref(Preferences::ShowLightPreview))
+  {
+    const auto timeSeconds =
+      float(QDateTime::currentMSecsSinceEpoch() % (1000 * 60 * 60)) / 1000.0f;
+    renderContext.setLightPreview(
+      std::make_shared<render::LightPreview>(m_document.map(), timeSeconds));
+  }
 
   setupGL(renderContext);
   setRenderOptions(renderContext);

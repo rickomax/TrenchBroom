@@ -26,6 +26,7 @@
 #include "render/EdgeRenderer.h"
 #include "render/FaceRenderer.h"
 
+#include <cstdint>
 #include <memory>
 #include <tuple>
 #include <unordered_map>
@@ -48,6 +49,7 @@ class EditorContext;
 
 namespace render
 {
+class LightPreview;
 
 class BrushRenderer
 {
@@ -164,6 +166,8 @@ private:
 
   Color m_faceColor;
   bool m_showEdges = false;
+  /** The lighting revision the baked vertex colors were built for. */
+  uint64_t m_lightingRevision = 0;
   Color m_edgeColor;
   bool m_grayscale = false;
   bool m_tint = false;
@@ -291,12 +295,13 @@ public:
   /**
    * Only exposed for benchmarking.
    */
-  void validate();
+  void ensureLightingRevision(const RenderContext& renderContext);
+  void validate(const LightPreview* lightPreview);
 
 private:
   bool shouldDrawFaceInTransparentPass(
     const mdl::BrushNode& brushNode, const mdl::BrushFace& face) const;
-  void validateBrush(const mdl::BrushNode& brushNode);
+  void validateBrush(const mdl::BrushNode& brushNode, const LightPreview* lightPreview);
 
 public:
   /**

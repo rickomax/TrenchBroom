@@ -209,6 +209,11 @@ using P3NT2 = VertexType<
   VertexAttributeTypes::P3,
   VertexAttributeTypes::N,
   VertexAttributeTypes::UV02>;
+using P3NT2C4 = VertexType<
+  VertexAttributeTypes::P3,
+  VertexAttributeTypes::N,
+  VertexAttributeTypes::UV02,
+  VertexAttributeTypes::C4>;
 } // namespace VertexTypes
 
 } // namespace tb::gl

@@ -25,6 +25,9 @@
 
 #include "vm/bbox.h"
 
+#include <cstdint>
+#include <memory>
+
 namespace tb
 {
 namespace gl
@@ -37,6 +40,7 @@ class ShaderManager;
 
 namespace render
 {
+class LightPreview;
 
 enum class RenderMode
 {
@@ -91,6 +95,10 @@ private:
 
   ShowSelectionGuide m_showSelectionGuide = ShowSelectionGuide::Hide;
   vm::bbox3f m_softMapBounds;
+
+  /** The lighting to bake into the vertex colors, if the light preview is on. Shared
+   * because it is built once per frame and read by every renderer. */
+  std::shared_ptr<const LightPreview> m_lightPreview;
 
 public:
   RenderContext(
@@ -166,6 +174,13 @@ public:
 
   bool tintSelection() const;
   void clearTintSelection();
+
+  /** The light preview to shade with, or null when it is off. */
+  const LightPreview* lightPreview() const;
+  /** The preview's revision, or 0 when there is none, so that a renderer can tell that
+   * its baked vertex colors are stale. */
+  uint64_t lightPreviewRevision() const;
+  void setLightPreview(std::shared_ptr<const LightPreview> lightPreview);
 
   bool showSelectionGuide() const;
   void setShowSelectionGuide();

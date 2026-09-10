@@ -312,6 +312,8 @@ inline auto FaceRenderMode =
 
 inline auto ShadeFaces = Preference<bool>{"Map view/Shade faces", true};
 inline auto ShowFog = Preference<bool>{"Map view/Show fog", false};
+/** Shades the 3D view with a rough preview of what the map's lights will do. */
+inline auto ShowLightPreview = Preference<bool>{"Map view/Show light preview", false};
 inline auto ShowEdges = Preference<bool>{"Map view/Show edges", true};
 
 inline auto ShowSoftMapBounds = Preference<bool>{"Map view/Show soft map bounds", true};

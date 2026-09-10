@@ -166,6 +166,7 @@ void FaceRenderer::render(RenderContext& context)
     }
     shader.set("GrayScale", m_grayscale);
     shader.set("CameraPosition", context.camera().position());
+    shader.set("ApplyLightPreview", context.lightPreview() != nullptr);
     shader.set("ShadeFaces", shadeFaces);
     shader.set("ShowFog", showFog);
     shader.set("Alpha", m_alpha);
