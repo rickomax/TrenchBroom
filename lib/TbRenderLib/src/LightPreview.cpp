@@ -505,8 +505,18 @@ void LightPreview::render(
   const auto& camera = renderContext.camera();
   const auto& viewport = camera.viewport();
   const auto divisor = resolutionDivisor();
-  const auto width = std::clamp(viewport.width / divisor, 1, MaxPreviewWidth);
-  const auto height = std::clamp(viewport.height / divisor, 1, MaxPreviewHeight);
+  auto width = std::max(viewport.width / divisor, 1);
+  auto height = std::max(viewport.height / divisor, 1);
+
+  // Cap the work a very wide or very tall view asks for, scaling both sides by the same
+  // amount so that the preview's pixels stay square.
+  if (const auto excess = std::max(
+        float(width) / float(MaxPreviewWidth), float(height) / float(MaxPreviewHeight));
+      excess > 1.0f)
+  {
+    width = std::max(int(float(width) / excess), 1);
+    height = std::max(int(float(height) / excess), 1);
+  }
 
   const auto snapshot = makePreviewCamera(camera, width, height);
   if (snapshot != m_camera)
@@ -644,13 +654,25 @@ void LightPreview::renderOverlay(RenderContext& renderContext, gl::VboManager& v
 
     // The quad is written straight in clip space, so the preview covers the view whatever
     // transformation the scene was drawn with.
+    //
+    // The vertical texture coordinates are flipped because the two sides disagree about
+    // where an image starts: the tracer writes the top row of the view first, while a
+    // texture's first row is the one at v = 0, which lands at the bottom of the screen.
     m_quad = std::make_unique<gl::VertexArray>(gl::VertexArray::move(std::vector<Vertex>{
-      Vertex{{-1.0f, -1.0f}, {0.0f, 0.0f}},
-      Vertex{{1.0f, -1.0f}, {1.0f, 0.0f}},
-      Vertex{{1.0f, 1.0f}, {1.0f, 1.0f}},
-      Vertex{{-1.0f, 1.0f}, {0.0f, 1.0f}},
+      Vertex{{-1.0f, -1.0f}, {0.0f, 1.0f}},
+      Vertex{{1.0f, -1.0f}, {1.0f, 1.0f}},
+      Vertex{{1.0f, 1.0f}, {1.0f, 0.0f}},
+      Vertex{{-1.0f, 1.0f}, {0.0f, 0.0f}},
     }));
   }
+
+  // The map renderer leaves back face culling on with a clockwise front face, and a
+  // screen filling quad has no facing worth speaking of, so culling comes off for the
+  // draw. It has to go back on afterwards, since the focus indicator is drawn after the
+  // view's contents and is wound to match.
+  gl.pushAttrib(GL_POLYGON_BIT);
+  gl.disable(GL_CULL_FACE);
+  gl.polygonMode(GL_FRONT_AND_BACK, GL_FILL);
 
   gl.disable(GL_DEPTH_TEST);
   gl.depthMask(GL_FALSE);
@@ -678,6 +700,7 @@ void LightPreview::renderOverlay(RenderContext& renderContext, gl::VboManager& v
 
   gl.depthMask(GL_TRUE);
   gl.enable(GL_DEPTH_TEST);
+  gl.popAttrib();
 }
 
 bool LightPreview::hasGlResources() const
