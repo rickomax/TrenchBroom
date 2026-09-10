@@ -19,6 +19,7 @@
 
 #include "ui/MapView3D.h"
 
+#include <QOpenGLContext>
 #include <QTimer>
 
 #include "PreferenceManager.h"
@@ -156,7 +157,7 @@ void MapView3D::connectObservers()
   m_notifierConnection += m_document.materialCollectionsDidChangeNotifier.connect(
     this, &MapView3D::invalidateLightPreviewMaterials);
   m_notifierConnection += m_document.nodeVisibilityDidChangeNotifier.connect(
-    this, [this](const std::vector<mdl::Node*>&) { invalidateLightPreview(); });
+    [this](const std::vector<mdl::Node*>&) { invalidateLightPreview(); });
 }
 
 void MapView3D::invalidateLightPreview()
@@ -185,8 +186,13 @@ void MapView3D::updateLightPreviewSettings()
 
 void MapView3D::releaseLightPreviewResources()
 {
-  // The preview's texture and buffer belong to this widget's context, so they have to go
-  // while that context is still current.
+  if (!m_lightPreview->hasGlResources())
+  {
+    return;
+  }
+
+  // Freeing them needs the context that owns them to be current, and this runs while that
+  // context is on its way out, so it has to be made current one last time.
   makeCurrent();
   auto gl = GlQt{getGlFunctions("MapView3D::releaseLightPreviewResources", context())};
   m_lightPreview->releaseGlResources(gl);
@@ -243,6 +249,16 @@ void MapView3D::initializeGL()
 {
   MapViewBase::initializeGL();
   setCompass(std::make_unique<render::Compass3D>());
+
+  // The preview's texture and vertex buffer belong to this context, so they have to be
+  // released before it goes. The context is destroyed and made again when the view is
+  // reparented, not only when the window closes, so the connection is made here rather
+  // than once at construction: it follows whichever context is current.
+  connect(
+    context(),
+    &QOpenGLContext::aboutToBeDestroyed,
+    this,
+    &MapView3D::releaseLightPreviewResources);
 }
 
 void MapView3D::bindEvents()
@@ -256,10 +272,6 @@ void MapView3D::bindEvents()
   m_lightPreviewTimer = new QTimer{this};
   m_lightPreviewTimer->setInterval(66);
   connect(m_lightPreviewTimer, &QTimer::timeout, this, [this]() { update(); });
-
-  connect(this, &QOpenGLWidget::aboutToBeDestroyed, this, [this]() {
-    releaseLightPreviewResources();
-  });
 }
 
 void MapView3D::updateFlyMode()

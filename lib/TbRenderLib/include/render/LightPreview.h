@@ -152,6 +152,9 @@ public:
   void render(
     RenderContext& renderContext, gl::VboManager& vboManager, const mdl::Map& map);
 
+  /** Whether the preview currently holds anything that has to be freed with a context. */
+  bool hasGlResources() const;
+
   /**
    * Releases the preview's GL objects. Must be called while the context that owns them is
    * still current.

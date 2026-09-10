@@ -33,6 +33,7 @@
 #include <atomic>
 #include <cmath>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -677,6 +678,11 @@ void LightPreview::renderOverlay(RenderContext& renderContext, gl::VboManager& v
 
   gl.depthMask(GL_TRUE);
   gl.enable(GL_DEPTH_TEST);
+}
+
+bool LightPreview::hasGlResources() const
+{
+  return m_texture != 0 || m_quad != nullptr;
 }
 
 void LightPreview::releaseGlResources(gl::Gl& gl)
