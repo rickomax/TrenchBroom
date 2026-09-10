@@ -52,11 +52,22 @@
 #include <cstdlib>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace tb::render
 {
 namespace
 {
+
+bool startsWithIgnoringCase(const std::string_view str, const std::string_view prefix)
+{
+  return str.size() >= prefix.size()
+         && std::equal(
+           prefix.begin(), prefix.end(), str.begin(), [](const char a, const char b) {
+             return std::tolower(static_cast<unsigned char>(a))
+                    == std::tolower(static_cast<unsigned char>(b));
+           });
+}
 
 std::string toLower(std::string_view str)
 {
@@ -76,6 +87,102 @@ std::string materialBaseName(const std::string& name)
 {
   const auto slash = name.find_last_of("/\\");
   return toLower(slash == std::string::npos ? name : name.substr(slash + 1));
+}
+
+/**
+ * Decides whether a face is one the game never draws.
+ *
+ * The entity definitions cannot answer this: an FGD says whether a class is solid or a
+ * point, and what properties it takes, but nothing about whether it is drawn. What it
+ * does give is the classname, and every Quake family game names its trigger classes the
+ * same way, which is why the game configs can tag them by pattern. The rest comes from
+ * the game config's own surface and content flags, from Quake 3 surface parameters, and
+ * from the handful of texture names the whole family uses for faces that exist only for
+ * the compiler.
+ *
+ * These faces are left out of the scene altogether rather than made invisible: they are
+ * not drawn, they do not block light, and they must not colour the light that bounces
+ * around them either.
+ *
+ * NOTE: the texture names below are conventions rather than anything a game states, so
+ * this is one of the places to look first when a game previews something it should not.
+ */
+class HiddenFaceClassifier
+{
+private:
+  int m_surfaceFlags = 0;
+  int m_contentFlags = 0;
+
+public:
+  explicit HiddenFaceClassifier(const mdl::GameConfig& gameConfig)
+  {
+    const auto& faceAttribs = gameConfig.faceAttribsConfig;
+    for (const auto* flag : {"nodraw", "hint", "skip"})
+    {
+      m_surfaceFlags |= faceAttribs.surfaceFlags.flagValue(flag);
+    }
+    for (const auto* flag : {"playerclip", "monsterclip", "origin"})
+    {
+      m_contentFlags |= faceAttribs.contentFlags.flagValue(flag);
+    }
+  }
+
+  bool isHidden(
+    const gl::Material* material,
+    const std::string& materialName,
+    const int surfaceFlags,
+    const int contentFlags) const
+  {
+    if (
+      (m_surfaceFlags != 0 && (surfaceFlags & m_surfaceFlags) != 0)
+      || (m_contentFlags != 0 && (contentFlags & m_contentFlags) != 0))
+    {
+      return true;
+    }
+
+    if (material)
+    {
+      for (const auto* parm :
+           {"nodraw", "hint", "skip", "trigger", "areaportal", "clusterportal"})
+      {
+        if (material->surfaceParms().contains(parm))
+        {
+          return true;
+        }
+      }
+    }
+
+    // The same patterns the game configs match these by, spelled out so that the rule
+    // still holds for a game whose config does not carry the tag.
+    const auto name = materialBaseName(materialName);
+    static const auto exactNames = std::unordered_set<std::string>{
+      "aaatrigger",
+      "areaportal",
+      "clusterportal",
+      "donotenter",
+      "nodraw",
+      "null",
+      "origin",
+      "skip",
+      "trigger",
+    };
+
+    return exactNames.contains(name) || name.ends_with("clip") || name.starts_with("hint")
+           || name.find("caulk") != std::string::npos;
+  }
+};
+
+/**
+ * Whether a brush entity is one the game never draws.
+ *
+ * Triggers are the case that matters. The classname is the only thing the entity
+ * definitions offer here, but it is enough: every game in the family spells its trigger
+ * classes the same way, which is why the game configs tag them by that same pattern.
+ */
+bool isHiddenBrushEntity(const mdl::EntityNodeBase* entityNode)
+{
+  return entityNode
+         && startsWithIgnoringCase(entityNode->entity().classname(), "trigger");
 }
 
 /**
@@ -405,6 +512,7 @@ void addBrushFace(
   const mdl::BrushFace& face,
   const BrushModelLighting& brushModel,
   const SkyClassifier& skyClassifier,
+  const HiddenFaceClassifier& hiddenClassifier,
   const int lightSurfaceFlag,
   const float transparentAlpha,
   MaterialLookup& materials,
@@ -412,6 +520,15 @@ void addBrushFace(
 {
   const auto* material = face.material();
   const auto surfaceFlags = face.resolvedSurfaceFlags();
+
+  if (hiddenClassifier.isHidden(
+        material,
+        face.attributes().materialName(),
+        surfaceFlags,
+        face.resolvedSurfaceContents()))
+  {
+    return;
+  }
 
   auto shading = PreviewTriangleShading{};
   shading.materialIndex = materials.indexOf(material);
@@ -489,6 +606,7 @@ void addPatch(
   const mdl::PatchNode& patchNode,
   const BrushModelLighting& brushModel,
   const SkyClassifier& skyClassifier,
+  const HiddenFaceClassifier& hiddenClassifier,
   MaterialLookup& materials,
   TriangleSink& sink)
 {
@@ -499,6 +617,13 @@ void addPatch(
   }
 
   const auto* material = patchNode.patch().material();
+
+  // A patch carries no surface or content flags of its own, so only its material can say
+  // that it is one of the faces the game never draws.
+  if (hiddenClassifier.isHidden(material, patchNode.patch().materialName(), 0, 0))
+  {
+    return;
+  }
 
   auto shading = PreviewTriangleShading{};
   shading.materialIndex = materials.indexOf(material);
@@ -831,6 +956,7 @@ PreviewScene buildPreviewScene(
 
   const auto& gameConfig = map.gameInfo().gameConfig;
   const auto skyClassifier = SkyClassifier{gameConfig};
+  const auto hiddenClassifier = HiddenFaceClassifier{gameConfig};
   const auto lightSurfaceFlag =
     gameConfig.faceAttribsConfig.surfaceFlags.flagValue("light");
   const auto transparentAlpha =
@@ -871,6 +997,13 @@ PreviewScene buildPreviewScene(
         return;
       }
 
+      // A trigger is never drawn, so nothing about it belongs in the scene: not its
+      // shape, not the light it would block, and not the colour it would bounce.
+      if (isHiddenBrushEntity(node.entity()))
+      {
+        return;
+      }
+
       const auto brushModel = readBrushModelLighting(node.entity());
       for (const auto& face : node.brush().faces())
       {
@@ -881,6 +1014,7 @@ PreviewScene buildPreviewScene(
             face,
             brushModel,
             skyClassifier,
+            hiddenClassifier,
             lightSurfaceFlag,
             transparentAlpha,
             materials,
@@ -889,10 +1023,15 @@ PreviewScene buildPreviewScene(
       }
     },
     [&](const mdl::PatchNode& node) {
-      if (editorContext.visible(node))
+      if (editorContext.visible(node) && !isHiddenBrushEntity(node.entity()))
       {
         addPatch(
-          node, readBrushModelLighting(node.entity()), skyClassifier, materials, sink);
+          node,
+          readBrushModelLighting(node.entity()),
+          skyClassifier,
+          hiddenClassifier,
+          materials,
+          sink);
       }
     }));
 

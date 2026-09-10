@@ -30,6 +30,14 @@ config carries a tag for it. Liquids are also drawn as see-through as the editor
 them, at the "Transparent faces" alpha, so a ray carries on to whatever is under the
 water even though light ignores the surface entirely.
 
+Faces the game never draws are left out of the scene altogether: triggers, clip, skip,
+hint, caulk, nodraw, origin and the portal shaders. They are not drawn, they do not block
+light, and they do not colour the light that bounces around them. What counts as one is
+decided by the game config's `nodraw`, `hint` and `skip` surface flags, its `playerclip`,
+`monsterclip` and `origin` content flags, Quake 3 surface parameters, the classname for
+trigger entities, and the handful of texture names the whole family uses for faces that
+exist only for the compiler.
+
 Sky faces are a hole into the sky rather than a surface.
 
 Entity models are lit along with the brushwork, under the "Include entity models" toggle
@@ -43,6 +51,14 @@ These are worth revisiting; they are listed here rather than buried in the code 
 they can be checked against a real compile.
 
 **Read from the wrong place, or guessed**
+
+- *Nothing in an FGD says whether a class is drawn.* An entity definition gives the
+  classname, whether the class is solid or a point, and its properties, and that is all, so
+  which brush entities to leave out is decided from the classname and from the game config
+  rather than from the definition. In practice that means trigger classes, which every game
+  in the family spells the same way. The texture names alongside them are conventions
+  rather than anything a game states, and are the first place to look when a game previews
+  something it should not.
 
 - *GoldSrc attenuation is inferred from the key spelling.* An entity that writes `_light`
   rather than `light` is previewed with inverse square falloff, since that is what HLRAD
