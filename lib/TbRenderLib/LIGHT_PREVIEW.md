@@ -32,10 +32,10 @@ water even though light ignores the surface entirely.
 
 Sky faces are a hole into the sky rather than a surface.
 
-Entity models are lit along with the brushwork. They do not cast shadows, which is what
-the compilers do: a model entity is not part of the BSP, so nothing about it reaches the
-lightmap, and a preview that let one cast a shadow would show something the compiled map
-will not have.
+Entity models are lit along with the brushwork, under the "Include entity models" toggle
+in View Options. They do not cast shadows, which is what the compilers do: a model entity
+is not part of the BSP, so nothing about it reaches the lightmap, and a preview that let
+one cast a shadow would show something the compiled map will not have.
 
 ## Where it deliberately differs, and what is missing
 

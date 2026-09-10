@@ -187,6 +187,7 @@ void MapView3D::updateLightPreviewSettings()
       ? render::LightPreview::Quality::High
       : render::LightPreview::Quality::Medium);
 
+  m_lightPreview->setShowModels(pref(Preferences::LightPreviewShowModels));
   m_lightPreview->setExposure(pref(Preferences::LightPreviewExposure));
 }
 

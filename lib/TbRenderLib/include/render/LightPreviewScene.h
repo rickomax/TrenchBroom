@@ -204,6 +204,17 @@ struct PreviewScene
 };
 
 /**
+ * What to put in the scene, and how much detail to keep.
+ */
+struct PreviewSceneOptions
+{
+  /** The largest side an albedo texture is kept at. */
+  size_t maxTextureSize = 64;
+  /** Whether entity models are traced along with the brushwork. */
+  bool includeEntityModels = true;
+};
+
+/**
  * Builds the traceable scene from the given map.
  *
  * Must run on the thread that owns the GL context, because it reads the albedo of each
@@ -212,13 +223,12 @@ struct PreviewScene
  * buildPreviewSceneBvh on it, which is safe to do from a worker thread since the scene is
  * not shared until then.
  *
- * maxTextureSize caps the resolution the albedo is kept at.
  */
 PreviewScene buildPreviewScene(
   const mdl::Map& map,
   gl::Gl& gl,
   PreviewMaterialCache& materialCache,
-  size_t maxTextureSize);
+  const PreviewSceneOptions& options);
 
 void buildPreviewSceneBvh(PreviewScene& scene);
 

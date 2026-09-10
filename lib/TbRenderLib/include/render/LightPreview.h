@@ -77,6 +77,7 @@ private:
   bool m_enabled = false;
   Quality m_quality = Quality::Medium;
   float m_exposure = 1.0f;
+  bool m_showModels = true;
 
   /** Set whenever the map changes, including while a scene is already being built. */
   bool m_sceneDirty = true;
@@ -121,6 +122,10 @@ public:
 
   float exposure() const;
   void setExposure(float exposure);
+
+  /** Whether entity models are traced along with the brushwork. */
+  bool showModels() const;
+  void setShowModels(bool showModels);
 
   /**
    * Throws away the scene, so that the next frame collects the map's geometry and lights

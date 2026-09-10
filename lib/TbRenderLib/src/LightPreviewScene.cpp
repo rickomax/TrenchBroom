@@ -821,7 +821,7 @@ PreviewScene buildPreviewScene(
   const mdl::Map& map,
   gl::Gl& gl,
   PreviewMaterialCache& materialCache,
-  const size_t maxTextureSize)
+  const PreviewSceneOptions& options)
 {
   auto scene = PreviewScene{};
 
@@ -836,7 +836,7 @@ PreviewScene buildPreviewScene(
   const auto transparentAlpha =
     std::clamp(pref(Preferences::TransparentFaceAlpha), 0.0f, 1.0f);
 
-  auto materials = MaterialLookup{materialCache, gl, maxTextureSize};
+  auto materials = MaterialLookup{materialCache, gl, options.maxTextureSize};
   auto sink = TriangleSink{scene, {}};
 
   const auto& editorContext = map.editorContext();
@@ -858,7 +858,10 @@ PreviewScene buildPreviewScene(
     [&](auto&& thisLambda, const mdl::EntityNode& node) {
       if (editorContext.visible(node))
       {
-        addEntityModel(node, materials, sink);
+        if (options.includeEntityModels)
+        {
+          addEntityModel(node, materials, sink);
+        }
         node.visitChildren(thisLambda);
       }
     },

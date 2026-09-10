@@ -394,6 +394,23 @@ void LightPreview::setExposure(const float exposure)
   }
 }
 
+bool LightPreview::showModels() const
+{
+  return m_showModels;
+}
+
+void LightPreview::setShowModels(const bool showModels)
+{
+  if (m_showModels != showModels)
+  {
+    m_showModels = showModels;
+
+    // This changes what is in the scene rather than how it is traced, so the geometry has
+    // to be collected again.
+    invalidateScene();
+  }
+}
+
 void LightPreview::invalidateMaterials()
 {
   m_materialCache->clear();
@@ -558,8 +575,12 @@ void LightPreview::render(
     // Collecting the map's geometry has to happen here, on the thread that owns the GL
     // context and while the editor is not touching the map. Building the hierarchy over
     // it does not, and it is the expensive half, so it goes to a worker.
+    const auto options = PreviewSceneOptions{
+      .maxTextureSize = MaxAlbedoTextureSize,
+      .includeEntityModels = m_showModels,
+    };
     auto scene = std::make_unique<PreviewScene>(
-      buildPreviewScene(map, gl, *m_materialCache, MaxAlbedoTextureSize));
+      buildPreviewScene(map, gl, *m_materialCache, options));
     m_sceneBuild = std::async(
       std::launch::async,
       [scene = std::move(scene)]() mutable -> std::shared_ptr<const PreviewScene> {

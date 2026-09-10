@@ -322,6 +322,9 @@ inline constexpr auto LightPreviewQualityHigh = "high";
 inline auto LightPreviewQuality =
   Preference<std::string>{"Map view/Light preview quality", LightPreviewQualityMedium};
 
+inline auto LightPreviewShowModels =
+  Preference<bool>{"Map view/Light preview models", true};
+
 inline auto LightPreviewExposure =
   Preference<float>{"Map view/Light preview exposure", 1.0f};
 

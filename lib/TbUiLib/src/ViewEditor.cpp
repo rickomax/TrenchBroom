@@ -678,7 +678,14 @@ void ViewEditor::refreshRendererPanel()
 
 void ViewEditor::refreshLightPreviewPanel()
 {
-  m_showLightPreviewCheckBox->setChecked(pref(Preferences::ShowLightPreview));
+  const auto showLightPreview = pref(Preferences::ShowLightPreview);
+  m_showLightPreviewCheckBox->setChecked(showLightPreview);
+
+  m_lightPreviewModelsCheckBox->setChecked(pref(Preferences::LightPreviewShowModels));
+
+  // Neither setting does anything until the preview is switched on.
+  m_lightPreviewModelsCheckBox->setEnabled(showLightPreview);
+  m_lightPreviewQualityComboBox->setEnabled(showLightPreview);
 
   const auto quality = QString::fromStdString(pref(Preferences::LightPreviewQuality));
   if (const auto index = m_lightPreviewQualityComboBox->findData(quality); index >= 0)
@@ -698,6 +705,11 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
     "Path traces the map's lighting over the 3D view. The preview refines itself while "
     "the view is left alone, and starts over when the camera or the map changes."));
 
+  m_lightPreviewModelsCheckBox = new QCheckBox{tr("Include entity models")};
+  m_lightPreviewModelsCheckBox->setToolTip(tr(
+    "Lights entity models along with the brushwork. They never cast shadows, since a "
+    "model entity is not part of the BSP and so never reaches the compiled lightmap."));
+
   m_lightPreviewQualityComboBox = new QComboBox{};
   m_lightPreviewQualityComboBox->addItem(
     tr("Low quality"), QString::fromStdString(Preferences::LightPreviewQualityLow));
@@ -714,6 +726,11 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
     this,
     &ViewEditor::showLightPreviewChanged);
   connect(
+    m_lightPreviewModelsCheckBox,
+    &QAbstractButton::clicked,
+    this,
+    &ViewEditor::lightPreviewModelsChanged);
+  connect(
     m_lightPreviewQualityComboBox,
     &QComboBox::currentIndexChanged,
     this,
@@ -723,6 +740,7 @@ QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
   layout->setContentsMargins(0, 0, 0, 0);
   layout->setSpacing(0);
   layout->addWidget(m_showLightPreviewCheckBox);
+  layout->addWidget(m_lightPreviewModelsCheckBox);
   layout->addWidget(m_lightPreviewQualityComboBox);
 
   inner->setLayout(layout);
@@ -849,6 +867,11 @@ void ViewEditor::showLightPreviewChanged(const bool checked)
   setPref(Preferences::ShowLightPreview, checked);
 }
 
+void ViewEditor::lightPreviewModelsChanged(const bool checked)
+{
+  setPref(Preferences::LightPreviewShowModels, checked);
+}
+
 void ViewEditor::lightPreviewQualityChanged(const int index)
 {
   if (index >= 0)
@@ -877,6 +900,7 @@ void ViewEditor::restoreDefaultsClicked()
   prefs.resetToDefault(Preferences::EntityLinkMode);
   prefs.resetToDefault(Preferences::ShowLightPreview);
   prefs.resetToDefault(Preferences::LightPreviewQuality);
+  prefs.resetToDefault(Preferences::LightPreviewShowModels);
   prefs.resetToDefault(Preferences::LightPreviewExposure);
   prefs.saveChanges();
 }

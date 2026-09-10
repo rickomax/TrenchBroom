@@ -109,6 +109,7 @@ private:
   QCheckBox* m_showSoftBoundsCheckBox = nullptr;
 
   QCheckBox* m_showLightPreviewCheckBox = nullptr;
+  QCheckBox* m_lightPreviewModelsCheckBox = nullptr;
   QComboBox* m_lightPreviewQualityComboBox = nullptr;
 
   NotifierConnection m_notifierConnection;
@@ -161,6 +162,7 @@ private:
   void entityLinkModeChanged(int id);
   void showSoftMapBoundsChanged(bool checked);
   void showLightPreviewChanged(bool checked);
+  void lightPreviewModelsChanged(bool checked);
   void lightPreviewQualityChanged(int index);
   void restoreDefaultsClicked();
 };
