@@ -21,7 +21,9 @@
 #include "mdl/BrushBuilder.h"
 #include "mdl/BrushFace.h"
 #include "mdl/Entity.h"
+#include "mdl/EntityProperties.h"
 #include "mdl/MapFormat.h"
+#include "mdl/SplineEntities.h"
 #include "mdl/SplineEntity.h"
 
 #include "kd/result.h"
@@ -150,6 +152,58 @@ TEST_CASE("SplineEntity")
       CHECK(parseSplineTemplateBrushes(clearedEntity, MapFormat::Standard, worldBounds)
               .empty());
     }
+  }
+
+  SECTION("template entities round trip")
+  {
+    auto templateEntity = Entity{{
+      {EntityPropertyKeys::Classname, "light"},
+      {EntityPropertyKeys::Origin, "32 0 24"},
+      {"light", "200"},
+      // A value with spaces and one with a quote in it, which is what the packing has
+      // to survive.
+      {"message", "a room with a view"},
+      {"_note", "the \"good\" one"},
+    }};
+    templateEntity.setPointEntity(true);
+
+    const auto templateEntities = std::vector<SplineTemplateEntity>{
+      SplineTemplateEntity{
+        std::move(templateEntity), vm::bbox3d{{24, -8, 16}, {40, 8, 32}}},
+    };
+
+    const auto entity = writeSplineTemplateEntities(Entity{}, templateEntities);
+    CHECK(entity.property("_spline_template_entity_0") != nullptr);
+
+    const auto parsed = parseSplineTemplateEntities(entity);
+    REQUIRE(parsed.size() == 1);
+
+    CHECK(parsed.front().bounds == vm::bbox3d{{24, -8, 16}, {40, 8, 32}});
+    CHECK(parsed.front().entity.classname() == "light");
+    CHECK(parsed.front().entity.origin() == vm::approx{vm::vec3d{32, 0, 24}});
+    CHECK(*parsed.front().entity.property("light") == "200");
+    CHECK(*parsed.front().entity.property("message") == "a room with a view");
+    CHECK(*parsed.front().entity.property("_note") == "the \"good\" one");
+
+    SECTION("an empty snapshot removes stored entities")
+    {
+      const auto clearedEntity = writeSplineTemplateEntities(entity, {});
+      CHECK(clearedEntity.property("_spline_template_entity_0") == nullptr);
+      CHECK(parseSplineTemplateEntities(clearedEntity).empty());
+    }
+  }
+
+  SECTION("splineEntityId")
+  {
+    // A spline with no data has nothing to tie generated entities to.
+    CHECK(splineEntityId(Entity{}).empty());
+
+    // Writing a spline gives it one, and rewriting it keeps the same one, so the
+    // entities it generated are still its own after an edit.
+    const auto written = writeSplineEntity(Entity{}, data);
+    const auto id = splineEntityId(written);
+    CHECK_FALSE(id.empty());
+    CHECK(splineEntityId(writeSplineEntity(written, data)) == id);
   }
 }
 

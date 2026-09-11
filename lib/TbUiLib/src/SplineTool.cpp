@@ -33,10 +33,12 @@
 #include "mdl/HitFilter.h"
 #include "mdl/LayerNode.h"
 #include "mdl/Map.h"
+#include "mdl/MapSidecar.h"
 #include "mdl/Map_Nodes.h"
 #include "mdl/PatchNode.h"
 #include "mdl/PickResult.h"
 #include "mdl/SplineBrushes.h"
+#include "mdl/SplineEntities.h"
 #include "mdl/Transaction.h"
 #include "mdl/WorldNode.h"
 #include "render/RenderService.h"
@@ -47,6 +49,7 @@
 #include "kd/ranges/to.h"
 #include "kd/result.h"
 #include "kd/set_temp.h"
+#include "kd/string_utils.h"
 
 #include "vm/vec.h"
 
@@ -98,7 +101,9 @@ void SplineTool::pick(
     {
       const auto hitPoint = vm::point_at_distance(pickRay, *distance);
       pickResult.addHit(mdl::Hit{
-        PointHitType, *distance, hitPoint,
+        PointHitType,
+        *distance,
+        hitPoint,
         Target{m_splineNode, i, SplineHandlePart::Point}});
     }
   }
@@ -122,8 +127,7 @@ void SplineTool::pick(
       };
       for (const auto& [part, position] : handles)
       {
-        if (
-          const auto distance = camera.pickPointHandle(pickRay, position, handleRadius))
+        if (const auto distance = camera.pickPointHandle(pickRay, position, handleRadius))
         {
           const auto hitPoint = vm::point_at_distance(pickRay, *distance);
           pickResult.addHit(
@@ -143,7 +147,9 @@ void SplineTool::pick(
       {
         const auto hitPoint = vm::point_at_distance(pickRay, *distance);
         pickResult.addHit(mdl::Hit{
-          PointHitType, *distance, hitPoint,
+          PointHitType,
+          *distance,
+          hitPoint,
           Target{entityNode, i, SplineHandlePart::Point}});
       }
     }
@@ -164,8 +170,7 @@ void SplineTool::render(
   {
     if (data.points.size() > 1)
     {
-      const auto samples =
-        mdl::sampleSpline(data.points, data.subdivisions, data.closed);
+      const auto samples = mdl::sampleSpline(data.points, data.subdivisions, data.closed);
       const auto vertices =
         samples
         | std::views::transform([](const auto& point) { return vm::vec3f{point}; })
@@ -393,8 +398,7 @@ size_t SplineTool::addPointAnchorIndex() const
 void SplineTool::addPoint(const vm::vec3d& point)
 {
   const auto index = m_points.empty() ? 0 : addPointAnchorIndex() + 1;
-  m_points.insert(
-    m_points.begin() + std::ptrdiff_t(index), mdl::SplinePoint{point});
+  m_points.insert(m_points.begin() + std::ptrdiff_t(index), mdl::SplinePoint{point});
   m_selectedIndex = index;
   m_selectedPart = SplineHandlePart::Point;
   commitSpline("Add Spline Point");
@@ -564,8 +568,7 @@ bool SplineTool::dragPoint(const vm::vec3d& newPosition)
 
 void SplineTool::endDragPoint()
 {
-  const auto movedTangent =
-    m_dragState && m_dragState->part != SplineHandlePart::Point;
+  const auto movedTangent = m_dragState && m_dragState->part != SplineHandlePart::Point;
   m_dragState = std::nullopt;
   commitSpline(movedTangent ? "Move Spline Tangent" : "Move Spline Point");
 }
@@ -708,8 +711,8 @@ void SplineTool::moveSelectedPoint(const vm::vec3d& delta)
   auto& point = m_points[*m_selectedIndex];
   if (m_selectedPart != SplineHandlePart::Point && tangentHandlesVisible())
   {
-    auto& tangent = m_selectedPart == SplineHandlePart::TangentIn ? point.tangentIn
-                                                                  : point.tangentOut;
+    auto& tangent =
+      m_selectedPart == SplineHandlePart::TangentIn ? point.tangentIn : point.tangentOut;
     tangent = tangent + delta;
     commitSpline("Move Spline Tangent");
   }
@@ -750,7 +753,9 @@ void SplineTool::setSubdivisions(const size_t subdivisions)
 
 bool SplineTool::canLinkTemplate() const
 {
-  return selectedGroup() != nullptr || !m_document.map().selection().brushes.empty();
+  const auto& selection = m_document.map().selection();
+  return selectedGroup() != nullptr || !selection.brushes.empty()
+         || !selection.entities.empty();
 }
 
 void SplineTool::linkTemplate()
@@ -761,30 +766,47 @@ void SplineTool::linkTemplate()
     {
       m_templateGroupId = groupNode->persistentId();
       m_templateBrushes.clear();
+      m_templateEntities.clear();
       commitSpline("Link Spline Template");
     }
     return;
   }
 
-  const auto& selectedBrushes = m_document.map().selection().brushes;
-  if (!selectedBrushes.empty())
+  const auto& selection = m_document.map().selection();
+  if (selection.brushes.empty() && selection.entities.empty())
   {
-    // Individually selected brushes cannot be referenced persistently, so take a
-    // snapshot of their current state instead.
-    m_templateBrushes.clear();
-    m_templateBrushes.reserve(selectedBrushes.size());
-    for (const auto* brushNode : selectedBrushes)
-    {
-      m_templateBrushes.push_back(brushNode->brush());
-    }
-    m_templateGroupId = std::nullopt;
-    commitSpline("Link Spline Template");
+    return;
   }
+
+  // Individually selected nodes cannot be referenced persistently, so take a snapshot
+  // of their current state instead.
+  m_templateBrushes.clear();
+  m_templateBrushes.reserve(selection.brushes.size());
+  for (const auto* brushNode : selection.brushes)
+  {
+    m_templateBrushes.push_back(brushNode->brush());
+  }
+
+  m_templateEntities.clear();
+  for (const auto* entityNode : selection.entities)
+  {
+    // An entity with brushes of its own contributes those brushes to the sweep like
+    // any other brush selection would; only a point entity is replicated whole.
+    if (!entityNode->hasChildren())
+    {
+      m_templateEntities.push_back(
+        mdl::SplineTemplateEntity{entityNode->entity(), entityNode->logicalBounds()});
+    }
+  }
+
+  m_templateGroupId = std::nullopt;
+  commitSpline("Link Spline Template");
 }
 
 bool SplineTool::hasTemplate() const
 {
-  return m_templateGroupId.has_value() || !m_templateBrushes.empty();
+  return m_templateGroupId.has_value() || !m_templateBrushes.empty()
+         || !m_templateEntities.empty();
 }
 
 void SplineTool::unlinkTemplate()
@@ -793,13 +815,26 @@ void SplineTool::unlinkTemplate()
   {
     m_templateGroupId = std::nullopt;
     m_templateBrushes.clear();
+    m_templateEntities.clear();
     commitSpline("Unlink Spline Template");
   }
 }
 
 bool SplineTool::canBreakSpline() const
 {
-  return m_splineNode != nullptr && !m_splineNode->children().empty();
+  if (!m_splineNode)
+  {
+    return false;
+  }
+  if (!m_splineNode->children().empty())
+  {
+    return true;
+  }
+
+  // Asking the template whether it makes any entities is the same answer as looking
+  // for the generated ones, without walking the whole map to find them.
+  const auto contents = collectTemplate();
+  return contents && !contents->entities.empty();
 }
 
 void SplineTool::breakSpline()
@@ -822,6 +857,24 @@ void SplineTool::breakSpline()
     }
   }
 
+  // The generated point entities stay behind the same way. Dropping the marker is what
+  // detaches them: without it the spline no longer owns them, so unlinking the
+  // template below takes away the originals and leaves these as ordinary entities.
+  for (auto* node : findGeneratedEntityNodes())
+  {
+    if (const auto* entityNode = dynamic_cast<mdl::EntityNode*>(node))
+    {
+      auto entity = entityNode->entity();
+      entity.removeProperty(mdl::SplinePropertyKeys::GeneratedBy);
+      duplicates.push_back(new mdl::EntityNode{std::move(entity)});
+    }
+  }
+
+  if (duplicates.empty())
+  {
+    return;
+  }
+
   auto* parent = m_splineNode->parent();
 
   auto transaction = mdl::Transaction{map, "Break Spline"};
@@ -831,9 +884,10 @@ void SplineTool::breakSpline()
     return;
   }
 
-  // Unlink the template so the spline stops generating brushes.
+  // Unlink the template so the spline stops generating anything.
   m_templateGroupId = std::nullopt;
   m_templateBrushes.clear();
+  m_templateEntities.clear();
   commitSpline("Break Spline");
   transaction.commit();
 }
@@ -845,13 +899,22 @@ std::string SplineTool::templateName() const
     const auto* groupNode = findTemplateGroup();
     return groupNode ? groupNode->group().name() : "";
   }
+  auto parts = std::vector<std::string>{};
   if (!m_templateBrushes.empty())
   {
-    return m_templateBrushes.size() == 1
-             ? std::string{"1 brush"}
-             : fmt::format("{} brushes", m_templateBrushes.size());
+    parts.push_back(
+      m_templateBrushes.size() == 1
+        ? std::string{"1 brush"}
+        : fmt::format("{} brushes", m_templateBrushes.size()));
   }
-  return "";
+  if (!m_templateEntities.empty())
+  {
+    parts.push_back(
+      m_templateEntities.size() == 1
+        ? std::string{"1 entity"}
+        : fmt::format("{} entities", m_templateEntities.size()));
+  }
+  return kdl::str_join(parts, ", ");
 }
 
 mdl::GroupNode* SplineTool::findTemplateGroup() const
@@ -949,6 +1012,7 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
     m_closed = data->closed;
     m_templateBrushes = mdl::parseSplineTemplateBrushes(
       splineNode->entity(), map.worldNode().mapFormat(), map.worldBounds());
+    m_templateEntities = mdl::parseSplineTemplateEntities(splineNode->entity());
     m_selectedIndex = std::nullopt;
     m_dragState = std::nullopt;
 
@@ -970,6 +1034,7 @@ void SplineTool::clearSpline()
   m_closed = false;
   m_templateGroupId = std::nullopt;
   m_templateBrushes.clear();
+  m_templateEntities.clear();
   m_selectedIndex = std::nullopt;
   m_dragState = std::nullopt;
   refreshOtherSplines();
@@ -982,12 +1047,18 @@ void SplineTool::commitSpline(const std::string& commandName)
   const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
   auto& map = m_document.map();
 
+  // The point entities the spline generated cannot live inside it, so they are beside
+  // it and have to be taken away by hand whenever it is rebuilt.
+  const auto generatedEntityNodes = findGeneratedEntityNodes();
+
   if (m_points.empty())
   {
     if (m_splineNode)
     {
       auto transaction = mdl::Transaction{map, commandName};
-      removeNodes(map, {m_splineNode});
+      auto nodesToRemove = generatedEntityNodes;
+      nodesToRemove.push_back(m_splineNode);
+      removeNodes(map, nodesToRemove);
       m_splineNode = nullptr;
       transaction.commit();
     }
@@ -998,9 +1069,11 @@ void SplineTool::commitSpline(const std::string& commandName)
 
   const auto data =
     mdl::SplineEntityData{m_points, m_subdivisions, m_templateGroupId, m_closed};
-  auto entity = mdl::writeSplineTemplateBrushes(
-    mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data),
-    m_templateBrushes);
+  auto entity = mdl::writeSplineTemplateEntities(
+    mdl::writeSplineTemplateBrushes(
+      mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data),
+      m_templateBrushes),
+    m_templateEntities);
 
   // Give the entity an origin so that it has a sensible position while it has no
   // brushes yet.
@@ -1012,17 +1085,39 @@ void SplineTool::commitSpline(const std::string& commandName)
       m_points.front().position.y(),
       m_points.front().position.z()));
 
+  // writeSplineEntity gives every spline a tool data id, which is what the entities it
+  // generates carry to say who they belong to.
+  const auto splineId = mdl::splineEntityId(entity);
+  const auto contents = collectTemplate();
+
   auto* newNode = new mdl::EntityNode{std::move(entity)};
-  newNode->addChildren(createBrushNodes());
+  if (contents)
+  {
+    newNode->addChildren(createBrushNodes(*contents));
+  }
+
+  auto newNodes = std::vector<mdl::Node*>{newNode};
+  if (contents)
+  {
+    for (auto* node : createEntityNodes(*contents, splineId))
+    {
+      newNodes.push_back(node);
+    }
+  }
 
   auto* parent = m_splineNode ? m_splineNode->parent() : parentForNodes(map, {});
 
   auto transaction = mdl::Transaction{map, commandName};
+  auto nodesToRemove = generatedEntityNodes;
   if (m_splineNode)
   {
-    removeNodes(map, {m_splineNode});
+    nodesToRemove.push_back(m_splineNode);
   }
-  const auto addedNodes = addNodes(map, {{parent, {newNode}}});
+  if (!nodesToRemove.empty())
+  {
+    removeNodes(map, nodesToRemove);
+  }
+  const auto addedNodes = addNodes(map, {{parent, newNodes}});
   if (addedNodes.empty())
   {
     transaction.cancel();
@@ -1039,24 +1134,31 @@ void SplineTool::commitSpline(const std::string& commandName)
   splineDidChangeNotifier();
 }
 
-std::vector<mdl::Node*> SplineTool::createBrushNodes() const
+std::optional<SplineTool::TemplateContents> SplineTool::collectTemplate() const
 {
-  if (m_points.size() < 2)
-  {
-    return {};
-  }
+  auto contents = TemplateContents{};
 
-  auto templateBrushes = std::vector<const mdl::Brush*>{};
   if (const auto* groupNode = findTemplateGroup())
   {
     groupNode->visitChildren(kdl::overload(
       [](auto&& thisLambda, mdl::GroupNode& nestedGroup) {
         nestedGroup.visitChildren(thisLambda);
       },
-      [](auto&& thisLambda, mdl::EntityNode& entityNode) {
-        entityNode.visitChildren(thisLambda);
+      [&](auto&& thisLambda, mdl::EntityNode& entityNode) {
+        // An entity with brushes of its own contributes them to the swept solid, the
+        // way it always has. One without any is a point entity, and there is nothing
+        // to sweep: it is replicated whole instead.
+        if (entityNode.hasChildren())
+        {
+          entityNode.visitChildren(thisLambda);
+        }
+        else
+        {
+          contents.entities.push_back(
+            mdl::SplineTemplateEntity{entityNode.entity(), entityNode.logicalBounds()});
+        }
       },
-      [&](mdl::BrushNode& brushNode) { templateBrushes.push_back(&brushNode.brush()); },
+      [&](mdl::BrushNode& brushNode) { contents.brushes.push_back(&brushNode.brush()); },
       [](mdl::WorldNode&) {},
       [](mdl::LayerNode&) {},
       [](mdl::PatchNode&) {}));
@@ -1065,19 +1167,42 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes() const
   {
     for (const auto& brush : m_templateBrushes)
     {
-      templateBrushes.push_back(&brush);
+      contents.brushes.push_back(&brush);
+    }
+    contents.entities = m_templateEntities;
+  }
+
+  if (contents.brushes.empty())
+  {
+    // With no brushes there is no swept solid to size the lattice from, so the
+    // entities size it themselves.
+    const auto bounds = mdl::splineTemplateEntityBounds(contents.entities);
+    if (!bounds)
+    {
+      return std::nullopt;
+    }
+    contents.bounds = *bounds;
+  }
+  else
+  {
+    // The brushes alone size the lattice even when entities sit outside it, so that
+    // adding an entity to a template never changes the geometry it already sweeps.
+    contents.bounds = contents.brushes.front()->bounds();
+    for (const auto* brush : contents.brushes)
+    {
+      contents.bounds = vm::merge(contents.bounds, brush->bounds());
     }
   }
 
-  if (templateBrushes.empty())
+  return contents;
+}
+
+std::vector<mdl::Node*> SplineTool::createBrushNodes(
+  const TemplateContents& contents) const
+{
+  if (m_points.size() < 2 || contents.brushes.empty())
   {
     return {};
-  }
-
-  auto templateBounds = templateBrushes.front()->bounds();
-  for (const auto* brush : templateBrushes)
-  {
-    templateBounds = vm::merge(templateBounds, brush->bounds());
   }
 
   auto& map = m_document.map();
@@ -1085,8 +1210,8 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes() const
            map.worldNode().mapFormat(),
            map.worldBounds(),
            m_points,
-           templateBrushes,
-           templateBounds,
+           contents.brushes,
+           contents.bounds,
            m_closed)
          | kdl::transform([](auto brushes) {
              return brushes | std::views::transform([](auto& brush) {
@@ -1100,6 +1225,58 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes() const
              return std::vector<mdl::Node*>{};
            })
          | kdl::value();
+}
+
+std::vector<mdl::Node*> SplineTool::createEntityNodes(
+  const TemplateContents& contents, const std::string& splineId) const
+{
+  if (m_points.size() < 2 || contents.entities.empty() || splineId.empty())
+  {
+    return {};
+  }
+
+  auto nodes = std::vector<mdl::Node*>{};
+  for (auto& entity :
+       mdl::createSplineEntities(m_points, contents.entities, contents.bounds, m_closed))
+  {
+    entity.addOrUpdateProperty(mdl::SplinePropertyKeys::GeneratedBy, splineId);
+    nodes.push_back(new mdl::EntityNode{std::move(entity)});
+  }
+  return nodes;
+}
+
+std::vector<mdl::Node*> SplineTool::findGeneratedEntityNodes() const
+{
+  const auto splineId =
+    m_splineNode ? mdl::splineEntityId(m_splineNode->entity()) : std::string{};
+  if (splineId.empty())
+  {
+    return {};
+  }
+
+  auto nodes = std::vector<mdl::Node*>{};
+  m_document.map().worldNode().accept(kdl::overload(
+    [](auto&& thisLambda, mdl::WorldNode& worldNode) {
+      worldNode.visitChildren(thisLambda);
+    },
+    [](auto&& thisLambda, mdl::LayerNode& layerNode) {
+      layerNode.visitChildren(thisLambda);
+    },
+    [](auto&& thisLambda, mdl::GroupNode& groupNode) {
+      groupNode.visitChildren(thisLambda);
+    },
+    [&](mdl::EntityNode& entityNode) {
+      const auto* owner =
+        entityNode.entity().property(mdl::SplinePropertyKeys::GeneratedBy);
+      if (owner && *owner == splineId)
+      {
+        nodes.push_back(&entityNode);
+      }
+    },
+    [](mdl::BrushNode&) {},
+    [](mdl::PatchNode&) {}));
+
+  return nodes;
 }
 
 bool SplineTool::doActivate()

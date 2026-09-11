@@ -39,29 +39,6 @@ namespace
 {
 
 /**
- * Free-form deformation: maps a point inside the lattice onto the span between the
- * cross-section frames a and b. The X position inside the lattice interpolates
- * linearly between the two cross-sections, and the Y / Z offsets from the lattice
- * center are applied along each frame's right / up direction, scaled by the frame's
- * cross-section scale (which tapers the profile without changing its length).
- */
-vm::vec3d ffdDeform(
-  const vm::vec3d& point,
-  const vm::bbox3d& lattice,
-  const SweepFrame& a,
-  const SweepFrame& b)
-{
-  const auto sx = vm::max(1e-4, lattice.size().x());
-  const auto u = vm::clamp((point.x() - lattice.min.x()) / sx, 0.0, 1.0);
-  const auto offY = point.y() - lattice.center().y();
-  const auto offZ = point.z() - lattice.center().z();
-
-  const auto csA = a.position + a.right * (offY * a.scale) + a.up * (offZ * a.scale);
-  const auto csB = b.position + b.right * (offY * b.scale) + b.up * (offZ * b.scale);
-  return vm::mix(csA, csB, vm::vec3d::fill(u));
-}
-
-/**
  * The affine approximation of the free-form deformation over one span, mapping
  * template (lattice) space into the world. The X axis follows the span between the two
  * frame positions, and the cross-section axes are the averaged, scaled right / up
@@ -157,7 +134,10 @@ void copyFaceAttributes(Brush& brush, const std::vector<BrushFace>& templateFace
         // coordinate systems without a snapshot (paraxial), the attributes realigned
         // by the transformation above already carry the alignment.
         face.copyUVCoordSystemFromFace(
-          *snapshot, bestMatch->attributes(), bestMatch->boundary(), WrapStyle::Projection);
+          *snapshot,
+          bestMatch->attributes(),
+          bestMatch->boundary(),
+          WrapStyle::Projection);
       }
     }
   }
@@ -227,7 +207,7 @@ Result<std::vector<Brush>> createSplineBrushes(
         apex = apex + vertex;
       }
       apex = apex / double(vertices.size());
-      const auto deformedApex = vm::round(ffdDeform(apex, templateBounds, a, b));
+      const auto deformedApex = vm::round(deformIntoSpan(apex, templateBounds, a, b));
 
       const auto templateFaces = transformTemplateFaces(*templateBrush, uvTransform);
 
@@ -244,7 +224,7 @@ Result<std::vector<Brush>> createSplineBrushes(
         for (const auto& vertex : faceVertices)
         {
           deformedFaceVertices.push_back(
-            vm::round(ffdDeform(vertex, templateBounds, a, b)));
+            vm::round(deformIntoSpan(vertex, templateBounds, a, b)));
         }
 
         for (size_t j = 1; j + 1 < deformedFaceVertices.size(); ++j)

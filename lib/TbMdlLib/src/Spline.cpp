@@ -21,6 +21,7 @@
 
 #include "kd/reflection_impl.h"
 
+#include "vm/mat_ext.h"
 #include "vm/quat.h"
 #include "vm/scalar.h"
 #include "vm/vec_ext.h"
@@ -163,12 +164,13 @@ std::vector<vm::vec3d> computeBaseNodeUps(
   ups[0] = orthonormalUp(chooseInitialUp(tangents[0]), tangents[0]);
   for (size_t i = 1; i < n; ++i)
   {
-    const auto up = (points[i].locks & SplineLock::Twist) != 0u ? chooseInitialUp(tangents[i])
-                                     : doubleReflectUp(
-                                         ups[i - 1],
-                                         tangents[i - 1],
-                                         points[i].position - points[i - 1].position,
-                                         tangents[i]);
+    const auto up = (points[i].locks & SplineLock::Twist) != 0u
+                      ? chooseInitialUp(tangents[i])
+                      : doubleReflectUp(
+                          ups[i - 1],
+                          tangents[i - 1],
+                          points[i].position - points[i - 1].position,
+                          tangents[i]);
     ups[i] = orthonormalUp(up, tangents[i]);
   }
   return ups;
@@ -231,8 +233,8 @@ SweepFrame sweepFrameAt(
   const auto position = curvePoint(points, segment, t, closed);
   const auto tangent = curveTangent(points, segment, t, closed);
 
-  auto up = slerpDirection(
-    nodeUps[segment], nodeUps[nextPointIndex(points, segment, closed)], t);
+  auto up =
+    slerpDirection(nodeUps[segment], nodeUps[nextPointIndex(points, segment, closed)], t);
   auto right = vm::cross(up, tangent);
   if (vm::squared_length(right) < 1e-8)
   {
@@ -420,6 +422,74 @@ std::vector<SweepFrame> computeNodeFrames(
         : sweepFrameAt(points, nodeUps, points.size() - 2, 1.0, closed));
   }
   return frames;
+}
+
+vm::vec3d deformIntoSpan(
+  const vm::vec3d& point,
+  const vm::bbox3d& lattice,
+  const SweepFrame& a,
+  const SweepFrame& b)
+{
+  const auto sx = vm::max(1e-4, lattice.size().x());
+  const auto u = vm::clamp((point.x() - lattice.min.x()) / sx, 0.0, 1.0);
+  const auto offY = point.y() - lattice.center().y();
+  const auto offZ = point.z() - lattice.center().z();
+
+  const auto csA = a.position + a.right * (offY * a.scale) + a.up * (offZ * a.scale);
+  const auto csB = b.position + b.right * (offY * b.scale) + b.up * (offZ * b.scale);
+  return vm::mix(csA, csB, vm::vec3d::fill(u));
+}
+
+vm::mat4x4d spanOrientation(
+  const vm::vec3d& point,
+  const vm::bbox3d& lattice,
+  const SweepFrame& a,
+  const SweepFrame& b)
+{
+  const auto sx = vm::max(1e-4, lattice.size().x());
+  const auto u = vm::clamp((point.x() - lattice.min.x()) / sx, 0.0, 1.0);
+
+  auto right = vm::mix(a.right, b.right, vm::vec3d::fill(u));
+  auto up = vm::mix(a.up, b.up, vm::vec3d::fill(u));
+
+  // The span direction, which is where the template's X axis ends up. On a degenerate
+  // span there is no direction to read off the positions, so fall back to the frame's
+  // own forward direction.
+  auto forward = b.position - a.position;
+  if (vm::squared_length(forward) < 1e-10)
+  {
+    forward = vm::cross(a.right, a.up);
+  }
+
+  forward = vm::normalize(forward);
+  // Orthogonalize against the span direction, so that a curving span does not shear
+  // what is placed on it, and renormalize: the interpolated axes are neither unit
+  // length nor square to the direction in general.
+  right = right - forward * vm::dot(right, forward);
+  if (vm::squared_length(right) < 1e-10)
+  {
+    right = vm::cross(up, forward);
+  }
+  right = vm::normalize(right);
+  up = vm::cross(forward, right);
+
+  return vm::mat4x4d{
+    forward.x(),
+    right.x(),
+    up.x(),
+    0.0,
+    forward.y(),
+    right.y(),
+    up.y(),
+    0.0,
+    forward.z(),
+    right.z(),
+    up.z(),
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0};
 }
 
 } // namespace tb::mdl

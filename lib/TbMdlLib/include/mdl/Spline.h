@@ -21,6 +21,8 @@
 
 #include "kd/reflection_decl.h"
 
+#include "vm/bbox.h"
+#include "vm/mat.h"
 #include "vm/vec.h"
 
 #include <cstddef>
@@ -163,5 +165,37 @@ std::vector<SweepFrame> buildSweepFrames(
  */
 std::vector<SweepFrame> computeNodeFrames(
   const std::vector<SplinePoint>& points, bool closed = false);
+
+/**
+ * Free-form deformation: maps a point inside the lattice onto the span between the
+ * cross-section frames a and b. The X position inside the lattice interpolates
+ * linearly between the two cross-sections, and the Y / Z offsets from the lattice
+ * center are applied along each frame's right / up direction, scaled by the frame's
+ * cross-section scale (which tapers the profile without changing its length).
+ *
+ * The X position is clamped to the lattice, so a point beyond either end of the
+ * template lands on the span's end cross-section rather than running off the curve.
+ */
+vm::vec3d deformIntoSpan(
+  const vm::vec3d& point,
+  const vm::bbox3d& lattice,
+  const SweepFrame& a,
+  const SweepFrame& b);
+
+/**
+ * The rotation that carries the lattice's axes onto the span's frame at the lattice X
+ * position of the given point: the X axis onto the span direction, and the Y / Z axes
+ * onto the right / up directions interpolated between the two frames. The
+ * cross-section scale is left out, so the result is a pure rotation and anything
+ * placed with it keeps its proportions.
+ *
+ * This is the deformation's orientation at that point, so an object placed with it
+ * turns with the curve the same way the swept geometry around it does.
+ */
+vm::mat4x4d spanOrientation(
+  const vm::vec3d& point,
+  const vm::bbox3d& lattice,
+  const SweepFrame& a,
+  const SweepFrame& b);
 
 } // namespace tb::mdl

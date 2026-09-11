@@ -25,11 +25,11 @@
 #include <QLabel>
 #include <QPushButton>
 
-#include <utility>
-
 #include "mdl/Map.h"
 #include "ui/MapDocument.h"
 #include "ui/SplineTool.h"
+
+#include <utility>
 
 namespace tb::ui
 {
@@ -59,14 +59,15 @@ void SplineToolPage::createGui()
   m_templateLabel = new QLabel{tr("<none>")};
   m_linkButton = new QPushButton{tr("Link")};
   m_linkButton->setToolTip(
-    tr("Use the selected group or the selected brushes as the spline's template"));
+    tr("Use the selected group, or the selected brushes and entities, as the spline's "
+       "template"));
   m_linkButton->setFocusPolicy(Qt::NoFocus);
   m_unlinkButton = new QPushButton{tr("Unlink")};
   m_unlinkButton->setFocusPolicy(Qt::NoFocus);
   m_breakButton = new QPushButton{tr("Break")};
   m_breakButton->setToolTip(
-    tr("Duplicate the generated brushes as standard, editable brushes and unlink "
-       "the spline's template"));
+    tr("Duplicate the generated brushes and entities as standard, editable ones and "
+       "unlink the spline's template"));
   m_breakButton->setFocusPolicy(Qt::NoFocus);
 
   m_roll = new QDoubleSpinBox{};
@@ -146,8 +147,7 @@ void SplineToolPage::createGui()
   connect(m_linkButton, &QPushButton::clicked, this, [this]() { m_tool.linkTemplate(); });
   connect(
     m_unlinkButton, &QPushButton::clicked, this, [this]() { m_tool.unlinkTemplate(); });
-  connect(
-    m_breakButton, &QPushButton::clicked, this, [this]() { m_tool.breakSpline(); });
+  connect(m_breakButton, &QPushButton::clicked, this, [this]() { m_tool.breakSpline(); });
   connect(
     m_roll,
     QOverload<double>::of(&QDoubleSpinBox::valueChanged),

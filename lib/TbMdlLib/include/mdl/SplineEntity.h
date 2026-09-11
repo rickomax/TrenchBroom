@@ -21,12 +21,14 @@
 
 #include "mdl/IdType.h"
 #include "mdl/Spline.h"
+#include "mdl/SplineEntities.h"
 
 #include "kd/reflection_decl.h"
 
 #include "vm/bbox.h"
 
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace tb::mdl
@@ -52,6 +54,17 @@ constexpr auto TemplateGroupId = "_spline_template_group";
  * segment, each of the form "x1 y1 z1 x2 y2 z2 x3 y3 z3 material". Used when the
  * template is a plain brush selection rather than a group. */
 constexpr auto TemplateBrushPrefix = "_spline_template_brush_";
+/** Per entity property holding a snapshot of a template point entity; the index is
+ * appended, e.g. "_spline_template_entity_0". The value is the entity's bounds in
+ * template space, "minx miny minz maxx maxy maxz", followed by its properties as
+ * quoted key value pairs. Used when the template is a plain entity selection rather
+ * than a group. */
+constexpr auto TemplateEntityPrefix = "_spline_template_entity_";
+/** Carried by the point entities a spline generates, holding the tool data id of the
+ * spline that owns them. Under the _tb_ prefix so that it is stripped from exports:
+ * a compiler has no use for it, but it has to survive a save so that the spline can
+ * still find its entities after the map is reopened. */
+constexpr auto GeneratedBy = "_tb_spline_source";
 } // namespace SplinePropertyKeys
 
 /**
@@ -108,5 +121,26 @@ std::vector<Brush> parseSplineTemplateBrushes(
  */
 Entity writeSplineTemplateBrushes(
   const Entity& entity, const std::vector<Brush>& brushes);
+
+/**
+ * Reads the template point entity snapshot stored in the given entity's properties.
+ * Malformed entries are skipped; returns an empty vector if no snapshot is stored.
+ */
+std::vector<SplineTemplateEntity> parseSplineTemplateEntities(const Entity& entity);
+
+/**
+ * Returns an entity carrying a snapshot of the given point entities in its
+ * properties. Any previously stored snapshot is removed; passing an empty vector just
+ * removes it.
+ */
+Entity writeSplineTemplateEntities(
+  const Entity& entity, const std::vector<SplineTemplateEntity>& entities);
+
+/**
+ * The id tying a spline entity to the point entities it generated, or an empty string
+ * if it has none. This is the entity's tool data id, which writeSplineEntity gives
+ * every spline.
+ */
+std::string splineEntityId(const Entity& entity);
 
 } // namespace tb::mdl

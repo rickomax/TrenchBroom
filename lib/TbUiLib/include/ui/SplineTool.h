@@ -24,6 +24,7 @@
 #include "mdl/Brush.h"
 #include "mdl/HitType.h"
 #include "mdl/Spline.h"
+#include "mdl/SplineEntities.h"
 #include "mdl/SplineEntity.h"
 #include "ui/Tool.h"
 
@@ -77,9 +78,13 @@ enum class SplineHandlePart
 /**
  * A tool for creating and editing splines. A spline is a curve through a sequence of
  * control points; each point can be moved, rotated (rolled around the curve) and
- * locked. A spline can be linked to an entity group, in which case the group's
- * brushes are used as a template that is deformed along the curve, and the resulting
- * brushes are kept as children of the spline's entity.
+ * locked. A spline can be linked to a group, in which case the group's brushes are
+ * used as a template that is deformed along the curve, and the resulting brushes are
+ * kept as children of the spline's entity. The group's point entities are replicated
+ * along the curve as well, as real entities so that the map compiles the same way it
+ * would had they been placed by hand; since an entity holds only brushes and patches,
+ * these are kept beside the spline rather than inside it, and carry a property naming
+ * the spline they belong to.
  *
  * The spline is persisted in the map as a func_group entity carrying the control
  * points in its properties, so that it remains editable across sessions and its
@@ -102,9 +107,10 @@ private:
   bool m_closed = false;
 
   /** The template is either a group (referenced by its persistent ID) or a snapshot
-   * of individually linked brushes; at most one of these is set. */
+   * of individually linked brushes and point entities; at most one of these is set. */
   std::optional<mdl::IdType> m_templateGroupId;
   std::vector<mdl::Brush> m_templateBrushes;
+  std::vector<mdl::SplineTemplateEntity> m_templateEntities;
 
   /** Whether clicking empty space appends new points. */
   bool m_addPointMode = false;
@@ -241,7 +247,6 @@ private:
   bool tangentHandlesVisible() const;
 
 public:
-
 public: // closing
   /** Whether the spline is closed, i.e. the last point connects back to the first
    * and brushes are created on that segment as well. */
@@ -252,13 +257,14 @@ public: // template group linkage
   size_t subdivisions() const;
   void setSubdivisions(size_t subdivisions);
 
-  /** Whether the current selection contains a group or brushes that can be linked. */
+  /** Whether the current selection contains a group, brushes or point entities that
+   * can be linked. */
   bool canLinkTemplate() const;
   /**
    * Links the current selection as the spline's deformation template. A selected
    * group is linked by reference, so later changes to it are picked up when the
-   * spline is regenerated; a plain brush selection is linked by taking a snapshot of
-   * the selected brushes.
+   * spline is regenerated; a plain selection of brushes and point entities is linked
+   * by taking a snapshot of them.
    */
   void linkTemplate();
   bool hasTemplate() const;
@@ -266,12 +272,12 @@ public: // template group linkage
   /** A user facing description of the linked template. */
   std::string templateName() const;
 
-  /** Whether the spline has generated brushes that can be broken out. */
+  /** Whether the spline has generated brushes or entities that can be broken out. */
   bool canBreakSpline() const;
   /**
-   * Duplicates the spline's generated brushes as standard, editable brushes and
-   * unlinks the template, so the spline stops generating geometry and the user can
-   * edit the copies.
+   * Duplicates the spline's generated brushes and point entities as standard,
+   * editable ones and unlinks the template, so the spline stops generating anything
+   * and the user can edit the copies.
    */
   void breakSpline();
 
@@ -292,7 +298,29 @@ private:
    */
   void commitSpline(const std::string& commandName);
 
-  std::vector<mdl::Node*> createBrushNodes() const;
+  /** The brushes and point entities the template is made of, in template space. */
+  struct TemplateContents
+  {
+    std::vector<const mdl::Brush*> brushes;
+    std::vector<mdl::SplineTemplateEntity> entities;
+    /** The lattice the sweep deforms, which the brushes size when there are any. */
+    vm::bbox3d bounds;
+  };
+  std::optional<TemplateContents> collectTemplate() const;
+
+  std::vector<mdl::Node*> createBrushNodes(const TemplateContents& contents) const;
+
+  /**
+   * The point entities to place along the curve, each marked as belonging to the
+   * spline with the given id. Unlike the brushes these cannot be children of the
+   * spline's entity, since an entity holds only brushes and patches, so they are
+   * added beside it and the marker is what ties them back to it.
+   */
+  std::vector<mdl::Node*> createEntityNodes(
+    const TemplateContents& contents, const std::string& splineId) const;
+
+  /** The point entities the spline currently owns, found by their marker. */
+  std::vector<mdl::Node*> findGeneratedEntityNodes() const;
 
 private:
   bool doActivate() override;

@@ -25,6 +25,7 @@
 #include "mdl/Entity.h"
 #include "mdl/EntityProperties.h"
 #include "mdl/MapSidecar.h"
+#include "mdl/SplineEntities.h"
 
 #include "kd/reflection_impl.h"
 #include "kd/result.h"
@@ -37,6 +38,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -53,6 +55,88 @@ std::string pointKey(const size_t index)
 std::string templateBrushKey(const size_t index)
 {
   return fmt::format("{}{}", SplinePropertyKeys::TemplateBrushPrefix, index);
+}
+
+std::string templateEntityKey(const size_t index)
+{
+  return fmt::format("{}{}", SplinePropertyKeys::TemplateEntityPrefix, index);
+}
+
+std::string formatTemplateEntity(const SplineTemplateEntity& templateEntity)
+{
+  auto stream = std::ostringstream{};
+  stream << fmt::format(
+    "{} {} {} {} {} {}",
+    templateEntity.bounds.min.x(),
+    templateEntity.bounds.min.y(),
+    templateEntity.bounds.min.z(),
+    templateEntity.bounds.max.x(),
+    templateEntity.bounds.max.y(),
+    templateEntity.bounds.max.z());
+
+  for (const auto& property : templateEntity.entity.properties())
+  {
+    // The snapshot is one entity property value holding another entity's properties,
+    // so the inner keys and values are quoted the way the map format quotes them.
+    stream << " " << quoteSidecarString(property.key()) << " "
+           << quoteSidecarString(property.value());
+  }
+
+  return stream.str();
+}
+
+std::optional<SplineTemplateEntity> parseTemplateEntity(const std::string& value)
+{
+  auto stream = std::istringstream{value};
+  auto coords = std::array<double, 6>{};
+  for (auto& coord : coords)
+  {
+    stream >> coord;
+  }
+  if (stream.fail())
+  {
+    return std::nullopt;
+  }
+
+  auto properties = std::vector<EntityProperty>{};
+  auto rest = std::string{};
+  std::getline(stream, rest);
+
+  auto position = rest.find('"');
+  while (position != std::string::npos)
+  {
+    const auto key = unquoteSidecarString(rest, position);
+    if (!key)
+    {
+      return std::nullopt;
+    }
+
+    position = rest.find('"', position);
+    if (position == std::string::npos)
+    {
+      return std::nullopt;
+    }
+
+    const auto propertyValue = unquoteSidecarString(rest, position);
+    if (!propertyValue)
+    {
+      return std::nullopt;
+    }
+
+    properties.emplace_back(*key, *propertyValue);
+    position = rest.find('"', position);
+  }
+
+  auto entity = Entity{std::move(properties)};
+  // A snapshot is only ever taken of a point entity, and the entity it is read back
+  // into has no definition to say so until it is put in the map.
+  entity.setPointEntity(true);
+
+  return SplineTemplateEntity{
+    std::move(entity),
+    vm::bbox3d{
+      vm::vec3d{coords[0], coords[1], coords[2]},
+      vm::vec3d{coords[3], coords[4], coords[5]}}};
 }
 
 std::string formatTemplateBrush(const Brush& brush)
@@ -333,6 +417,53 @@ Entity writeSplineTemplateBrushes(const Entity& entity, const std::vector<Brush>
   }
 
   return result;
+}
+
+std::vector<SplineTemplateEntity> parseSplineTemplateEntities(const Entity& entity)
+{
+  auto entities = std::vector<SplineTemplateEntity>{};
+
+  for (size_t i = 0;; ++i)
+  {
+    const auto* value = entity.property(templateEntityKey(i));
+    if (!value)
+    {
+      break;
+    }
+    if (auto templateEntity = parseTemplateEntity(*value))
+    {
+      entities.push_back(std::move(*templateEntity));
+    }
+  }
+
+  return entities;
+}
+
+Entity writeSplineTemplateEntities(
+  const Entity& entity, const std::vector<SplineTemplateEntity>& entities)
+{
+  auto result = entity;
+
+  for (const auto& property : entity.properties())
+  {
+    if (property.hasPrefix(SplinePropertyKeys::TemplateEntityPrefix))
+    {
+      result.removeProperty(property.key());
+    }
+  }
+
+  for (size_t i = 0; i < entities.size(); ++i)
+  {
+    result.addOrUpdateProperty(templateEntityKey(i), formatTemplateEntity(entities[i]));
+  }
+
+  return result;
+}
+
+std::string splineEntityId(const Entity& entity)
+{
+  const auto* id = entity.property(SidecarPropertyKeys::DataId);
+  return id ? *id : std::string{};
 }
 
 } // namespace tb::mdl

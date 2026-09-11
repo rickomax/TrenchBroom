@@ -25,6 +25,7 @@
 #include "kd/reflection_decl.h"
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -51,6 +52,19 @@ namespace SidecarPropertyKeys
  * is stripped from exports along with the editor's other bookkeeping. */
 inline const std::string DataId = EntityPropertyKeys::TbPrefix + "tool_data";
 } // namespace SidecarPropertyKeys
+
+/**
+ * Quotes a key or value the way the map format does, so that one containing spaces
+ * survives being packed into a larger string.
+ */
+std::string quoteSidecarString(const std::string& str);
+
+/**
+ * Reads a string quoted by quoteSidecarString, starting at the given position, which
+ * must be the opening quote, and moves the position past the closing quote. Returns
+ * nullopt if the string is not terminated.
+ */
+std::optional<std::string> unquoteSidecarString(const std::string& str, size_t& position);
 
 /** The property key prefixes whose values live in the sidecar file. */
 const std::vector<std::string>& sidecarPropertyPrefixes();
