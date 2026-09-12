@@ -37,22 +37,22 @@ enum class MapFormat;
 enum class SplineUVMode
 {
   /**
-   * The UVs are carried through the deformation and realigned onto the geometry it
-   * produces, so a pattern runs along the curve.
+   * The UVs are carried across by one map fitted to the whole span.
    *
-   * The deformation is not rigid, so the alignment cannot come out of it untouched: a
-   * stretched span stretches the texture with it, and a turn or a roll leaves the
-   * copies with rotations and offsets the template did not have.
+   * The deformation that map stands in for is not affine, so it is only an
+   * approximation of what happened to any particular part of the template, and the
+   * copies come out with the texture a little off where the two disagree.
    */
   Follow,
   /**
-   * Every copy carries the alignment the template was authored with: the same offset,
-   * scale and rotation on every one of them, and, in a format that stores UV axes, those
-   * axes turned to follow the copy rather than reprojected.
+   * The UVs are carried across one triangle at a time, by the map that says exactly
+   * what happened to that triangle.
    *
-   * A piece of trim lined up by hand on the template comes out lined up the same way all
-   * the way along, at the cost of the pattern not being continuous from one copy to the
-   * next.
+   * Where the deformation is affine, which is every sweep that only moves and stretches
+   * the template, the copies then show the texture the template showed, to the pixel. A
+   * curve or a roll bends a template face out of its own plane and a face's UVs are
+   * flat, so nothing can be exact everywhere there, but going triangle by triangle
+   * still lands far more of it than one map for the span does.
    */
   Lock,
 };

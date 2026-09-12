@@ -113,12 +113,11 @@ void SplineToolPage::createGui()
 
   m_lockUVs = new QCheckBox{tr("Lock UVs")};
   m_lockUVs->setToolTip(
-    tr("Give every copy the alignment the template was authored with: the same offset, "
-       "scale and rotation on all of them, so a piece of trim lined up by hand comes "
-       "out lined up the same way all the way along. Off, the template's UVs are "
-       "realigned onto the geometry the sweep produces, which keeps the pattern running "
-       "from one copy to the next but leaves a stretched or turned copy with an "
-       "alignment the template did not have."));
+    tr("Show the template's own texture on every copy, carried across one piece at a "
+       "time so that a sweep which only moves and stretches the template reproduces it "
+       "exactly. A curve or a roll bends the template out of shape and no alignment can "
+       "hold everywhere there, but this still holds far more of it than the sweep does "
+       "on its own."));
   m_lockUVs->setFocusPolicy(Qt::NoFocus);
 
   auto* layout = new QHBoxLayout{};

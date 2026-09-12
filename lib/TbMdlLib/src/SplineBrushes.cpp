@@ -27,10 +27,12 @@
 #include "kd/result.h"
 
 #include "vm/mat.h"
+#include "vm/mat_ext.h"
 #include "vm/scalar.h"
 #include "vm/vec.h"
 #include "vm/vec_ext.h"
 
+#include <optional>
 #include <vector>
 
 namespace tb::mdl
@@ -83,6 +85,73 @@ vm::mat4x4d spanUVTransform(
 }
 
 /**
+ * The affine map that takes one template triangle exactly onto the deformed triangle it
+ * became.
+ *
+ * A face's UVs are an affine function of position on its plane, and a triangle has
+ * exactly the three points that pin an affine map down, so UVs carried through this map
+ * land on the copy precisely where the template had them. The map fitted to a whole span
+ * cannot do that: the deformation it stands in for is not affine, so it is only ever an
+ * approximation of what happened to any particular triangle. The two normals supply the
+ * fourth correspondence a map in space needs.
+ *
+ * Returns nullopt if either triangle is degenerate, which the caller treats as a cell
+ * that produced nothing worth texturing.
+ */
+std::optional<vm::mat4x4d> triangleTransform(
+  const vm::vec3d& t0,
+  const vm::vec3d& t1,
+  const vm::vec3d& t2,
+  const vm::vec3d& w0,
+  const vm::vec3d& w1,
+  const vm::vec3d& w2)
+{
+  const auto templateNormal = vm::cross(t1 - t0, t2 - t0);
+  const auto worldNormal = vm::cross(w1 - w0, w2 - w0);
+  if (
+    vm::squared_length(templateNormal) < 1.0e-10
+    || vm::squared_length(worldNormal) < 1.0e-10)
+  {
+    return std::nullopt;
+  }
+
+  const auto edges = [](const vm::vec3d& e1, const vm::vec3d& e2, const vm::vec3d& n) {
+    return vm::mat3x3d{
+      e1.x(), e2.x(), n.x(), e1.y(), e2.y(), n.y(), e1.z(), e2.z(), n.z()};
+  };
+
+  const auto fromTemplate = edges(t1 - t0, t2 - t0, vm::normalize(templateNormal));
+  const auto toWorld = edges(w1 - w0, w2 - w0, vm::normalize(worldNormal));
+
+  const auto inverse = vm::invert(fromTemplate);
+  if (!inverse)
+  {
+    return std::nullopt;
+  }
+
+  const auto linear = toWorld * *inverse;
+  const auto embedded = vm::mat4x4d{
+    linear[0][0],
+    linear[0][1],
+    linear[0][2],
+    0.0,
+    linear[1][0],
+    linear[1][1],
+    linear[1][2],
+    0.0,
+    linear[2][0],
+    linear[2][1],
+    linear[2][2],
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    1.0};
+
+  return vm::translation_matrix(w0) * embedded * vm::translation_matrix(-t0);
+}
+
+/**
  * The template brush's faces moved into the span's world space, which is what the
  * generated faces take their attributes and alignment from.
  *
@@ -113,11 +182,28 @@ std::vector<BrushFace> placeTemplateFaces(
  * each face of the given brush. Faces are matched by normal in world space, since the
  * template faces have already been moved into the span.
  */
-void copyFaceAttributes(Brush& brush, const std::vector<BrushFace>& templateFaces)
+void copyFaceAttributes(
+  Brush& brush,
+  const std::vector<BrushFace>& templateFaces,
+  const std::optional<BrushFace>& lockedFace)
 {
   for (auto& face : brush.faces())
   {
-    const BrushFace* bestMatch = nullptr;
+    // A locked cell has its own face, carried onto it by the map that produced it, so
+    // there is nothing to match: every face of the cell takes its alignment from that
+    // one. Only the outer face is ever seen; the rest are inside the solid.
+    const BrushFace* bestMatch = lockedFace ? &*lockedFace : nullptr;
+    if (bestMatch)
+    {
+      face.setAttributes(bestMatch->attributes());
+      if (const auto snapshot = bestMatch->takeUVCoordSystemSnapshot())
+      {
+        face.copyUVCoordSystemFromFace(
+          *snapshot, bestMatch->attributes(), bestMatch->boundary(), WrapStyle::Rotation);
+      }
+      continue;
+    }
+
     auto bestDot = -2.0;
     for (const auto& templateFace : templateFaces)
     {
@@ -234,6 +320,29 @@ Result<std::vector<Brush>> createSplineBrushes(
 
         for (size_t j = 1; j + 1 < deformedFaceVertices.size(); ++j)
         {
+          // Locked, this cell's own triangle says exactly what happened to it, so the
+          // template face's UVs are carried across by that rather than by the map
+          // fitted to the span, which would leave them a little off.
+          auto lockedFace = std::optional<BrushFace>{};
+          if (uvMode == SplineUVMode::Lock)
+          {
+            if (
+              const auto transform = triangleTransform(
+                faceVertices[0],
+                faceVertices[j],
+                faceVertices[j + 1],
+                deformedFaceVertices[0],
+                deformedFaceVertices[j],
+                deformedFaceVertices[j + 1]))
+            {
+              auto copy = face;
+              if (copy.transform(*transform, true).is_success())
+              {
+                lockedFace = std::move(copy);
+              }
+            }
+          }
+
           builder.createBrush(
             std::vector<vm::vec3d>{
               deformedApex,
@@ -242,7 +351,7 @@ Result<std::vector<Brush>> createSplineBrushes(
               deformedFaceVertices[j + 1]},
             materialName)
             | kdl::transform([&](Brush brush) {
-                copyFaceAttributes(brush, templateFaces);
+                copyFaceAttributes(brush, templateFaces, lockedFace);
                 brushes.push_back(std::move(brush));
               })
             | kdl::transform_error([](const auto&) {
