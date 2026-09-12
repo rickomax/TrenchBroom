@@ -298,8 +298,11 @@ void transformNode(
         entityNode.entityPropertyConfig().updateAnglePropertyAfterTransform;
 
       auto entity = entityNode.entity();
-      entity.transform(transformation, updateAngleProperty);
-      entityNode.setEntity(std::move(entity));
+      entity.transform(transformation, updateAngleProperty)
+        | kdl::transform([&]() { entityNode.setEntity(std::move(entity)); })
+        | kdl::transform_error([](const auto&) {
+            // A terrain that the transformation cannot be applied to is left alone.
+          });
 
       entityNode.visitChildren(thisLambda);
     },

@@ -20,6 +20,7 @@
 #include "mdl/Brush.h"
 #include "mdl/BrushFace.h"
 #include "mdl/Entity.h"
+#include "mdl/EntityProperties.h"
 #include "mdl/MapFormat.h"
 #include "mdl/Terrain.h"
 #include "mdl/TerrainBrushes.h"
@@ -29,11 +30,18 @@
 
 #include "vm/approx.h"
 #include "vm/bbox.h"
+#include "vm/mat.h"
+#include "vm/mat_ext.h"
 #include "vm/ray.h"
 #include "vm/vec.h"
 #include "vm/vec_io.h" // IWYU pragma: keep
 
+#include <algorithm>
+#include <tuple>
+#include <vector>
+
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 namespace tb::mdl
 {
@@ -180,103 +188,173 @@ TEST_CASE("Terrain")
     CHECK(terrainCellMaterial(terrain, 0, 0) == "some_material");
   }
 
-  SECTION("scaleTerrain")
+  SECTION("translateTerrain")
   {
-    SECTION("scaling in XY changes the resolution and stretches the shape")
+    SECTION("carries the whole terrain along")
     {
       auto terrain = makeTerrain(4, 4);
-      // A ramp along X, so the resampled heights can be checked against it.
-      for (size_t row = 0; row <= terrain.rows; ++row)
+      terrain.heights[terrainVertexIndex(terrain, 2, 2)] = 64.0;
+      const auto before = terrainBounds(terrain);
+
+      translateTerrain(terrain, vm::vec3d{128, -64, 16});
+
+      CHECK(terrain.origin == vm::approx{vm::vec3d{128, -64, 16}});
+      CHECK(
+        terrainBounds(terrain).min == vm::approx{before.min + vm::vec3d{128, -64, 16}});
+      CHECK(
+        terrainBounds(terrain).max == vm::approx{before.max + vm::vec3d{128, -64, 16}});
+      CHECK(
+        terrainVertexPosition(terrain, 2, 2)
+        == vm::approx{vm::vec3d{64 + 128, 64 - 64, 64 + 16}});
+    }
+
+    SECTION("leaves the shape, the resolution and the materials alone")
+    {
+      auto terrain = makeTerrain(4, 4);
+      REQUIRE(sculptTerrain(
+        terrain,
+        terrainVertexPosition(terrain, 2, 2),
+        48.0,
+        32.0,
+        TerrainSculptMode::Raise));
+      REQUIRE(
+        paintTerrain(terrain, terrainVertexPosition(terrain, 0, 0), 40.0, "painted"));
+
+      auto moved = terrain;
+      translateTerrain(moved, vm::vec3d{128, -64, 16});
+
+      CHECK(moved.columns == terrain.columns);
+      CHECK(moved.rows == terrain.rows);
+      CHECK(moved.materials == terrain.materials);
+      CHECK(terrainBounds(moved).size() == vm::approx{terrainBounds(terrain).size()});
+
+      // Every height moved by the same amount, which is what keeps the shape.
+      for (size_t i = 0; i < moved.heights.size(); ++i)
       {
-        for (size_t column = 0; column <= terrain.columns; ++column)
-        {
-          terrain.heights[terrainVertexIndex(terrain, column, row)] =
-            32.0 + double(column) * 8.0;
-        }
+        CHECK(moved.heights[i] - terrain.heights[i] == vm::approx{16.0});
       }
-
-      REQUIRE(
-        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{256, 128, 64}}));
-
-      // The cell size is kept, so twice the width means twice the columns.
-      CHECK(terrain.cellSize == vm::approx{32.0});
-      CHECK(terrain.columns == 8);
-      CHECK(terrain.rows == 4);
-      CHECK(isValidTerrain(terrain));
-
-      // The ramp is stretched across the wider footprint rather than repeated or
-      // cropped: its ends keep their heights and the new vertices in between are
-      // interpolated. The height range already matched the new bounds, so Z is
-      // unchanged.
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 0, 0)] == vm::approx{32.0});
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 1, 0)] == vm::approx{36.0});
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 8, 0)] == vm::approx{64.0});
-      CHECK(terrainBounds(terrain).max == vm::approx{vm::vec3d{256, 128, 64}});
     }
 
-    SECTION("the far corner is sampled from the last cell, not past the grid")
+    SECTION("moving back and forth leaves the terrain as it was")
     {
       auto terrain = makeTerrain(4, 4);
-      // A corner spike, so a wrong sample at the far edge shows up as a wrong height
-      // rather than only as an out of range read.
-      terrain.heights[terrainVertexIndex(terrain, 4, 4)] = 96.0;
+      terrain.heights[terrainVertexIndex(terrain, 1, 3)] = 48.0;
+      const auto original = terrain;
 
-      REQUIRE(
-        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{256, 256, 96}}));
+      translateTerrain(terrain, vm::vec3d{256, 32, -64});
+      translateTerrain(terrain, vm::vec3d{-256, -32, 64});
 
-      REQUIRE(terrain.columns == 8);
-      REQUIRE(terrain.rows == 8);
-      // The corner vertex maps exactly onto the old corner vertex, and the vertex one
-      // step in is half way down the spike.
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 8, 8)] == vm::approx{96.0});
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 7, 8)] == vm::approx{64.0});
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 8, 7)] == vm::approx{64.0});
+      CHECK(terrain == original);
+    }
+  }
+
+  SECTION("transformTerrain")
+  {
+    SECTION("moves the terrain like a translation does")
+    {
+      const auto delta = vm::vec3d{128, -64, 16};
+
+      auto terrain = makeTerrain(4, 4);
+      terrain.heights[terrainVertexIndex(terrain, 2, 2)] = 64.0;
+
+      auto translated = terrain;
+      translateTerrain(translated, delta);
+
+      REQUIRE(transformTerrain(terrain, vm::translation_matrix(delta)));
+      CHECK(terrain == translated);
     }
 
-    SECTION("scaling in Z scales the height data")
+    SECTION("scaling stretches the cells rather than adding more of them")
     {
       auto terrain = makeTerrain(4, 4);
       terrain.heights[terrainVertexIndex(terrain, 2, 2)] = 64.0;
 
-      // The old height range is [0, 64] and the new one is [0, 128], so every height
-      // above the base is doubled.
-      REQUIRE(
-        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{128, 128, 128}}));
+      REQUIRE(transformTerrain(terrain, vm::scaling_matrix(vm::vec3d{2, 3, 4})));
 
       CHECK(terrain.columns == 4);
       CHECK(terrain.rows == 4);
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 2, 2)] == vm::approx{128.0});
-      CHECK(terrain.heights[terrainVertexIndex(terrain, 0, 0)] == vm::approx{64.0});
+      CHECK(terrain.cellSizeX == vm::approx{64.0});
+      CHECK(terrain.cellSizeY == vm::approx{96.0});
+      CHECK(terrain.heights[terrainVertexIndex(terrain, 2, 2)] == vm::approx{256.0});
+      CHECK(terrainBounds(terrain).max == vm::approx{vm::vec3d{256, 384, 256}});
     }
 
-    SECTION("materials follow the cells they covered")
+    SECTION("anything that would take the grid off the axes is refused")
     {
       auto terrain = makeTerrain(4, 4);
-      REQUIRE(
-        paintTerrain(terrain, terrainVertexPosition(terrain, 0, 0), 40.0, "painted"));
-      REQUIRE(terrainCellMaterial(terrain, 0, 0) == "painted");
-
-      REQUIRE(
-        scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{256, 256, 32}}));
-
-      // The painted cell now covers the first two cells along each axis.
-      CHECK(terrainCellMaterial(terrain, 0, 0) == "painted");
-      CHECK(terrainCellMaterial(terrain, 1, 1) == "painted");
-      CHECK(terrainCellMaterial(terrain, 7, 7) == "some_material");
-    }
-
-    SECTION("rejects bounds that would collapse or oversize the terrain")
-    {
-      auto terrain = makeTerrain(4, 4);
+      terrain.heights[terrainVertexIndex(terrain, 2, 2)] = 64.0;
       const auto original = terrain;
 
-      CHECK(!scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{8, 8, 32}}));
-      CHECK(
-        !scaleTerrain(terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{128, 128, 0}}));
-      CHECK(!scaleTerrain(
-        terrain, vm::bbox3d{vm::vec3d{0, 0, 0}, vm::vec3d{8192, 8192, 32}}));
+      // Turning it, on any axis.
+      CHECK_FALSE(transformTerrain(
+        terrain, vm::rotation_matrix(vm::vec3d{0, 0, 1}, vm::to_radians(90.0))));
+      CHECK_FALSE(transformTerrain(
+        terrain, vm::rotation_matrix(vm::vec3d{1, 0, 0}, vm::to_radians(10.0))));
+
+      // Mirroring it: each cell is split along one of its diagonals, and a mirror maps
+      // that diagonal onto the other one, so the brushes would not be the ones the
+      // mirrored height field describes.
+      CHECK_FALSE(transformTerrain(terrain, vm::scaling_matrix(vm::vec3d{-1, 1, 1})));
+      CHECK_FALSE(transformTerrain(terrain, vm::scaling_matrix(vm::vec3d{1, -1, 1})));
+
+      // Flattening it away altogether.
+      CHECK_FALSE(transformTerrain(terrain, vm::scaling_matrix(vm::vec3d{0, 1, 1})));
 
       CHECK(terrain == original);
+    }
+
+    SECTION("leaves the terrain where the same transformation puts its brushes")
+    {
+      // This is what lets the standard tools move and scale a terrain: whatever they do
+      // to its brushes, the height field ends up describing exactly those brushes, so
+      // the next edit does not snap the geometry somewhere else.
+      const auto transformation = GENERATE(
+        vm::translation_matrix(vm::vec3d{128, -64, 16}),
+        vm::scaling_matrix(vm::vec3d{2, 3, 1}),
+        vm::scaling_matrix(vm::vec3d{1, 1, 2}),
+        vm::translation_matrix(vm::vec3d{64, 64, 0})
+          * vm::scaling_matrix(vm::vec3d{2, 2, 2}));
+
+      auto terrain = makeTerrain(2, 2);
+      REQUIRE(sculptTerrain(
+        terrain,
+        terrainVertexPosition(terrain, 1, 1),
+        48.0,
+        24.0,
+        TerrainSculptMode::Raise));
+      REQUIRE(
+        paintTerrain(terrain, terrainVertexPosition(terrain, 0, 0), 24.0, "painted"));
+
+      auto transformed = terrain;
+      REQUIRE(transformTerrain(transformed, transformation));
+
+      auto carried =
+        createTerrainBrushes(MapFormat::Standard, worldBounds, terrain) | kdl::value();
+      const auto rebuilt =
+        createTerrainBrushes(MapFormat::Standard, worldBounds, transformed)
+        | kdl::value();
+      REQUIRE(carried.size() == rebuilt.size());
+
+      for (size_t i = 0; i < carried.size(); ++i)
+      {
+        REQUIRE(carried[i].transform(worldBounds, transformation, false).is_success());
+        CHECK(carried[i].vertexPositions() == rebuilt[i].vertexPositions());
+
+        // The textures have to land in the same place too, or moving a terrain would
+        // shift the picture on it.
+        REQUIRE(carried[i].faceCount() == rebuilt[i].faceCount());
+        for (size_t f = 0; f < carried[i].faceCount(); ++f)
+        {
+          const auto& carriedFace = carried[i].face(f);
+          const auto& rebuiltFace = rebuilt[i].face(f);
+          REQUIRE(carriedFace.normal() == vm::approx{rebuiltFace.normal()});
+
+          const auto point = rebuiltFace.center();
+          CHECK(
+            carriedFace.uvCoords(point)
+            == vm::approx{rebuiltFace.uvCoords(point), 0.001f});
+        }
+      }
     }
   }
 
@@ -407,6 +485,10 @@ TEST_CASE("Terrain")
   SECTION("TerrainEntity round-trip")
   {
     auto terrain = makeTerrain(4, 4);
+    // Everything that comes in pairs is given two different values, so that writing the
+    // pair the wrong way round cannot go unnoticed.
+    terrain.cellSizeX = 24.0;
+    terrain.cellSizeY = 40.0;
     terrain.texScaleX = 0.5f;
     terrain.texScaleY = 2.5f;
     sculptTerrain(
@@ -426,7 +508,8 @@ TEST_CASE("Terrain")
     CHECK(parsed->columns == terrain.columns);
     CHECK(parsed->rows == terrain.rows);
     CHECK(parsed->origin == vm::approx{terrain.origin});
-    CHECK(parsed->cellSize == vm::approx{terrain.cellSize});
+    CHECK(parsed->cellSizeX == vm::approx{terrain.cellSizeX});
+    CHECK(parsed->cellSizeY == vm::approx{terrain.cellSizeY});
     CHECK(parsed->texScaleX == terrain.texScaleX);
     CHECK(parsed->texScaleY == terrain.texScaleY);
     CHECK(parsed->defaultMaterial == terrain.defaultMaterial);
@@ -436,6 +519,29 @@ TEST_CASE("Terrain")
     for (size_t i = 0; i < terrain.heights.size(); ++i)
     {
       CHECK(parsed->heights[i] == vm::approx{terrain.heights[i]});
+    }
+
+    SECTION("a single cell size, from before cells could be stretched, reads as square")
+    {
+      auto entity = writeTerrainEntity(Entity{}, makeTerrain(2, 2));
+      entity.addOrUpdateProperty(TerrainPropertyKeys::CellSize, "48");
+
+      const auto parsed = parseTerrainEntity(entity);
+      REQUIRE(parsed.has_value());
+      CHECK(parsed->cellSizeX == vm::approx{48.0});
+      CHECK(parsed->cellSizeY == vm::approx{48.0});
+    }
+
+    SECTION("the entity's own origin follows the terrain's")
+    {
+      // Whatever asks the entity where it is -- the editor, a compiler, another tool --
+      // has to be told the truth after the terrain has been moved.
+      auto moved = makeTerrain(2, 2);
+      translateTerrain(moved, vm::vec3d{128, -64, 16});
+
+      const auto entity = writeTerrainEntity(Entity{}, moved);
+      REQUIRE(entity.property(EntityPropertyKeys::Origin) != nullptr);
+      CHECK(*entity.property(EntityPropertyKeys::Origin) == "128 -64 16");
     }
 
     SECTION("a non-terrain entity does not parse")

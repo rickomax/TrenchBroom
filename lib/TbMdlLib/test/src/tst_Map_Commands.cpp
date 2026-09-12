@@ -37,6 +37,8 @@
 #include "mdl/TransactionScope.h"
 #include "mdl/UpdateBrushFaceAttributes.h"
 
+#include "kd/result.h"
+
 #include "vm/approx.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -160,7 +162,8 @@ TEST_CASE("Map_Commands")
     SECTION("Repeat rotation")
     {
       auto entity = Entity();
-      entity.transform(vm::translation_matrix(vm::vec3d(1, 2, 3)), true);
+      REQUIRE(
+        entity.transform(vm::translation_matrix(vm::vec3d(1, 2, 3)), true).is_success());
 
       auto* entityNode = new EntityNode(std::move(entity));
 

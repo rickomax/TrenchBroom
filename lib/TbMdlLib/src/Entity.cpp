@@ -26,9 +26,12 @@
 #include "mdl/EntityRotation.h"
 #include "mdl/ModelDefinition.h"
 #include "mdl/PropertyDefinition.h"
+#include "mdl/Terrain.h"
+#include "mdl/TerrainEntity.h"
 
 #include "kd/ranges/to.h"
 #include "kd/reflection_impl.h"
+#include "kd/result.h"
 #include "kd/string_utils.h"
 #include "kd/vector_utils.h"
 
@@ -445,8 +448,26 @@ std::vector<EntityProperty> Entity::numberedProperties(const std::string& prefix
          | kdl::ranges::to<std::vector>();
 }
 
-void Entity::transform(const vm::mat4x4d& transformation, const bool updateAngleProperty)
+Result<void> Entity::transform(
+  const vm::mat4x4d& transformation, const bool updateAngleProperty)
 {
+  // A terrain's height field has to be carried along with the brushes generated from
+  // it, and it can only be carried by a transformation that leaves it lying along the
+  // axes. Nothing is changed when it cannot be.
+  if (isTerrainEntity(*this))
+  {
+    auto terrain = parseTerrainEntity(*this);
+    if (!terrain || !transformTerrain(*terrain, transformation))
+    {
+      return Error{"A terrain can be moved and scaled, but not turned or mirrored"};
+    }
+
+    // A terrain is a brush entity carrying no angle of its own, and its properties, the
+    // origin among them, have just been written: there is nothing else to apply.
+    *this = writeTerrainEntity(*this, *terrain);
+    return kdl::void_success;
+  }
+
   if (m_pointEntity)
   {
     const auto offset = definitionBounds().center();
@@ -470,6 +491,8 @@ void Entity::transform(const vm::mat4x4d& transformation, const bool updateAngle
       applyEntityRotation(*this, rotation);
     }
   }
+
+  return kdl::void_success;
 }
 
 } // namespace tb::mdl

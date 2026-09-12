@@ -138,8 +138,11 @@ bool transformSelection(
           },
           [&](EntityNode& entityNode) -> TransformResult {
             auto entity = entityNode.entity();
-            entity.transform(transformation, updateAngleProperty);
-            return std::make_pair(&entityNode, NodeContents{std::move(entity)});
+            return entity.transform(transformation, updateAngleProperty)
+                   | kdl::and_then([&]() -> TransformResult {
+                       return std::make_pair(
+                         &entityNode, NodeContents{std::move(entity)});
+                     });
           },
           [&](BrushNode& brushNode) -> TransformResult {
             const auto* containingGroup = brushNode.containingGroup();
@@ -169,7 +172,14 @@ bool transformSelection(
                              std::move(nodesToUpdate),
                              collectContainingGroups(map.selection().nodes));
                          })
-                       | kdl::value_or(false);
+                       | kdl::or_else([&](const auto& e) {
+                           // Nothing has been changed, so saying why is all that is left
+                           // to do: a terrain that cannot be turned is the usual reason.
+                           map.logger().error()
+                             << "Could not transform objects: " << e.msg;
+                           return Result<bool>{false};
+                         })
+                       | kdl::value();
 
   if (success)
   {

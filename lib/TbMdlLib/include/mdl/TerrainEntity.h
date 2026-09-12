@@ -31,6 +31,8 @@ namespace TerrainPropertyKeys
 {
 /** The terrain's origin, "x y z". */
 constexpr auto Origin = "_terrain_origin";
+/** The width and depth of a cell, "sx sy". A single number, from before cells could be
+ * stretched, is read as square cells. */
 constexpr auto CellSize = "_terrain_cell_size";
 constexpr auto Columns = "_terrain_columns";
 constexpr auto Rows = "_terrain_rows";

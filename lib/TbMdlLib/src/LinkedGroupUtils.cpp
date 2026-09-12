@@ -292,8 +292,11 @@ Result<std::vector<std::unique_ptr<Node>>> cloneAndTransformChildren(
             const auto updateAngleProperty =
               entityNode.entityPropertyConfig().updateAnglePropertyAfterTransform;
             auto entity = entityNode.entity();
-            entity.transform(transformation, updateAngleProperty);
-            return std::make_pair(nodeToTransform, NodeContents{std::move(entity)});
+            return entity.transform(transformation, updateAngleProperty)
+                   | kdl::and_then([&]() -> TransformResult {
+                       return std::make_pair(
+                         nodeToTransform, NodeContents{std::move(entity)});
+                     });
           },
           [&](const BrushNode& brushNode) -> TransformResult {
             auto brush = brushNode.brush();

@@ -352,7 +352,13 @@ bool EditorContext::selectable(const GroupNode& groupNode) const
 
 bool EditorContext::selectable(const EntityNode& entityNode) const
 {
-  return visible(entityNode) && editable(entityNode) && !entityNode.hasChildren()
+  // A brush entity is selected through its brushes rather than as a whole, except for a
+  // terrain, whose brushes belong to its height field and are only ever taken hold of
+  // together. Selecting one is what lets the move and scale tools carry it, height field
+  // and all.
+  const auto asAWhole = !entityNode.hasChildren() || isTerrainEntity(entityNode.entity());
+
+  return visible(entityNode) && editable(entityNode) && asAWhole
          && inOpenGroup(entityNode);
 }
 

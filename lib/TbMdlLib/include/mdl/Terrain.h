@@ -22,6 +22,7 @@
 #include "kd/reflection_decl.h"
 
 #include "vm/bbox.h"
+#include "vm/mat.h"
 #include "vm/ray.h"
 #include "vm/vec.h"
 
@@ -61,7 +62,10 @@ struct Terrain
 {
   /** The minimum corner of the terrain: its XY origin and the base plane's Z. */
   vm::vec3d origin;
-  double cellSize = 32.0;
+  /** The width and depth of a cell. The two are separate so that scaling a terrain can
+   * stretch its cells rather than having to resample the height field. */
+  double cellSizeX = 32.0;
+  double cellSizeY = 32.0;
   size_t columns = 0;
   size_t rows = 0;
 
@@ -78,7 +82,8 @@ struct Terrain
   kdl_reflect_decl(
     Terrain,
     origin,
-    cellSize,
+    cellSizeX,
+    cellSizeY,
     columns,
     rows,
     heights,
@@ -113,19 +118,21 @@ vm::vec3d terrainVertexPosition(const Terrain& terrain, size_t column, size_t ro
 vm::bbox3d terrainBounds(const Terrain& terrain);
 
 /**
- * Reshapes the terrain to fill the given bounds.
- *
- * The footprint keeps the terrain's cell size, so the number of columns and rows follows
- * the new size rather than the cells being stretched, and the heights are resampled
- * bilinearly from the old ones. Scaling in Z maps the old height range onto the new
- * one. The terrain's shape is therefore stretched or squashed with the bounds instead of
- * being cropped or reset.
- *
- * Returns false, leaving the terrain unchanged, if the bounds are too small for a single
- * cell or thin enough to collapse the terrain, or would need more than TerrainMaxCells
- * cells.
+ * Moves the whole terrain by the given delta, carrying its shape along unchanged.
  */
-bool scaleTerrain(Terrain& terrain, const vm::bbox3d& bounds);
+void translateTerrain(Terrain& terrain, const vm::vec3d& delta);
+
+/**
+ * Applies the given transformation to the terrain, so that it ends up exactly where the
+ * same transformation puts the brushes generated from it.
+ *
+ * A height field is a grid lying along the axes, so only a transformation it can be
+ * carried by is accepted: moving it and scaling it along those axes. Anything else --
+ * above all a rotation, which would tip the grid off the axes -- returns false and
+ * leaves the terrain untouched, so that the caller can refuse the whole operation rather
+ * than let the terrain and its brushes part ways.
+ */
+bool transformTerrain(Terrain& terrain, const vm::mat4x4d& transformation);
 
 /**
  * Applies one step of the sculpting brush centered at the given world position.

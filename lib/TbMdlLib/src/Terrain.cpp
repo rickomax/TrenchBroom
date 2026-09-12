@@ -21,11 +21,14 @@
 
 #include "kd/reflection_impl.h"
 
+#include "vm/constants.h"
 #include "vm/intersection.h"
+#include "vm/mat_ext.h"
 #include "vm/scalar.h"
 #include "vm/vec_ext.h"
 #include "vm/vec_io.h" // IWYU pragma: keep
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <utility>
@@ -82,17 +85,17 @@ VertexRange vertexRangeInRadius(
   };
 
   return VertexRange{
-    index(center.x() - radius, terrain.origin.x(), terrain.cellSize, terrain.columns),
+    index(center.x() - radius, terrain.origin.x(), terrain.cellSizeX, terrain.columns),
     index(
-      center.x() + radius + terrain.cellSize,
+      center.x() + radius + terrain.cellSizeX,
       terrain.origin.x(),
-      terrain.cellSize,
+      terrain.cellSizeX,
       terrain.columns),
-    index(center.y() - radius, terrain.origin.y(), terrain.cellSize, terrain.rows),
+    index(center.y() - radius, terrain.origin.y(), terrain.cellSizeY, terrain.rows),
     index(
-      center.y() + radius + terrain.cellSize,
+      center.y() + radius + terrain.cellSizeY,
       terrain.origin.y(),
-      terrain.cellSize,
+      terrain.cellSizeY,
       terrain.rows)};
 }
 
@@ -228,7 +231,8 @@ std::optional<Terrain> createTerrain(
 
   auto terrain = Terrain{};
   terrain.origin = vm::vec3d{bounds.min.x(), bounds.min.y(), bounds.min.z()};
-  terrain.cellSize = cellSize;
+  terrain.cellSizeX = cellSize;
+  terrain.cellSizeY = cellSize;
   terrain.columns = columns;
   terrain.rows = rows;
   terrain.defaultMaterial = std::move(defaultMaterial);
@@ -239,7 +243,8 @@ std::optional<Terrain> createTerrain(
 
 bool isValidTerrain(const Terrain& terrain)
 {
-  return terrain.columns > 0 && terrain.rows > 0 && terrain.cellSize > 0.0
+  return terrain.columns > 0 && terrain.rows > 0 && terrain.cellSizeX > 0.0
+         && terrain.cellSizeY > 0.0
          && terrain.heights.size() == terrainVertexCount(terrain)
          && terrain.materials.size() == terrainCellCount(terrain);
 }
@@ -263,8 +268,8 @@ vm::vec3d terrainVertexPosition(
   const Terrain& terrain, const size_t column, const size_t row)
 {
   return vm::vec3d{
-    terrain.origin.x() + double(column) * terrain.cellSize,
-    terrain.origin.y() + double(row) * terrain.cellSize,
+    terrain.origin.x() + double(column) * terrain.cellSizeX,
+    terrain.origin.y() + double(row) * terrain.cellSizeY,
     terrain.heights[terrainVertexIndex(terrain, column, row)]};
 }
 
@@ -281,76 +286,93 @@ vm::bbox3d terrainBounds(const Terrain& terrain)
   return vm::bbox3d{
     vm::vec3d{terrain.origin.x(), terrain.origin.y(), minZ},
     vm::vec3d{
-      terrain.origin.x() + double(terrain.columns) * terrain.cellSize,
-      terrain.origin.y() + double(terrain.rows) * terrain.cellSize,
+      terrain.origin.x() + double(terrain.columns) * terrain.cellSizeX,
+      terrain.origin.y() + double(terrain.rows) * terrain.cellSizeY,
       maxZ}};
 }
 
-bool scaleTerrain(Terrain& terrain, const vm::bbox3d& bounds)
+void translateTerrain(Terrain& terrain, const vm::vec3d& delta)
+{
+  // The heights are absolute world coordinates rather than offsets from the base plane,
+  // so they have to travel with the origin for the terrain to keep its shape.
+  terrain.origin = terrain.origin + delta;
+  for (auto& height : terrain.heights)
+  {
+    height += delta.z();
+  }
+}
+
+namespace
+{
+
+/**
+ * The scale factors along the axes of a transformation that is nothing but a move and a
+ * scale along those axes, or nothing if it is anything else.
+ *
+ * A height field is a grid lying along the axes, so it can only be carried by a
+ * transformation that leaves it there: every axis has to map onto itself, which is what
+ * the off diagonal entries being zero says, and none of the factors may turn negative.
+ * A mirror would keep the grid on the axes, but each cell is split into two prisms along
+ * one of its diagonals, and mirroring maps that diagonal onto the other one, so the
+ * mirrored brushes are not the brushes the mirrored height field describes.
+ */
+std::optional<vm::vec3d> axisAlignedScale(const vm::mat4x4d& transformation)
+{
+  for (size_t c = 0; c < 3; ++c)
+  {
+    for (size_t r = 0; r < 3; ++r)
+    {
+      if (r != c && std::abs(transformation[c][r]) > vm::constants<double>::almost_zero())
+      {
+        return std::nullopt;
+      }
+    }
+  }
+
+  // The bottom row -- the last entry of each column, since a matrix is indexed by column
+  // first -- is what tells an affine transformation from a projective one. Nothing here
+  // should ever produce the latter, but a terrain is not the place to find out.
+  if (
+    transformation[0][3] != 0.0 || transformation[1][3] != 0.0
+    || transformation[2][3] != 0.0 || transformation[3][3] != 1.0)
+  {
+    return std::nullopt;
+  }
+
+  const auto scale =
+    vm::vec3d{transformation[0][0], transformation[1][1], transformation[2][2]};
+  return scale.x() > vm::constants<double>::almost_zero()
+             && scale.y() > vm::constants<double>::almost_zero()
+             && scale.z() > vm::constants<double>::almost_zero()
+           ? std::optional{scale}
+           : std::nullopt;
+}
+
+} // namespace
+
+bool transformTerrain(Terrain& terrain, const vm::mat4x4d& transformation)
 {
   if (!isValidTerrain(terrain))
   {
     return false;
   }
 
-  // The cell size is kept, so scaling the footprint changes the terrain's resolution
-  // rather than the size of its cells.
-  const auto size = bounds.size();
-  const auto columns = size_t(std::llround(size.x() / terrain.cellSize));
-  const auto rows = size_t(std::llround(size.y() / terrain.cellSize));
-  if (
-    columns < 1 || rows < 1 || columns * rows > TerrainMaxCells
-    || size.z() < TerrainMinThickness)
+  const auto scale = axisAlignedScale(transformation);
+  if (!scale)
   {
     return false;
   }
 
-  // Heights are absolute, so scaling in Z means mapping the old height range onto the
-  // new one. Sculpting keeps every vertex at least TerrainMinThickness above the base,
-  // so the old range is never empty, but a terrain read from a map file might be.
-  const auto oldBounds = terrainBounds(terrain);
-  const auto oldRangeZ = oldBounds.max.z() - oldBounds.min.z();
-  const auto scaleZ = oldRangeZ > 0.0 ? size.z() / oldRangeZ : 0.0;
-  const auto minHeight = bounds.min.z() + TerrainMinThickness;
+  terrain.origin = transformation * terrain.origin;
+  terrain.cellSizeX = terrain.cellSizeX * scale->x();
+  terrain.cellSizeY = terrain.cellSizeY * scale->y();
 
-  auto heights = std::vector<double>((columns + 1) * (rows + 1));
-  for (size_t row = 0; row <= rows; ++row)
+  // Heights are absolute world coordinates, so each one moves as the point it is.
+  for (auto& height : terrain.heights)
   {
-    const auto sourceRow = double(row) / double(rows) * double(terrain.rows);
-    for (size_t column = 0; column <= columns; ++column)
-    {
-      const auto sourceColumn =
-        double(column) / double(columns) * double(terrain.columns);
-      const auto height = sampleHeight(terrain, sourceColumn, sourceRow);
-      const auto scaled = scaleZ > 0.0
-                            ? bounds.min.z() + (height - oldBounds.min.z()) * scaleZ
-                            : bounds.max.z();
-      heights[row * (columns + 1) + column] = vm::max(scaled, minHeight);
-    }
+    height = (transformation * vm::vec3d{0, 0, height}).z();
   }
 
-  // Materials cannot be interpolated, so every new cell takes the material of the old
-  // cell that covers the same part of the footprint.
-  auto materials = std::vector<std::string>(columns * rows);
-  for (size_t row = 0; row < rows; ++row)
-  {
-    const auto sourceRow = vm::min(
-      terrain.rows - 1, size_t(double(row) / double(rows) * double(terrain.rows)));
-    for (size_t column = 0; column < columns; ++column)
-    {
-      const auto sourceColumn = vm::min(
-        terrain.columns - 1,
-        size_t(double(column) / double(columns) * double(terrain.columns)));
-      materials[row * columns + column] =
-        terrain.materials[sourceRow * terrain.columns + sourceColumn];
-    }
-  }
-
-  terrain.origin = vm::vec3d{bounds.min.x(), bounds.min.y(), bounds.min.z()};
-  terrain.columns = columns;
-  terrain.rows = rows;
-  terrain.heights = std::move(heights);
-  terrain.materials = std::move(materials);
   return true;
 }
 
@@ -460,8 +482,8 @@ bool paintTerrain(
       }
 
       const auto position = vm::vec3d{
-        terrain.origin.x() + (double(column) + 0.5) * terrain.cellSize,
-        terrain.origin.y() + (double(row) + 0.5) * terrain.cellSize,
+        terrain.origin.x() + (double(column) + 0.5) * terrain.cellSizeX,
+        terrain.origin.y() + (double(row) + 0.5) * terrain.cellSizeY,
         height * 0.25};
 
       if (planarDistance(position, center) <= radius)
@@ -518,19 +540,34 @@ std::optional<vm::vec3d> pickTerrain(const Terrain& terrain, const vm::ray3d& ra
   const auto p1 = vm::point_at_distance(ray, far);
 
   const auto cellIndex = [&](
-                           const double world, const double origin, const size_t count) {
-    const auto raw = std::llround(std::floor((world - origin) / terrain.cellSize));
+                           const double world,
+                           const double origin,
+                           const double cellSize,
+                           const size_t count) {
+    const auto raw = std::llround(std::floor((world - origin) / cellSize));
     return size_t(vm::clamp(raw, 0ll, static_cast<long long>(count) - 1));
   };
 
   const auto minColumn = cellIndex(
-    vm::min(p0.x(), p1.x()) - terrain.cellSize, terrain.origin.x(), terrain.columns);
+    vm::min(p0.x(), p1.x()) - terrain.cellSizeX,
+    terrain.origin.x(),
+    terrain.cellSizeX,
+    terrain.columns);
   const auto maxColumn = cellIndex(
-    vm::max(p0.x(), p1.x()) + terrain.cellSize, terrain.origin.x(), terrain.columns);
+    vm::max(p0.x(), p1.x()) + terrain.cellSizeX,
+    terrain.origin.x(),
+    terrain.cellSizeX,
+    terrain.columns);
   const auto minRow = cellIndex(
-    vm::min(p0.y(), p1.y()) - terrain.cellSize, terrain.origin.y(), terrain.rows);
+    vm::min(p0.y(), p1.y()) - terrain.cellSizeY,
+    terrain.origin.y(),
+    terrain.cellSizeY,
+    terrain.rows);
   const auto maxRow = cellIndex(
-    vm::max(p0.y(), p1.y()) + terrain.cellSize, terrain.origin.y(), terrain.rows);
+    vm::max(p0.y(), p1.y()) + terrain.cellSizeY,
+    terrain.origin.y(),
+    terrain.cellSizeY,
+    terrain.rows);
 
   // The surface is the triangulated top of the height field; both triangles of every
   // candidate cell are tested against the ray.
