@@ -113,11 +113,11 @@ void SplineToolPage::createGui()
 
   m_lockUVs = new QCheckBox{tr("Lock UVs")};
   m_lockUVs->setToolTip(
-    tr("Show the template's own texture on every copy, carried across one piece at a "
-       "time so that a sweep which only moves and stretches the template reproduces it "
-       "exactly. A curve or a roll bends the template out of shape and no alignment can "
-       "hold everywhere there, but this still holds far more of it than the sweep does "
-       "on its own."));
+    tr("Keep the copies' textures the shape the template drew them, instead of letting "
+       "the squeezing that fits each copy to its segment squash the picture with it. "
+       "This is what moving and turning brushes with texture lock on already does. Maps "
+       "in the Valve format hold it exactly; the standard format picks its texture axes "
+       "from each face, so a turned face keeps some of the squeeze there."));
   m_lockUVs->setFocusPolicy(Qt::NoFocus);
 
   auto* layout = new QHBoxLayout{};

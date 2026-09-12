@@ -85,71 +85,35 @@ vm::mat4x4d spanUVTransform(
 }
 
 /**
- * The affine map that takes one template triangle exactly onto the deformed triangle it
- * became.
+ * The rigid placement of the template into the span: where the copy ends up and which
+ * way it is turned, with the stretching that made it fit left out.
  *
- * A face's UVs are an affine function of position on its plane, and a triangle has
- * exactly the three points that pin an affine map down, so UVs carried through this map
- * land on the copy precisely where the template had them. The map fitted to a whole span
- * cannot do that: the deformation it stands in for is not affine, so it is only ever an
- * approximation of what happened to any particular triangle. The two normals supply the
- * fourth correspondence a map in space needs.
- *
- * Returns nullopt if either triangle is degenerate, which the caller treats as a cell
- * that produced nothing worth texturing.
+ * This is what a locked copy's UVs are carried across by. Moving and turning a selection
+ * with texture lock on does not distort its textures, because a rigid transform cannot
+ * distort anything; stretching one does. The sweep stretches every copy to fit its
+ * segment, so carrying the UVs across by what actually happened to the geometry stretches
+ * the picture with it. Carrying them across by the placement alone leaves the picture the
+ * size the template drew it, which is what a tree or any other piece of art wants.
  */
-std::optional<vm::mat4x4d> triangleTransform(
-  const vm::vec3d& t0,
-  const vm::vec3d& t1,
-  const vm::vec3d& t2,
-  const vm::vec3d& w0,
-  const vm::vec3d& w1,
-  const vm::vec3d& w2)
+vm::mat4x4d rigidSpanTransform(
+  const vm::bbox3d& lattice, const SweepFrame& a, const SweepFrame& b)
 {
-  const auto templateNormal = vm::cross(t1 - t0, t2 - t0);
-  const auto worldNormal = vm::cross(w1 - w0, w2 - w0);
-  if (
-    vm::squared_length(templateNormal) < 1.0e-10
-    || vm::squared_length(worldNormal) < 1.0e-10)
-  {
-    return std::nullopt;
-  }
-
-  const auto edges = [](const vm::vec3d& e1, const vm::vec3d& e2, const vm::vec3d& n) {
-    return vm::mat3x3d{
-      e1.x(), e2.x(), n.x(), e1.y(), e2.y(), n.y(), e1.z(), e2.z(), n.z()};
-  };
-
-  const auto fromTemplate = edges(t1 - t0, t2 - t0, vm::normalize(templateNormal));
-  const auto toWorld = edges(w1 - w0, w2 - w0, vm::normalize(worldNormal));
-
-  const auto inverse = vm::invert(fromTemplate);
-  if (!inverse)
-  {
-    return std::nullopt;
-  }
-
-  const auto linear = toWorld * *inverse;
-  const auto embedded = vm::mat4x4d{
-    linear[0][0],
-    linear[0][1],
-    linear[0][2],
-    0.0,
-    linear[1][0],
-    linear[1][1],
-    linear[1][2],
-    0.0,
-    linear[2][0],
-    linear[2][1],
-    linear[2][2],
-    0.0,
-    0.0,
-    0.0,
-    0.0,
-    1.0};
-
-  return vm::translation_matrix(w0) * embedded * vm::translation_matrix(-t0);
+  const auto center = lattice.center();
+  const auto rotation = spanOrientation(center, lattice, a, b);
+  return vm::translation_matrix(deformIntoSpan(center, lattice, a, b)) * rotation
+         * vm::translation_matrix(-center);
 }
+
+/**
+ * A template face placed into the span two ways: by what actually happened to the
+ * geometry, which is the shape a generated face is matched against, and by the rigid
+ * placement alone, which is the undistorted alignment a locked copy takes.
+ */
+struct TemplateFace
+{
+  BrushFace deformed;
+  BrushFace rigid;
+};
 
 /**
  * The template brush's faces moved into the span's world space, which is what the
@@ -160,54 +124,45 @@ std::optional<vm::mat4x4d> triangleTransform(
  * geometry it produces, and locking leaves them where the template had them. A face
  * whose transformation fails is left where it was.
  */
-std::vector<BrushFace> placeTemplateFaces(
-  const Brush& templateBrush, const vm::mat4x4d& transform, const SplineUVMode uvMode)
+std::vector<TemplateFace> placeTemplateFaces(
+  const Brush& templateBrush,
+  const vm::mat4x4d& spanTransform,
+  const vm::mat4x4d& rigidTransform)
 {
-  auto faces = std::vector<BrushFace>{};
-  faces.reserve(templateBrush.faceCount());
-  for (const auto& face : templateBrush.faces())
-  {
+  const auto place = [](const BrushFace& face, const vm::mat4x4d& transform) {
     auto copy = face;
-    if (copy.transform(transform, uvMode == SplineUVMode::Follow).is_error())
+    if (copy.transform(transform, true).is_error())
     {
       copy = face;
     }
-    faces.push_back(std::move(copy));
+    return copy;
+  };
+
+  auto faces = std::vector<TemplateFace>{};
+  faces.reserve(templateBrush.faceCount());
+  for (const auto& face : templateBrush.faces())
+  {
+    faces.push_back(
+      TemplateFace{place(face, spanTransform), place(face, rigidTransform)});
   }
   return faces;
 }
 
 /**
  * Copies the attributes and the UV alignment of the best matching template face onto
- * each face of the given brush. Faces are matched by normal in world space, since the
- * template faces have already been moved into the span.
+ * each face of the given brush. Faces are matched by normal in world space against the
+ * deformed template faces, since those are the shapes the generated ones were cut from.
  */
 void copyFaceAttributes(
-  Brush& brush,
-  const std::vector<BrushFace>& templateFaces,
-  const std::optional<BrushFace>& lockedFace)
+  Brush& brush, const std::vector<TemplateFace>& templateFaces, const SplineUVMode uvMode)
 {
   for (auto& face : brush.faces())
   {
-    // A locked cell has its own face, carried onto it by the map that produced it, so
-    // there is nothing to match: every face of the cell takes its alignment from that
-    // one. Only the outer face is ever seen; the rest are inside the solid.
-    const BrushFace* bestMatch = lockedFace ? &*lockedFace : nullptr;
-    if (bestMatch)
-    {
-      face.setAttributes(bestMatch->attributes());
-      if (const auto snapshot = bestMatch->takeUVCoordSystemSnapshot())
-      {
-        face.copyUVCoordSystemFromFace(
-          *snapshot, bestMatch->attributes(), bestMatch->boundary(), WrapStyle::Rotation);
-      }
-      continue;
-    }
-
+    const TemplateFace* bestMatch = nullptr;
     auto bestDot = -2.0;
     for (const auto& templateFace : templateFaces)
     {
-      const auto d = vm::dot(face.normal(), templateFace.normal());
+      const auto d = vm::dot(face.normal(), templateFace.deformed.normal());
       if (d > bestDot)
       {
         bestDot = d;
@@ -215,20 +170,28 @@ void copyFaceAttributes(
       }
     }
 
-    if (bestMatch)
+    if (!bestMatch)
     {
-      face.setAttributes(bestMatch->attributes());
-      if (const auto snapshot = bestMatch->takeUVCoordSystemSnapshot())
-      {
-        // Wrap the source face's UV coordinate system onto this face's plane; for UV
-        // coordinate systems without a snapshot (paraxial), the attributes copied above
-        // already carry the alignment.
-        face.copyUVCoordSystemFromFace(
-          *snapshot,
-          bestMatch->attributes(),
-          bestMatch->boundary(),
-          WrapStyle::Projection);
-      }
+      continue;
+    }
+
+    const auto& alignment =
+      uvMode == SplineUVMode::Lock ? bestMatch->rigid : bestMatch->deformed;
+
+    face.setAttributes(alignment.attributes());
+    if (const auto snapshot = alignment.takeUVCoordSystemSnapshot())
+    {
+      // Wrap the source face's UV coordinate system onto this face's plane; for UV
+      // coordinate systems without a snapshot (paraxial), the attributes copied above
+      // already carry the alignment.
+      //
+      // Locked, the axes are turned onto the new plane rather than reprojected, since
+      // turning them is what a rigid placement does.
+      face.copyUVCoordSystemFromFace(
+        *snapshot,
+        alignment.attributes(),
+        alignment.boundary(),
+        uvMode == SplineUVMode::Lock ? WrapStyle::Rotation : WrapStyle::Projection);
     }
   }
 }
@@ -288,6 +251,7 @@ Result<std::vector<Brush>> createSplineBrushes(
     const auto& b = frames[i + 1];
 
     const auto uvTransform = spanUVTransform(templateBounds, a, b);
+    const auto rigidTransform = rigidSpanTransform(templateBounds, a, b);
 
     for (const auto* templateBrush : templateBrushes)
     {
@@ -300,7 +264,8 @@ Result<std::vector<Brush>> createSplineBrushes(
       apex = apex / double(vertices.size());
       const auto deformedApex = vm::round(deformIntoSpan(apex, templateBounds, a, b));
 
-      const auto templateFaces = placeTemplateFaces(*templateBrush, uvTransform, uvMode);
+      const auto templateFaces =
+        placeTemplateFaces(*templateBrush, uvTransform, rigidTransform);
 
       const auto materialName =
         !templateBrush->faces().empty()
@@ -320,29 +285,6 @@ Result<std::vector<Brush>> createSplineBrushes(
 
         for (size_t j = 1; j + 1 < deformedFaceVertices.size(); ++j)
         {
-          // Locked, this cell's own triangle says exactly what happened to it, so the
-          // template face's UVs are carried across by that rather than by the map
-          // fitted to the span, which would leave them a little off.
-          auto lockedFace = std::optional<BrushFace>{};
-          if (uvMode == SplineUVMode::Lock)
-          {
-            if (
-              const auto transform = triangleTransform(
-                faceVertices[0],
-                faceVertices[j],
-                faceVertices[j + 1],
-                deformedFaceVertices[0],
-                deformedFaceVertices[j],
-                deformedFaceVertices[j + 1]))
-            {
-              auto copy = face;
-              if (copy.transform(*transform, true).is_success())
-              {
-                lockedFace = std::move(copy);
-              }
-            }
-          }
-
           builder.createBrush(
             std::vector<vm::vec3d>{
               deformedApex,
@@ -351,7 +293,7 @@ Result<std::vector<Brush>> createSplineBrushes(
               deformedFaceVertices[j + 1]},
             materialName)
             | kdl::transform([&](Brush brush) {
-                copyFaceAttributes(brush, templateFaces, lockedFace);
+                copyFaceAttributes(brush, templateFaces, uvMode);
                 brushes.push_back(std::move(brush));
               })
             | kdl::transform_error([](const auto&) {

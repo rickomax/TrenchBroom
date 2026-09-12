@@ -45,14 +45,17 @@ enum class SplineUVMode
    */
   Follow,
   /**
-   * The UVs are carried across one triangle at a time, by the map that says exactly
-   * what happened to that triangle.
+   * The UVs are carried across by the copy's placement alone: where it ended up and
+   * which way it is turned, with the squeezing that made it fit its segment left out.
    *
-   * Where the deformation is affine, which is every sweep that only moves and stretches
-   * the template, the copies then show the texture the template showed, to the pixel. A
-   * curve or a roll bends a template face out of its own plane and a face's UVs are
-   * flat, so nothing can be exact everywhere there, but going triangle by triangle
-   * still lands far more of it than one map for the span does.
+   * Moving and turning brushes with texture lock on does not distort their textures,
+   * because a rigid transform cannot distort anything. This is the same thing for a
+   * sweep, and it is what a piece of art wants: a tree stays the shape the template drew
+   * it however much its copy was squeezed to fit.
+   *
+   * A format that stores its UV axes holds this exactly. The paraxial format picks its
+   * axes from each face's own normal, so a turned face cannot hold an undistorted
+   * picture there whatever it is told to do.
    */
   Lock,
 };

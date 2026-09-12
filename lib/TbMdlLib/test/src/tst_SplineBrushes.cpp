@@ -277,11 +277,8 @@ TEST_CASE("createSplineBrushes")
     CHECK(checkedFaces > 0);
   }
 
-  SECTION("Lock UVs puts the template's own UVs on the copies")
+  SECTION("Lock UVs keeps the picture from being squashed")
   {
-    // Both UV formats, since they store alignment differently, and a real texture size,
-    // because without a material a UV wraps modulo a one by one texture and every
-    // alignment looks alike.
     const auto mapFormat = GENERATE(MapFormat::Standard, MapFormat::Valve);
     CAPTURE(mapFormat);
 
@@ -289,152 +286,133 @@ TEST_CASE("createSplineBrushes")
     auto material =
       gl::Material{"some_material", gl::createTextureResource(std::move(texture))};
 
+    // A slanted wedge, like a billboard: its faces are not axis aligned, which is where
+    // the sweep's squeezing shows up in the texture.
     const auto uvBuilder = BrushBuilder{mapFormat, worldBounds};
-    auto uvTemplate =
-      uvBuilder.createCuboid(templateBounds, "some_material") | kdl::value();
+    auto uvTemplate = uvBuilder.createBrush(
+                        std::vector<vm::vec3d>{
+                          {0, -16, -16},
+                          {64, -16, -16},
+                          {0, 16, 16},
+                          {64, 16, 16},
+                          {0, -14, -16},
+                          {64, -14, -16},
+                          {0, 18, 16},
+                          {64, 18, 16}},
+                        "some_material")
+                      | kdl::value();
     for (auto& face : uvTemplate.faces())
     {
       auto attributes = face.attributes();
-      attributes.setScale(vm::vec2f{1.0f, 1.0f});
-      attributes.setOffset(vm::vec2f{11.0f, 7.0f});
-      attributes.setRotation(0.0f);
+      attributes.setScale(vm::vec2f{3.25f, 4.5f});
       face.setAttributes(attributes);
       face.setMaterial(&material);
     }
     const auto uvTemplates = std::vector<const Brush*>{&uvTemplate};
 
-    /** A texture repeats, so a whole tile of difference is the same picture. */
-    const auto wrapped = [](const float delta) {
-      const auto fraction = double(delta) - std::floor(double(delta));
-      return std::min(fraction, 1.0 - fraction);
-    };
-
     /**
-     * How many of the corners the sweep carried across landed on the UV the template
-     * has at the corner they came from, out of how many there were.
-     *
-     * The sweep is walked the way the generator walks it, so every triangle it cut can
-     * be found again by the corners it was cut from, rather than guessed at by normal.
+     * How much the face squashes the picture: the ratio of the two singular values of
+     * the map it makes from world distance to texture distance. One means the picture
+     * keeps its shape in every direction. Both singular values are independent of which
+     * direction is measured, unlike the stretch along any one edge, which changes when
+     * a face is merely turned.
      */
-    const auto countExactCorners = [&](
-                                     const std::vector<SplinePoint>& points,
-                                     const SplineUVMode uvMode) {
-      auto brushes =
-        createSplineBrushes(
-          mapFormat, worldBounds, points, uvTemplates, templateBounds, false, uvMode)
-        | kdl::value();
-      for (auto& brush : brushes)
+    const auto squash = [](const BrushFace& face) {
+      const auto normal = face.normal();
+      auto e1 = vm::cross(normal, vm::vec3d{0, 0, 1});
+      if (vm::squared_length(e1) < 1.0e-6)
       {
-        for (auto& face : brush.faces())
-        {
-          face.setMaterial(&material);
-        }
+        e1 = vm::cross(normal, vm::vec3d{0, 1, 0});
       }
+      e1 = vm::normalize(e1);
+      const auto e2 = vm::normalize(vm::cross(normal, e1));
 
-      const auto frames = buildSweepFrames(points, templateBounds.size().x(), false);
+      const auto origin = face.center();
+      const auto uv = face.uvCoords(origin);
+      const auto du = face.uvCoords(origin + e1) - uv;
+      const auto dv = face.uvCoords(origin + e2) - uv;
 
-      auto exact = 0;
-      auto checked = 0;
-
-      for (size_t i = 0; i + 1 < frames.size(); ++i)
-      {
-        for (const auto& templateFace : uvTemplate.faces())
-        {
-          const auto corners = templateFace.vertexPositions();
-          auto deformed = std::vector<vm::vec3d>{};
-          for (const auto& corner : corners)
-          {
-            deformed.push_back(vm::round(
-              deformIntoSpan(corner, templateBounds, frames[i], frames[i + 1])));
-          }
-
-          for (size_t j = 1; j + 1 < deformed.size(); ++j)
-          {
-            const auto cut =
-              std::vector<vm::vec3d>{deformed[0], deformed[j], deformed[j + 1]};
-            const auto sources =
-              std::vector<vm::vec3d>{corners[0], corners[j], corners[j + 1]};
-
-            for (auto& brush : brushes)
-            {
-              for (auto& face : brush.faces())
-              {
-                const auto have = face.vertexPositions();
-                if (
-                  have.size() != 3 || !std::ranges::all_of(cut, [&](const auto& wanted) {
-                    return std::ranges::any_of(have, [&](const auto& vertex) {
-                      return vm::squared_length(vertex - wanted) < 1.0e-6;
-                    });
-                  }))
-                {
-                  continue;
-                }
-
-                for (size_t k = 0; k < 3; ++k)
-                {
-                  const auto templateUv = templateFace.uvCoords(sources[k]);
-                  const auto uv = face.uvCoords(cut[k]);
-                  if (
-                    wrapped(uv.x() - templateUv.x()) < 1.0e-4
-                    && wrapped(uv.y() - templateUv.y()) < 1.0e-4)
-                  {
-                    ++exact;
-                  }
-                  ++checked;
-                }
-                goto nextTriangle;
-              }
-            }
-          nextTriangle:;
-          }
-        }
-      }
-
-      return std::pair{exact, checked};
+      const auto a = double(du.x());
+      const auto b = double(dv.x());
+      const auto c = double(du.y());
+      const auto d = double(dv.y());
+      const auto mean = (a * a + b * b + c * c + d * d) / 2.0;
+      const auto spread = std::sqrt(std::max(
+        0.0,
+        std::pow((a * a + b * b - c * c - d * d) / 2.0, 2.0)
+          + std::pow(a * c + b * d, 2.0)));
+      const auto larger = std::sqrt(std::max(0.0, mean + spread));
+      const auto smaller = std::sqrt(std::max(0.0, mean - spread));
+      return smaller > 0.0 ? larger / smaller : 0.0;
     };
 
-    SECTION("a sweep the deformation keeps flat reproduces them exactly")
+    auto templateSquash = 0.0;
+    for (const auto& face : uvTemplate.faces())
     {
-      // One template long, so nothing is deformed at all, and not a whole number of
-      // templates long, so every copy is stretched to fit. A stretch is still affine, so
-      // the template's UVs can come through both untouched.
-      const auto straight = std::vector<SplinePoint>{
-        SplinePoint{vm::vec3d{0, 0, 0}},
-        SplinePoint{vm::vec3d{64, 0, 0}},
-      };
-      const auto stretched = std::vector<SplinePoint>{
-        SplinePoint{vm::vec3d{0, 0, 0}},
-        SplinePoint{vm::vec3d{100, 0, 0}},
-      };
-
-      for (const auto& points : {straight, stretched})
-      {
-        const auto [exact, checked] = countExactCorners(points, SplineUVMode::Lock);
-        REQUIRE(checked > 0);
-        CHECK(exact == checked);
-      }
+      templateSquash = std::max(templateSquash, squash(face));
     }
+    REQUIRE(templateSquash > 0.0);
 
-    SECTION("a curve cannot be exact everywhere, but locking gets more of it")
-    {
-      // A curve bends a template face out of its own plane, and a face's UVs are flat,
-      // so no alignment can hold everywhere at once. Carrying the UVs across one
-      // triangle at a time still lands far more corners than fitting one map to the
-      // whole span does.
-      const auto curved = std::vector<SplinePoint>{
-        SplinePoint{vm::vec3d{0, 0, 0}},
-        SplinePoint{vm::vec3d{128, 0, 0}},
-        SplinePoint{vm::vec3d{128, 128, 0}},
+    /** The worst a copy is squashed beyond how the template drew it. */
+    const auto worstDistortion =
+      [&](const std::vector<SplinePoint>& points, const SplineUVMode uvMode) {
+        auto brushes =
+          createSplineBrushes(
+            mapFormat, worldBounds, points, uvTemplates, templateBounds, false, uvMode)
+          | kdl::value();
+
+        auto worst = 1.0;
+        for (auto& brush : brushes)
+        {
+          for (auto& face : brush.faces())
+          {
+            face.setMaterial(&material);
+            if (const auto faceSquash = squash(face); faceSquash > 0.0)
+            {
+              const auto relative = faceSquash / templateSquash;
+              worst = std::max(worst, std::max(relative, 1.0 / relative));
+            }
+          }
+        }
+        return worst;
       };
 
-      const auto [lockedExact, lockedChecked] =
-        countExactCorners(curved, SplineUVMode::Lock);
-      const auto [followedExact, followedChecked] =
-        countExactCorners(curved, SplineUVMode::Follow);
+    // A segment that is not a whole number of templates long, so the sweep squeezes
+    // every copy to make it fit, and a long curving run like a track, where how much it
+    // squeezes changes from copy to copy.
+    const auto stretched = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{100, 0, 0}},
+    };
+    const auto curved = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{1792, 288, 0}},
+      SplinePoint{vm::vec3d{4096, 2304, 0}},
+    };
 
-      REQUIRE(lockedChecked > 0);
-      REQUIRE(lockedChecked == followedChecked);
-      CHECK(lockedExact > followedExact);
+    for (const auto& points : {stretched, curved})
+    {
+      const auto locked = worstDistortion(points, SplineUVMode::Lock);
+      const auto followed = worstDistortion(points, SplineUVMode::Follow);
+
+      // Following lets the sweep's squeezing through into the picture, in both formats.
+      CHECK(followed > 1.01);
+
+      if (mapFormat == MapFormat::Valve)
+      {
+        // A format that stores its UV axes can hold the template's alignment exactly, so
+        // the picture comes out as the template drew it however the copy was squeezed.
+        CHECK(locked < 1.01);
+      }
+      else
+      {
+        // The paraxial format picks its UV axes from the face's own normal, so a turned
+        // face cannot hold an undistorted picture whatever it is told to do. Locking
+        // takes most of the squeezing out of a long curve there, but can leave more of
+        // it in than following does on a short one, so there is no promise to make
+        // beyond its staying in the same range.
+        CHECK(locked < 2.0);
+      }
     }
   }
 
