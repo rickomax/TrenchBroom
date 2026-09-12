@@ -153,6 +153,17 @@ void SplineToolPage::createGui()
   layout->addWidget(m_closed);
   layout->addWidget(m_lockUVs);
   layout->addWidget(m_keepSize);
+
+  // Neither of these is needed any more. Both were answers to generated faces losing
+  // the template's texture offset, which happened because they were given their
+  // material only after their UVs had been set, and an offset is kept modulo the
+  // texture: a face that thinks its texture is one pixel across keeps nothing. With the
+  // material in place first, a sweep left to itself reproduces the template's alignment
+  // and its copies still meet, which is what both options were reaching for and neither
+  // managed as well. They are hidden rather than removed so that a map that has one of
+  // them set still reads and writes it.
+  m_lockUVs->setVisible(false);
+  m_keepSize->setVisible(false);
   layout->addWidget(m_removePointButton);
   layout->addWidget(m_breakButton);
   layout->addStretch();

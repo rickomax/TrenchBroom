@@ -279,9 +279,10 @@ Result<std::vector<Brush>> createSplineBrushes(
   for (size_t i = 0; i < frames.size() - 1; ++i)
   {
     const auto& a = frames[i];
-    // Kept at its own size, the copy ends a template's length along the span rather than
-    // at the far end of it, and carries the start frame's orientation the whole way, so
-    // the span neither stretches nor bends it.
+    // Kept at its own size, the copy runs a template's length straight along the span
+    // rather than bending around it, so the curve neither stretches nor bends it. It
+    // therefore stops short of where the span ends, by however much the curve bulges
+    // away from the straight line across it.
     const auto naturalEnd = naturalEndFrame(a, frames[i + 1], forwardSize);
     const auto& b = keepTemplateSize ? naturalEnd : frames[i + 1];
 
