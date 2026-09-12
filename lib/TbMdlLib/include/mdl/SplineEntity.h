@@ -47,6 +47,9 @@ constexpr auto Subdivisions = "_spline_subdivisions";
 /** Present with value "1" if the spline is closed (the last point connects back to
  * the first). */
 constexpr auto Closed = "_spline_closed";
+/** Present with value "1" if the copies keep the template's UV alignment rather than
+ * having it realigned onto the geometry the sweep produces. */
+constexpr auto LockUVs = "_spline_lock_uvs";
 /** Persistent ID of the group whose brushes serve as the deformation template. */
 constexpr auto TemplateGroupId = "_spline_template_group";
 /** Per brush property holding a snapshot of a template brush; the index is appended,
@@ -86,8 +89,11 @@ struct SplineEntityData
   size_t subdivisions = SplineDefaultSubdivisions;
   std::optional<IdType> templateGroupId;
   bool closed = false;
+  /** Whether every copy keeps the alignment the template was authored with. */
+  bool lockUVs = false;
 
-  kdl_reflect_decl(SplineEntityData, points, subdivisions, templateGroupId, closed);
+  kdl_reflect_decl(
+    SplineEntityData, points, subdivisions, templateGroupId, closed, lockUVs);
 };
 
 /**

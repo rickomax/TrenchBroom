@@ -106,6 +106,9 @@ private:
   /** Whether the spline is closed, i.e. the last point connects back to the first. */
   bool m_closed = false;
 
+  /** Whether the copies keep the alignment the template was authored with. */
+  bool m_lockUVs = false;
+
   /** The template is either a group (referenced by its persistent ID) or a snapshot
    * of individually linked brushes and point entities; at most one of these is set. */
   std::optional<mdl::IdType> m_templateGroupId;
@@ -252,6 +255,15 @@ public: // closing
    * and brushes are created on that segment as well. */
   bool closed() const;
   void setClosed(bool closed);
+
+public: // UVs
+  /**
+   * Whether every generated copy keeps the alignment the template was authored with,
+   * rather than having the template's UVs realigned onto the geometry the sweep
+   * produces. See mdl::SplineUVMode.
+   */
+  bool lockUVs() const;
+  void setLockUVs(bool lockUVs);
 
 public: // template group linkage
   size_t subdivisions() const;

@@ -111,6 +111,16 @@ void SplineToolPage::createGui()
        "are created on that segment as well"));
   m_closed->setFocusPolicy(Qt::NoFocus);
 
+  m_lockUVs = new QCheckBox{tr("Lock UVs")};
+  m_lockUVs->setToolTip(
+    tr("Give every copy the alignment the template was authored with: the same offset, "
+       "scale and rotation on all of them, so a piece of trim lined up by hand comes "
+       "out lined up the same way all the way along. Off, the template's UVs are "
+       "realigned onto the geometry the sweep produces, which keeps the pattern running "
+       "from one copy to the next but leaves a stretched or turned copy with an "
+       "alignment the template did not have."));
+  m_lockUVs->setFocusPolicy(Qt::NoFocus);
+
   auto* layout = new QHBoxLayout{};
   layout->setContentsMargins(0, 0, 0, 0);
 
@@ -132,6 +142,7 @@ void SplineToolPage::createGui()
   layout->addWidget(new QLabel{tr("Lock:")});
   layout->addWidget(m_lockTwist);
   layout->addWidget(m_closed);
+  layout->addWidget(m_lockUVs);
   layout->addWidget(m_removePointButton);
   layout->addWidget(m_breakButton);
   layout->addStretch();
@@ -194,6 +205,12 @@ void SplineToolPage::createGui()
       m_tool.setClosed(checked);
     }
   });
+  connect(m_lockUVs, &QCheckBox::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setLockUVs(checked);
+    }
+  });
 }
 
 void SplineToolPage::connectObservers()
@@ -236,6 +253,10 @@ void SplineToolPage::updateControls()
   m_removePointButton->setEnabled(m_tool.canRemovePoint());
   m_closed->setEnabled(m_tool.hasPoints());
   m_closed->setChecked(m_tool.closed());
+
+  // Nothing to align until a template says what is being swept.
+  m_lockUVs->setEnabled(m_tool.hasTemplate());
+  m_lockUVs->setChecked(m_tool.lockUVs());
 
   m_updatingControls = false;
 }

@@ -34,6 +34,7 @@
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 
 namespace tb::mdl
 {
@@ -271,81 +272,114 @@ TEST_CASE("createSplineBrushes")
     CHECK(checkedFaces > 0);
   }
 
-  SECTION("texture lock decides whether the template's UVs follow the curve")
+  SECTION("Lock UVs keeps the alignment the template was authored with")
   {
-    auto uvTemplate = makeCuboid(templateBounds, "some_material");
+    // Both UV formats, because they take different paths through the sweep: the
+    // paraxial one derives its axes from each face's normal and carries only the
+    // attributes, while the parallel one stores its axes and has to have them turned
+    // onto the copy rather than reprojected.
+    const auto mapFormat = GENERATE(MapFormat::Standard, MapFormat::Valve);
+    CAPTURE(mapFormat);
+
+    const auto uvBuilder = BrushBuilder{mapFormat, worldBounds};
+    auto uvTemplate =
+      uvBuilder.createCuboid(templateBounds, "some_material") | kdl::value();
     for (auto& face : uvTemplate.faces())
     {
       auto attributes = face.attributes();
-      attributes.setScale(vm::vec2f{2.0f, 2.0f});
-      attributes.setRotation(30.0f);
+      attributes.setScale(vm::vec2f{1.0f, 1.0f});
+      attributes.setRotation(0.0f);
       face.setAttributes(attributes);
     }
     const auto uvTemplates = std::vector<const Brush*>{&uvTemplate};
 
-    // A right angle, so the second leg's faces are turned a quarter turn from the
-    // template's: a locked texture has to be realigned to stay on the surface, and an
-    // unlocked one has not.
-    const auto points = std::vector<SplinePoint>{
-      SplinePoint{vm::vec3d{0, 0, 0}},
-      SplinePoint{vm::vec3d{192, 0, 0}},
-      SplinePoint{vm::vec3d{192, 192, 0}},
-    };
-
-    const auto sweep = [&](const bool alignmentLock) {
+    const auto sweep = [&](
+                         const std::vector<SplinePoint>& points,
+                         const SplineUVMode uvMode) {
       return createSplineBrushes(
-               MapFormat::Standard,
-               worldBounds,
-               points,
-               uvTemplates,
-               templateBounds,
-               false,
-               alignmentLock)
+               mapFormat, worldBounds, points, uvTemplates, templateBounds, false, uvMode)
              | kdl::value();
     };
 
     const auto authored = [](const BrushFace& face) {
-      return face.attributes().scale() == vm::vec2f{2.0f, 2.0f}
-             && face.attributes().rotation() == 30.0f;
+      return face.attributes().scale() == vm::vec2f{1.0f, 1.0f}
+             && face.attributes().rotation() == 0.0f;
     };
 
-    SECTION("with it off the copies keep the alignment the template was authored with")
-    {
-      const auto brushes = sweep(false);
-      REQUIRE(!brushes.empty());
-
-      auto checkedFaces = 0;
-      for (const auto& brush : brushes)
-      {
-        for (const auto& face : brush.faces())
-        {
-          CHECK(authored(face));
-          CHECK(face.attributes().materialName() == "some_material");
-          ++checkedFaces;
-        }
-      }
-      CHECK(checkedFaces > 0);
-    }
-
-    SECTION("with it on the UVs are realigned onto the deformed geometry")
-    {
-      const auto brushes = sweep(true);
-      REQUIRE(!brushes.empty());
-
-      // Somewhere around the corner the alignment had to give, or the texture would
-      // not have stayed on the surface.
-      auto realignedFaces = 0;
+    const auto countDrifted = [&](const std::vector<Brush>& brushes) {
+      auto drifted = 0;
       for (const auto& brush : brushes)
       {
         for (const auto& face : brush.faces())
         {
           if (!authored(face))
           {
-            ++realignedFaces;
+            ++drifted;
           }
         }
       }
-      CHECK(realignedFaces > 0);
+      return drifted;
+    };
+
+    // A segment that is not a whole number of templates long, so every copy is
+    // stretched to fit it, and a right angle, so every copy around it is turned. Both
+    // are deformations the alignment cannot come through untouched.
+    const auto stretched = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{100, 0, 0}},
+    };
+    const auto curved = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{192, 0, 0}},
+      SplinePoint{vm::vec3d{192, 192, 0}},
+    };
+    const auto rolled = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{128, 0, 0}, 45.0},
+    };
+
+    SECTION("locked, every copy carries the template's scale and rotation")
+    {
+      for (const auto& points : {stretched, curved, rolled})
+      {
+        const auto brushes = sweep(points, SplineUVMode::Lock);
+        REQUIRE(!brushes.empty());
+        CHECK(countDrifted(brushes) == 0);
+      }
+    }
+
+    SECTION("following, a stretched or turned copy is realigned away from it")
+    {
+      for (const auto& points : {stretched, curved})
+      {
+        const auto brushes = sweep(points, SplineUVMode::Follow);
+        REQUIRE(!brushes.empty());
+        CHECK(countDrifted(brushes) > 0);
+      }
+    }
+
+    SECTION("even a sweep that deforms nothing needs locking in the parallel format")
+    {
+      // One segment exactly one template long, so the deformation is the identity.
+      const auto points = std::vector<SplinePoint>{
+        SplinePoint{vm::vec3d{0, 0, 0}},
+        SplinePoint{vm::vec3d{64, 0, 0}},
+      };
+
+      CHECK(countDrifted(sweep(points, SplineUVMode::Lock)) == 0);
+
+      // Following leaves the paraxial format alone, since there is nothing to realign,
+      // but it reprojects the parallel format's stored axes onto every copy, which
+      // moves the alignment even though the geometry did not move at all.
+      const auto followed = countDrifted(sweep(points, SplineUVMode::Follow));
+      if (mapFormat == MapFormat::Standard)
+      {
+        CHECK(followed == 0);
+      }
+      else
+      {
+        CHECK(followed > 0);
+      }
     }
   }
 

@@ -25,7 +25,6 @@
 #include "gl/Camera.h"
 #include "mdl/Brush.h"
 #include "mdl/BrushNode.h"
-#include "mdl/EditorContext.h"
 #include "mdl/Entity.h"
 #include "mdl/EntityNode.h"
 #include "mdl/GroupNode.h"
@@ -738,6 +737,20 @@ void SplineTool::setClosed(const bool closed)
   }
 }
 
+bool SplineTool::lockUVs() const
+{
+  return m_lockUVs;
+}
+
+void SplineTool::setLockUVs(const bool lockUVs)
+{
+  if (m_lockUVs != lockUVs)
+  {
+    m_lockUVs = lockUVs;
+    commitSpline("Lock Spline UVs");
+  }
+}
+
 size_t SplineTool::subdivisions() const
 {
   return m_subdivisions;
@@ -1011,6 +1024,7 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
     m_subdivisions = data->subdivisions;
     m_templateGroupId = data->templateGroupId;
     m_closed = data->closed;
+    m_lockUVs = data->lockUVs;
     m_templateBrushes = mdl::parseSplineTemplateBrushes(
       splineNode->entity(), map.worldNode().mapFormat(), map.worldBounds());
     m_templateEntities = mdl::parseSplineTemplateEntities(splineNode->entity());
@@ -1033,6 +1047,7 @@ void SplineTool::clearSpline()
   m_points.clear();
   m_subdivisions = mdl::SplineDefaultSubdivisions;
   m_closed = false;
+  m_lockUVs = false;
   m_templateGroupId = std::nullopt;
   m_templateBrushes.clear();
   m_templateEntities.clear();
@@ -1068,8 +1083,8 @@ void SplineTool::commitSpline(const std::string& commandName)
     return;
   }
 
-  const auto data =
-    mdl::SplineEntityData{m_points, m_subdivisions, m_templateGroupId, m_closed};
+  const auto data = mdl::SplineEntityData{
+    m_points, m_subdivisions, m_templateGroupId, m_closed, m_lockUVs};
   auto entity = mdl::writeSplineTemplateEntities(
     mdl::writeSplineTemplateBrushes(
       mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data),
@@ -1214,10 +1229,7 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes(
            contents.brushes,
            contents.bounds,
            m_closed,
-           // Texture lock decides whether the template's UVs are carried onto the
-           // copies. It is read as the spline is generated, so toggling it takes effect
-           // on the next change to the spline rather than rewriting one already drawn.
-           map.editorContext().alignmentLock())
+           m_lockUVs ? mdl::SplineUVMode::Lock : mdl::SplineUVMode::Follow)
          | kdl::transform([](auto brushes) {
              return brushes | std::views::transform([](auto& brush) {
                       return static_cast<mdl::Node*>(

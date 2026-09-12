@@ -83,23 +83,23 @@ vm::mat4x4d spanUVTransform(
 }
 
 /**
- * Returns copies of the template brush's faces, transformed into the span's world
- * space, which is what the generated faces take their attributes and alignment from.
+ * The template brush's faces moved into the span's world space, which is what the
+ * generated faces take their attributes and alignment from.
  *
- * With alignment lock on, the UVs are carried across with the geometry, so the copy
- * shows the same part of the texture the template did. With it off, only the axes
- * follow the new plane and the alignment stays as authored. Faces whose transformation
- * fails are returned untransformed.
+ * Whether the UVs come with them is the whole of the difference between the two modes:
+ * following carries them through the deformation, which realigns the texture onto the
+ * geometry it produces, and locking leaves them where the template had them. A face
+ * whose transformation fails is left where it was.
  */
-std::vector<BrushFace> transformTemplateFaces(
-  const Brush& templateBrush, const vm::mat4x4d& transform, const bool alignmentLock)
+std::vector<BrushFace> placeTemplateFaces(
+  const Brush& templateBrush, const vm::mat4x4d& transform, const SplineUVMode uvMode)
 {
   auto faces = std::vector<BrushFace>{};
   faces.reserve(templateBrush.faceCount());
   for (const auto& face : templateBrush.faces())
   {
     auto copy = face;
-    if (copy.transform(transform, alignmentLock).is_error())
+    if (copy.transform(transform, uvMode == SplineUVMode::Follow).is_error())
     {
       copy = face;
     }
@@ -109,9 +109,9 @@ std::vector<BrushFace> transformTemplateFaces(
 }
 
 /**
- * Copies the attributes and the UV alignment of the best matching transformed
- * template face onto each face of the given brush. Faces are matched by normal in
- * world space, since the template faces have already been transformed into the span.
+ * Copies the attributes and the UV alignment of the best matching template face onto
+ * each face of the given brush. Faces are matched by normal in world space, since the
+ * template faces have already been moved into the span.
  */
 void copyFaceAttributes(Brush& brush, const std::vector<BrushFace>& templateFaces)
 {
@@ -135,8 +135,8 @@ void copyFaceAttributes(Brush& brush, const std::vector<BrushFace>& templateFace
       if (const auto snapshot = bestMatch->takeUVCoordSystemSnapshot())
       {
         // Wrap the source face's UV coordinate system onto this face's plane; for UV
-        // coordinate systems without a snapshot (paraxial), the attributes realigned
-        // by the transformation above already carry the alignment.
+        // coordinate systems without a snapshot (paraxial), the attributes copied above
+        // already carry the alignment.
         face.copyUVCoordSystemFromFace(
           *snapshot,
           bestMatch->attributes(),
@@ -156,7 +156,7 @@ Result<std::vector<Brush>> createSplineBrushes(
   const std::vector<const Brush*>& templateBrushes,
   const vm::bbox3d& templateBounds,
   const bool closed,
-  const bool alignmentLock)
+  const SplineUVMode uvMode)
 {
   if (templateBounds.size().x() <= 0.0)
   {
@@ -214,8 +214,7 @@ Result<std::vector<Brush>> createSplineBrushes(
       apex = apex / double(vertices.size());
       const auto deformedApex = vm::round(deformIntoSpan(apex, templateBounds, a, b));
 
-      const auto templateFaces =
-        transformTemplateFaces(*templateBrush, uvTransform, alignmentLock);
+      const auto templateFaces = placeTemplateFaces(*templateBrush, uvTransform, uvMode);
 
       const auto materialName =
         !templateBrush->faces().empty()

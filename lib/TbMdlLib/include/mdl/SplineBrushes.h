@@ -32,6 +32,32 @@ class Brush;
 enum class MapFormat;
 
 /**
+ * What the sweep does with the UVs of the template faces it copies.
+ */
+enum class SplineUVMode
+{
+  /**
+   * The UVs are carried through the deformation and realigned onto the geometry it
+   * produces, so a pattern runs along the curve.
+   *
+   * The deformation is not rigid, so the alignment cannot come out of it untouched: a
+   * stretched span stretches the texture with it, and a turn or a roll leaves the
+   * copies with rotations and offsets the template did not have.
+   */
+  Follow,
+  /**
+   * Every copy carries the alignment the template was authored with: the same offset,
+   * scale and rotation on every one of them, and, in a format that stores UV axes, those
+   * axes turned to follow the copy rather than reprojected.
+   *
+   * A piece of trim lined up by hand on the template comes out lined up the same way all
+   * the way along, at the cost of the pattern not being continuous from one copy to the
+   * next.
+   */
+  Lock,
+};
+
+/**
  * Creates brushes by sweeping the given template (profile) brushes along the spline
  * through the given control points.
  *
@@ -51,11 +77,7 @@ enum class MapFormat;
  * If closed is true, the spline wraps around: the segment from the last control point
  * back to the first is swept as well.
  *
- * alignmentLock is the editor's texture lock: with it on, a template face's UVs are
- * carried onto the copy it becomes, so a pattern runs along the curve the way it ran
- * along the template. With it off, the copies keep the alignment the template was
- * authored with and the geometry moves under it, which is what texture lock means
- * everywhere else.
+ * uvMode decides what happens to the template's UVs. See SplineUVMode.
  *
  * Returns an error if the lattice or the spline is degenerate, or if no brushes
  * could be created.
@@ -67,6 +89,6 @@ Result<std::vector<Brush>> createSplineBrushes(
   const std::vector<const Brush*>& templateBrushes,
   const vm::bbox3d& templateBounds,
   bool closed = false,
-  bool alignmentLock = true);
+  SplineUVMode uvMode = SplineUVMode::Follow);
 
 } // namespace tb::mdl
