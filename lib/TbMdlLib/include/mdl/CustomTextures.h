@@ -41,6 +41,22 @@ namespace mdl
 {
 class Palette;
 
+/**
+ * What the material browser groups the map's own textures under, to set them apart from
+ * the wads it loaded.
+ */
+inline const auto CustomTextureCollectionName = std::filesystem::path{"map textures"};
+
+/**
+ * The worldspawn property naming the wad the map's own textures are written to.
+ *
+ * It is what says whether the map already has a wad of its own: without it, saving a map
+ * that carries textures asks where to put one. Under the _tb_ prefix, so a compiler
+ * never sees it, but kept in the map file, which is what lets a reopened map write its
+ * next texture to the same wad.
+ */
+constexpr auto CustomTextureWadPropertyKey = "_tb_texture_wad";
+
 /** A mip texture carries four levels, each half the size of the one before. */
 constexpr auto CustomTextureMipLevels = size_t(4);
 

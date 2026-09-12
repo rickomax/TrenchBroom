@@ -23,14 +23,18 @@
 #include "SimpleParserStatus.h"
 #include "fs/DiskIO.h"
 #include "fs/PathInfo.h"
+#include "gl/Material.h"
+#include "gl/MaterialCollection.h"
 #include "gl/MaterialManager.h"
 #include "gl/ResourceManager.h"
+#include "gl/TextureResource.h"
 #include "mdl/AssetUtils.h"
 #include "mdl/BrushBuilder.h"
 #include "mdl/BrushFace.h"
 #include "mdl/BrushNode.h"
 #include "mdl/Command.h"
 #include "mdl/CommandProcessor.h"
+#include "mdl/CustomTextures.h"
 #include "mdl/EditorContext.h"
 #include "mdl/EmptyBrushEntityValidator.h"
 #include "mdl/EmptyGroupValidator.h"
@@ -644,17 +648,15 @@ Result<std::unique_ptr<Map>> Map::loadMap(
              // The spline and terrain tools' data lives next to the map. Without it the
              // generated brushes simply stay in the map as ordinary geometry.
              const auto sidecarPath = sidecarPathForMap(path);
-             readSidecarFile(sidecarPath)
-               | kdl::transform([&](const auto& records) {
-                   applySidecarRecords(*worldNode, records);
-                   // A map written before the sidecar existed carries its tool data
-                   // inline and has no ids, so they are handed out here.
-                   assignSidecarIds(*worldNode);
-                 })
-               | kdl::transform_error([&](const auto& e) {
-                   logger.error()
-                     << "Could not load tool data from " << sidecarPath << ": " << e.msg;
-                 });
+             readSidecarFile(sidecarPath) | kdl::transform([&](const auto& records) {
+               applySidecarRecords(*worldNode, records);
+               // A map written before the sidecar existed carries its tool data
+               // inline and has no ids, so they are handed out here.
+               assignSidecarIds(*worldNode);
+             }) | kdl::transform_error([&](const auto& e) {
+               logger.error() << "Could not load tool data from " << sidecarPath << ": "
+                              << e.msg;
+             });
              return worldNode;
            })
          | kdl::transform([&](auto worldNode) {
@@ -1243,6 +1245,88 @@ void Map::clearEntityDefinitions()
   m_entityDefinitionManager->clear();
 }
 
+const std::vector<CustomTexture>& Map::customTextures() const
+{
+  return m_customTextures;
+}
+
+void Map::addCustomTexture(CustomTexture customTexture)
+{
+  // A texture of the same name replaces the one that was there, so dropping a changed
+  // image over an earlier one updates it rather than being ignored for clashing.
+  const auto existing = std::ranges::find_if(m_customTextures, [&](const auto& other) {
+    return other.name == customTexture.name;
+  });
+
+  if (existing != m_customTextures.end())
+  {
+    *existing = std::move(customTexture);
+  }
+  else
+  {
+    m_customTextures.push_back(std::move(customTexture));
+  }
+
+  reloadMaterials();
+  setMaterials();
+}
+
+void Map::clearCustomTextures()
+{
+  if (!m_customTextures.empty())
+  {
+    m_customTextures.clear();
+    reloadMaterials();
+    setMaterials();
+  }
+}
+
+std::optional<Palette> Map::materialPalette() const
+{
+  return loadMaterialPalette(*m_gameFileSystem, gameInfo().gameConfig.materialConfig)
+         | kdl::transform_error([&](auto e) {
+             m_logger.error() << "Could not load the game's palette: " + e.msg;
+             return std::optional<Palette>{};
+           })
+         | kdl::value();
+}
+
+std::optional<gl::MaterialCollection> Map::makeCustomTextureCollection() const
+{
+  if (m_customTextures.empty())
+  {
+    return std::nullopt;
+  }
+
+  const auto palette = materialPalette();
+  if (!palette)
+  {
+    m_logger.error() << "Cannot show textures brought in from images: this game has no "
+                        "palette to draw them with";
+    return std::nullopt;
+  }
+
+  auto materials = std::vector<gl::Material>{};
+  materials.reserve(m_customTextures.size());
+
+  for (const auto& customTexture : m_customTextures)
+  {
+    createCustomTextureImage(customTexture, *palette) | kdl::transform([&](auto texture) {
+      materials.emplace_back(
+        customTexture.name, gl::createTextureResource(std::move(texture)));
+    }) | kdl::transform_error([&](auto e) {
+      m_logger.error() << "Could not show '" + customTexture.name + "': " + e.msg;
+    });
+  }
+
+  if (materials.empty())
+  {
+    return std::nullopt;
+  }
+
+  return gl::MaterialCollection{CustomTextureCollectionName, std::move(materials)};
+}
+
 void Map::reloadMaterials()
 {
   clearMaterials();
@@ -1277,6 +1361,12 @@ void Map::loadMaterials()
     taskManager(),
     m_logger)
     | kdl::transform([&](auto materialCollections) {
+        // The textures the map carries itself go in last, so that a wad holding a
+        // texture of the same name does not hide the one the mapper just brought in.
+        if (auto customCollection = makeCustomTextureCollection())
+        {
+          materialCollections.push_back(std::move(*customCollection));
+        }
         m_materialManager->setMaterialCollections(std::move(materialCollections));
       })
     | kdl::transform_error([&](auto e) {

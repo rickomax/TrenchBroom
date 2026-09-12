@@ -59,10 +59,7 @@
 namespace tb::mdl
 {
 
-namespace
-{
-
-Result<std::optional<Palette>> loadPalette(
+Result<std::optional<Palette>> loadMaterialPalette(
   const fs::FileSystem& fs, const MaterialConfig& materialConfig)
 {
   if (materialConfig.palette.empty())
@@ -75,6 +72,9 @@ Result<std::optional<Palette>> loadPalette(
          })
          | kdl::transform([](auto palette) { return std::optional{std::move(palette)}; });
 }
+
+namespace
+{
 
 bool shouldExclude(
   const std::string& materialName, const std::vector<std::string>& patterns)
@@ -404,7 +404,7 @@ Result<std::vector<gl::MaterialCollection>> loadMaterialCollections(
                     })
                     | kdl::views::as_rvalue | kdl::ranges::to<std::vector>();
            })
-         | kdl::join(loadPalette(fs, materialConfig))
+         | kdl::join(loadMaterialPalette(fs, materialConfig))
          | kdl::and_then([&](auto shaders, auto palette) {
              return findAllMaterialPaths(fs, materialConfig, shaders)
                     | kdl::and_then([&](const auto& materialPaths) {

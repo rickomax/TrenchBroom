@@ -52,6 +52,13 @@ namespace mdl
 {
 struct MaterialConfig;
 
+/**
+ * The palette the given material configuration names, or nullopt if it names none
+ * because the game's textures carry their own colours.
+ */
+Result<std::optional<Palette>> loadMaterialPalette(
+  const fs::FileSystem& fs, const MaterialConfig& materialConfig);
+
 Result<gl::Material> loadMaterial(
   const fs::FileSystem& fs,
   const MaterialConfig& materialConfig,
