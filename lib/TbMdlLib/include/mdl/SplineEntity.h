@@ -50,6 +50,9 @@ constexpr auto Closed = "_spline_closed";
 /** Present with value "1" if the copies keep the template's UV alignment rather than
  * having it realigned onto the geometry the sweep produces. */
 constexpr auto LockUVs = "_spline_lock_uvs";
+/** Present with value "1" if the copies are placed at the template's own size instead
+ * of being stretched to fill their spans. */
+constexpr auto KeepSize = "_spline_keep_size";
 /** Persistent ID of the group whose brushes serve as the deformation template. */
 constexpr auto TemplateGroupId = "_spline_template_group";
 /** Per brush property holding a snapshot of a template brush; the index is appended,
@@ -91,9 +94,11 @@ struct SplineEntityData
   bool closed = false;
   /** Whether every copy keeps the alignment the template was authored with. */
   bool lockUVs = false;
+  /** Whether every copy is placed at the template's own size rather than stretched. */
+  bool keepSize = false;
 
   kdl_reflect_decl(
-    SplineEntityData, points, subdivisions, templateGroupId, closed, lockUVs);
+    SplineEntityData, points, subdivisions, templateGroupId, closed, lockUVs, keepSize);
 };
 
 /**

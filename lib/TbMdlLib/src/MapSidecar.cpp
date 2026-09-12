@@ -119,6 +119,7 @@ const std::vector<std::string>& sidecarPropertyPrefixes()
     SplinePropertyKeys::Subdivisions,
     SplinePropertyKeys::Closed,
     SplinePropertyKeys::LockUVs,
+    SplinePropertyKeys::KeepSize,
     SplinePropertyKeys::TemplateGroupId,
   };
   return prefixes;

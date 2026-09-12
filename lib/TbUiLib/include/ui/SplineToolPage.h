@@ -53,6 +53,7 @@ private:
   QPushButton* m_removePointButton = nullptr;
   QCheckBox* m_closed = nullptr;
   QCheckBox* m_lockUVs = nullptr;
+  QCheckBox* m_keepSize = nullptr;
 
   bool m_updatingControls = false;
 

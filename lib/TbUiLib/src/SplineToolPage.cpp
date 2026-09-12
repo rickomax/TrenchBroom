@@ -120,6 +120,16 @@ void SplineToolPage::createGui()
        "from each face, so a turned face keeps some of the squeeze there."));
   m_lockUVs->setFocusPolicy(Qt::NoFocus);
 
+  m_keepSize = new QCheckBox{tr("Keep size")};
+  m_keepSize->setToolTip(
+    tr("Place every copy at the size the template is drawn at, instead of stretching it "
+       "to fill its part of the curve. Copies are then identical to the template and to "
+       "each other, with the texture sitting on them exactly as it sits on the template, "
+       "and the curve is divided so that one copy never runs into the next. Use it for "
+       "something the spline is scattering rather than building, a tree or a lamp post, "
+       "where a copy squeezed to fit is a copy of the wrong shape."));
+  m_keepSize->setFocusPolicy(Qt::NoFocus);
+
   auto* layout = new QHBoxLayout{};
   layout->setContentsMargins(0, 0, 0, 0);
 
@@ -142,6 +152,7 @@ void SplineToolPage::createGui()
   layout->addWidget(m_lockTwist);
   layout->addWidget(m_closed);
   layout->addWidget(m_lockUVs);
+  layout->addWidget(m_keepSize);
   layout->addWidget(m_removePointButton);
   layout->addWidget(m_breakButton);
   layout->addStretch();
@@ -210,6 +221,12 @@ void SplineToolPage::createGui()
       m_tool.setLockUVs(checked);
     }
   });
+  connect(m_keepSize, &QCheckBox::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setKeepSize(checked);
+    }
+  });
 }
 
 void SplineToolPage::connectObservers()
@@ -256,6 +273,8 @@ void SplineToolPage::updateControls()
   // Nothing to align until a template says what is being swept.
   m_lockUVs->setEnabled(m_tool.hasTemplate());
   m_lockUVs->setChecked(m_tool.lockUVs());
+  m_keepSize->setEnabled(m_tool.hasTemplate());
+  m_keepSize->setChecked(m_tool.keepSize());
 
   m_updatingControls = false;
 }

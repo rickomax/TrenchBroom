@@ -109,6 +109,9 @@ private:
   /** Whether the copies keep the alignment the template was authored with. */
   bool m_lockUVs = false;
 
+  /** Whether the copies are placed at the template's own size. */
+  bool m_keepSize = false;
+
   /** The template is either a group (referenced by its persistent ID) or a snapshot
    * of individually linked brushes and point entities; at most one of these is set. */
   std::optional<mdl::IdType> m_templateGroupId;
@@ -264,6 +267,13 @@ public: // UVs
    */
   bool lockUVs() const;
   void setLockUVs(bool lockUVs);
+
+  /**
+   * Whether every copy is placed at the size the template is drawn at, rather than
+   * stretched to fill its span. See mdl::createSplineBrushes.
+   */
+  bool keepSize() const;
+  void setKeepSize(bool keepSize);
 
 public: // template group linkage
   size_t subdivisions() const;

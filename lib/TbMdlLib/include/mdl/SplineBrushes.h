@@ -82,6 +82,14 @@ enum class SplineUVMode
  *
  * uvMode decides what happens to the template's UVs. See SplineUVMode.
  *
+ * With keepTemplateSize, a copy is placed at the size the template is drawn at instead
+ * of being stretched to fill its span, and the span is left a little long rather than a
+ * little short so that one copy never runs into the next. Each copy is then a rigid
+ * placement of the template: same shape, same size, and so the same texture on it,
+ * fitted to its faces exactly as the template's is. Use it for something the sweep is
+ * scattering rather than building, a tree or a lamp post, where a copy squeezed to fit
+ * is a copy of the wrong shape.
+ *
  * Returns an error if the lattice or the spline is degenerate, or if no brushes
  * could be created.
  */
@@ -92,6 +100,7 @@ Result<std::vector<Brush>> createSplineBrushes(
   const std::vector<const Brush*>& templateBrushes,
   const vm::bbox3d& templateBounds,
   bool closed = false,
-  SplineUVMode uvMode = SplineUVMode::Follow);
+  SplineUVMode uvMode = SplineUVMode::Follow,
+  bool keepTemplateSize = false);
 
 } // namespace tb::mdl

@@ -751,6 +751,20 @@ void SplineTool::setLockUVs(const bool lockUVs)
   }
 }
 
+bool SplineTool::keepSize() const
+{
+  return m_keepSize;
+}
+
+void SplineTool::setKeepSize(const bool keepSize)
+{
+  if (m_keepSize != keepSize)
+  {
+    m_keepSize = keepSize;
+    commitSpline("Keep Spline Template Size");
+  }
+}
+
 size_t SplineTool::subdivisions() const
 {
   return m_subdivisions;
@@ -1025,6 +1039,7 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
     m_templateGroupId = data->templateGroupId;
     m_closed = data->closed;
     m_lockUVs = data->lockUVs;
+    m_keepSize = data->keepSize;
     m_templateBrushes = mdl::parseSplineTemplateBrushes(
       splineNode->entity(), map.worldNode().mapFormat(), map.worldBounds());
     m_templateEntities = mdl::parseSplineTemplateEntities(splineNode->entity());
@@ -1084,7 +1099,7 @@ void SplineTool::commitSpline(const std::string& commandName)
   }
 
   const auto data = mdl::SplineEntityData{
-    m_points, m_subdivisions, m_templateGroupId, m_closed, m_lockUVs};
+    m_points, m_subdivisions, m_templateGroupId, m_closed, m_lockUVs, m_keepSize};
   auto entity = mdl::writeSplineTemplateEntities(
     mdl::writeSplineTemplateBrushes(
       mdl::writeSplineEntity(m_splineNode ? m_splineNode->entity() : mdl::Entity{}, data),
@@ -1229,7 +1244,8 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes(
            contents.brushes,
            contents.bounds,
            m_closed,
-           m_lockUVs ? mdl::SplineUVMode::Lock : mdl::SplineUVMode::Follow)
+           m_lockUVs ? mdl::SplineUVMode::Lock : mdl::SplineUVMode::Follow,
+           m_keepSize)
          | kdl::transform([](auto brushes) {
              return brushes | std::views::transform([](auto& brush) {
                       return static_cast<mdl::Node*>(

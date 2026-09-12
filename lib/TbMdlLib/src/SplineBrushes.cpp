@@ -19,6 +19,7 @@
 
 #include "mdl/SplineBrushes.h"
 
+#include "gl/Material.h"
 #include "mdl/Brush.h"
 #include "mdl/BrushBuilder.h"
 #include "mdl/BrushFace.h"
@@ -82,6 +83,27 @@ vm::mat4x4d spanUVTransform(
     0.0,
     0.0,
     1.0};
+}
+
+/**
+ * The end of a span cut back to the template's own length, keeping the start frame's
+ * orientation and scale.
+ *
+ * Sweeping between a frame and this one places the template at the size it is drawn at,
+ * turned to face along the span but not bent by it or stretched to fill it, which is
+ * what makes every copy identical to the template and to each other.
+ */
+SweepFrame naturalEndFrame(
+  const SweepFrame& a, const SweepFrame& b, const double templateLength)
+{
+  auto forward = b.position - a.position;
+  if (vm::squared_length(forward) < 1.0e-10)
+  {
+    forward = vm::cross(a.right, a.up);
+  }
+
+  return SweepFrame{
+    a.position + vm::normalize(forward) * templateLength, a.right, a.up, a.scale};
 }
 
 /**
@@ -178,6 +200,14 @@ void copyFaceAttributes(
     const auto& alignment =
       uvMode == SplineUVMode::Lock ? bestMatch->rigid : bestMatch->deformed;
 
+    // The material has to be on the face before its UVs are set, not after. A face with
+    // none reports its texture as one pixel by one, and an offset is kept modulo the
+    // texture, so every offset the alignment carries would be wrapped down into the
+    // first pixel and lost. The brush builder only knows the material's name, so the
+    // face is pointed at the template's material here. Only the material's own usage
+    // count changes, which is what it counts.
+    face.setMaterial(const_cast<gl::Material*>(alignment.material()));
+
     face.setAttributes(alignment.attributes());
     if (const auto snapshot = alignment.takeUVCoordSystemSnapshot())
     {
@@ -205,7 +235,8 @@ Result<std::vector<Brush>> createSplineBrushes(
   const std::vector<const Brush*>& templateBrushes,
   const vm::bbox3d& templateBounds,
   const bool closed,
-  const SplineUVMode uvMode)
+  const SplineUVMode uvMode,
+  const bool keepTemplateSize)
 {
   if (templateBounds.size().x() <= 0.0)
   {
@@ -223,7 +254,7 @@ Result<std::vector<Brush>> createSplineBrushes(
   }
 
   const auto forwardSize = vm::max(1.0, templateBounds.size().x());
-  const auto frames = buildSweepFrames(points, forwardSize, closed);
+  const auto frames = buildSweepFrames(points, forwardSize, closed, keepTemplateSize);
   if (frames.size() < 2)
   {
     return Error{"Spline has zero length"};
@@ -248,7 +279,11 @@ Result<std::vector<Brush>> createSplineBrushes(
   for (size_t i = 0; i < frames.size() - 1; ++i)
   {
     const auto& a = frames[i];
-    const auto& b = frames[i + 1];
+    // Kept at its own size, the copy ends a template's length along the span rather than
+    // at the far end of it, and carries the start frame's orientation the whole way, so
+    // the span neither stretches nor bends it.
+    const auto naturalEnd = naturalEndFrame(a, frames[i + 1], forwardSize);
+    const auto& b = keepTemplateSize ? naturalEnd : frames[i + 1];
 
     const auto uvTransform = spanUVTransform(templateBounds, a, b);
     const auto rigidTransform = rigidSpanTransform(templateBounds, a, b);

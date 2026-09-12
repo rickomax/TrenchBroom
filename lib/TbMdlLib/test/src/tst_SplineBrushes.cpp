@@ -277,6 +277,136 @@ TEST_CASE("createSplineBrushes")
     CHECK(checkedFaces > 0);
   }
 
+  SECTION("a copy's texture sits where the template's does")
+  {
+    // The offsets are the point of this one, and an offset is kept modulo the texture,
+    // so it only means anything on a face that knows how big its texture is.
+    const auto mapFormat = GENERATE(MapFormat::Standard, MapFormat::Valve);
+    CAPTURE(mapFormat);
+
+    auto texture = gl::Texture{64, 64};
+    auto material =
+      gl::Material{"some_material", gl::createTextureResource(std::move(texture))};
+
+    const auto uvBuilder = BrushBuilder{mapFormat, worldBounds};
+    auto uvTemplate =
+      uvBuilder.createCuboid(templateBounds, "some_material") | kdl::value();
+    for (auto& face : uvTemplate.faces())
+    {
+      auto attributes = face.attributes();
+      attributes.setScale(vm::vec2f{1.0f, 1.0f});
+      attributes.setOffset(vm::vec2f{11.0f, 7.0f});
+      face.setAttributes(attributes);
+      face.setMaterial(&material);
+    }
+    const auto uvTemplates = std::vector<const Brush*>{&uvTemplate};
+
+    // A long curving run, like a track.
+    const auto points = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{1792, 288, 0}},
+      SplinePoint{vm::vec3d{4096, 2304, 0}},
+    };
+
+    auto brushes = createSplineBrushes(
+                     mapFormat,
+                     worldBounds,
+                     points,
+                     uvTemplates,
+                     templateBounds,
+                     false,
+                     SplineUVMode::Follow,
+                     true)
+                   | kdl::value();
+    REQUIRE(!brushes.empty());
+    for (auto& brush : brushes)
+    {
+      for (auto& face : brush.faces())
+      {
+        face.setMaterial(&material);
+      }
+    }
+
+    /** A texture repeats, so a whole tile of difference is the same picture. */
+    const auto wrapped = [](const float delta) {
+      const auto fraction = double(delta) - std::floor(double(delta));
+      return std::min(fraction, 1.0 - fraction);
+    };
+
+    // Walk the sweep the way the generator does, so every triangle it cut can be found
+    // again by the corners it was cut from, and ask what UV it shows there.
+    const auto forwardSize = templateBounds.size().x();
+    const auto frames = buildSweepFrames(points, forwardSize, false, true);
+
+    auto worst = 0.0;
+    auto checked = 0;
+
+    for (size_t i = 0; i + 1 < frames.size(); ++i)
+    {
+      const auto forward = vm::normalize(frames[i + 1].position - frames[i].position);
+      const auto end = SweepFrame{
+        frames[i].position + forward * forwardSize,
+        frames[i].right,
+        frames[i].up,
+        frames[i].scale};
+
+      for (const auto& templateFace : uvTemplate.faces())
+      {
+        const auto corners = templateFace.vertexPositions();
+        auto deformed = std::vector<vm::vec3d>{};
+        for (const auto& corner : corners)
+        {
+          deformed.push_back(
+            vm::round(deformIntoSpan(corner, templateBounds, frames[i], end)));
+        }
+
+        for (size_t j = 1; j + 1 < deformed.size(); ++j)
+        {
+          const auto cut =
+            std::vector<vm::vec3d>{deformed[0], deformed[j], deformed[j + 1]};
+          const auto sources =
+            std::vector<vm::vec3d>{corners[0], corners[j], corners[j + 1]};
+
+          for (const auto& brush : brushes)
+          {
+            for (const auto& face : brush.faces())
+            {
+              const auto have = face.vertexPositions();
+              if (have.size() != 3 || !std::ranges::all_of(cut, [&](const auto& wanted) {
+                    return std::ranges::any_of(have, [&](const auto& vertex) {
+                      return vm::squared_length(vertex - wanted) < 1.0e-6;
+                    });
+                  }))
+              {
+                continue;
+              }
+
+              for (size_t k = 0; k < 3; ++k)
+              {
+                const auto templateUv = templateFace.uvCoords(sources[k]);
+                const auto uv = face.uvCoords(cut[k]);
+                worst = std::max(
+                  worst,
+                  std::max(
+                    wrapped(uv.x() - templateUv.x()), wrapped(uv.y() - templateUv.y())));
+                ++checked;
+              }
+              goto nextTriangle;
+            }
+          }
+        nextTriangle:;
+        }
+      }
+    }
+
+    REQUIRE(checked > 0);
+    // A face that came out of the sweep knowing nothing about its texture has its offset
+    // kept modulo a one by one texture, which throws the offset away and leaves the
+    // picture up to half a tile out of place. Within a twentieth of a tile is the
+    // picture sitting where the template has it.
+    CHECK(worst < 0.05);
+  }
+
   SECTION("Lock UVs keeps the picture from being squashed")
   {
     const auto mapFormat = GENERATE(MapFormat::Standard, MapFormat::Valve);

@@ -150,6 +150,10 @@ std::vector<vm::vec3d> sampleSpline(
  * size, stretched or squished to fit its segment. A closed spline also sweeps the
  * segment from the last control point back to the first.
  *
+ * With wholeCopiesOnly, the segment is divided into floor(segmentLength / forwardSize)
+ * spans instead, so that no span is shorter than the profile and a copy placed at its
+ * own size never runs into the one after it.
+ *
  * The base orientation comes from a rotation minimizing frame transported across the
  * control points; locked points anchor the transport to their own upright frame.
  * Within each segment, the frame interpolates between its endpoint orientations, and
@@ -158,7 +162,10 @@ std::vector<vm::vec3d> sampleSpline(
  * Returns an empty vector if fewer than two control points are given.
  */
 std::vector<SweepFrame> buildSweepFrames(
-  const std::vector<SplinePoint>& points, double forwardSize, bool closed = false);
+  const std::vector<SplinePoint>& points,
+  double forwardSize,
+  bool closed = false,
+  bool wholeCopiesOnly = false);
 
 /**
  * The sweep frame at each control point, for display purposes (reference arrows).

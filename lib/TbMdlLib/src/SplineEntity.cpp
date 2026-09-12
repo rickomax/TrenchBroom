@@ -331,6 +331,11 @@ std::optional<SplineEntityData> parseSplineEntity(const Entity& entity)
     data.lockUVs = *lockUVs != "0";
   }
 
+  if (const auto* keepSize = entity.property(SplinePropertyKeys::KeepSize))
+  {
+    data.keepSize = *keepSize != "0";
+  }
+
   return data;
 }
 
@@ -351,6 +356,7 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   result.removeProperty(SplinePropertyKeys::TemplateGroupId);
   result.removeProperty(SplinePropertyKeys::Closed);
   result.removeProperty(SplinePropertyKeys::LockUVs);
+  result.removeProperty(SplinePropertyKeys::KeepSize);
 
   result.addOrUpdateProperty(EntityPropertyKeys::Classname, SplineEntityClassname);
 
@@ -384,6 +390,11 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   if (data.lockUVs)
   {
     result.addOrUpdateProperty(SplinePropertyKeys::LockUVs, "1");
+  }
+
+  if (data.keepSize)
+  {
+    result.addOrUpdateProperty(SplinePropertyKeys::KeepSize, "1");
   }
 
   return result;

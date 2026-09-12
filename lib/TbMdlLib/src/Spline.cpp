@@ -380,7 +380,10 @@ std::vector<vm::vec3d> sampleSpline(
 }
 
 std::vector<SweepFrame> buildSweepFrames(
-  const std::vector<SplinePoint>& points, const double forwardSize, const bool closed)
+  const std::vector<SplinePoint>& points,
+  const double forwardSize,
+  const bool closed,
+  const bool wholeCopiesOnly)
 {
   auto frames = std::vector<SweepFrame>{};
   if (points.size() < 2 || forwardSize <= 0.0)
@@ -394,7 +397,14 @@ std::vector<SweepFrame> buildSweepFrames(
   for (size_t segment = 0; segment < segmentCount(points, closed); ++segment)
   {
     const auto length = segmentLength(points, segment, closed);
-    const auto spanCount = vm::max(size_t(1), size_t(std::llround(length / forwardSize)));
+    // Rounding fits the profile to the segment, which means squeezing it when the
+    // segment is not a whole number of profiles long. Taking the floor instead leaves
+    // every span at least a profile long, so a copy kept at its own size has room.
+    const auto spanCount = vm::max(
+      size_t(1),
+      size_t(
+        wholeCopiesOnly ? int64_t(std::floor(length / forwardSize))
+                        : std::llround(length / forwardSize)));
     for (size_t k = 1; k <= spanCount; ++k)
     {
       frames.push_back(
