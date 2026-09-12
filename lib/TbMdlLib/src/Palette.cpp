@@ -63,6 +63,11 @@ Palette::Palette(std::shared_ptr<PaletteData> data)
 {
 }
 
+const PaletteData& Palette::data() const
+{
+  return *m_data;
+}
+
 bool Palette::indexedToRgba(
   fs::Reader& reader,
   const size_t pixelCount,
@@ -128,8 +133,7 @@ bool operator!=(const Palette& lhs, const Palette& rhs)
 std::ostream& operator<<(std::ostream& lhs, const Palette& rhs)
 {
   auto str = kdl::struct_stream{lhs};
-  str << "Palette"
-      << "m_data";
+  str << "Palette" << "m_data";
   if (rhs.m_data)
   {
     str << *rhs.m_data;
