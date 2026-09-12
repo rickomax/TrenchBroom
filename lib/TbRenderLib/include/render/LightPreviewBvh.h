@@ -73,6 +73,15 @@ struct PreviewRay
   }
 };
 
+/**
+ * The hit filter of a query that has nothing to turn down, which is every query over
+ * geometry the rays cannot see through.
+ */
+struct AcceptEveryHit
+{
+  bool operator()(uint32_t, float, float) const { return true; }
+};
+
 struct PreviewRayHit
 {
   float distance = 0.0f;
@@ -138,13 +147,19 @@ public:
    * The filter is called with a triangle index and decides whether that triangle takes
    * part in this query; it is how shadow rays ignore surfaces that light passes through.
    * Triangles are hit from either side, since a preview camera can end up behind a face.
+   *
+   * The hit filter is called only once a triangle has actually been hit, with the point
+   * on it, so that a query can turn a hit down for something the triangle index alone
+   * cannot answer: whether the texture has a hole there. Refusing a hit leaves the ray
+   * to carry on as though the triangle were not in its way.
    */
-  template <typename Filter>
+  template <typename Filter, typename HitFilter = AcceptEveryHit>
   std::optional<PreviewRayHit> intersect(
     const std::vector<PreviewTrianglePos>& triangles,
     const PreviewRay& ray,
     const float maxDistance,
-    const Filter& filter) const
+    const Filter& filter,
+    const HitFilter& hitFilter = HitFilter{}) const
   {
     auto result = std::optional<PreviewRayHit>{};
     auto closest = maxDistance;
@@ -161,9 +176,9 @@ public:
         float u = 0.0f;
         float v = 0.0f;
         float det = 0.0f;
-        if (
-          const auto distance =
-            intersectTriangle(triangles[triangleIndex], ray, closest, u, v, det))
+        if (const auto distance =
+              intersectTriangle(triangles[triangleIndex], ray, closest, u, v, det);
+            distance && hitFilter(triangleIndex, u, v))
         {
           closest = *distance;
           result = PreviewRayHit{*distance, u, v, triangleIndex, det > 0.0f};
@@ -176,15 +191,17 @@ public:
   }
 
   /**
-   * Returns whether any triangle accepted by the filter is hit within (0, maxDistance].
-   * Traversal stops at the first hit, so this is much cheaper than intersect.
+   * Returns whether any triangle accepted by both filters is hit within (0, maxDistance].
+   * Traversal stops at the first hit, so this is much cheaper than intersect. See
+   * intersect for what the two filters are each for.
    */
-  template <typename Filter>
+  template <typename Filter, typename HitFilter = AcceptEveryHit>
   bool occluded(
     const std::vector<PreviewTrianglePos>& triangles,
     const PreviewRay& ray,
     const float maxDistance,
-    const Filter& filter) const
+    const Filter& filter,
+    const HitFilter& hitFilter = HitFilter{}) const
   {
     auto found = false;
     auto limit = maxDistance;
@@ -201,7 +218,9 @@ public:
         float u = 0.0f;
         float v = 0.0f;
         float det = 0.0f;
-        if (intersectTriangle(triangles[triangleIndex], ray, limit, u, v, det))
+        if (
+          intersectTriangle(triangles[triangleIndex], ray, limit, u, v, det)
+          && hitFilter(triangleIndex, u, v))
         {
           found = true;
           return true;

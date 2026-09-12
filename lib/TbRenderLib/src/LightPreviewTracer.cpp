@@ -365,6 +365,28 @@ vm::vec3f skyRadiance(const PreviewScene& scene, const vm::vec3f& direction)
 }
 
 /**
+ * Whether the texture has a hole where the ray struck, in which case there is nothing
+ * there to stop it, shade it or bounce it.
+ *
+ * Called for every triangle a ray actually hits, so it does as little as it can: a
+ * triangle whose texture has no holes at all is turned away by a flag, without the
+ * material being reached for.
+ */
+bool hitAHole(
+  const PreviewScene& scene, const uint32_t triangleIndex, const float u, const float v)
+{
+  const auto& shading = scene.triangleShading[triangleIndex];
+  if (!shading.maskedTexture)
+  {
+    return false;
+  }
+
+  const auto w = 1.0f - u - v;
+  const auto uv = shading.uv0 * w + shading.uv1 * u + shading.uv2 * v;
+  return scene.materials[shading.materialIndex]->transparentAt(uv);
+}
+
+/**
  * Whether anything opaque stands between two points.
  *
  * Only surfaces that are part of the solid hull block the ray. Water, triggers and clip
@@ -379,9 +401,15 @@ bool occluded(
 {
   const auto ray = PreviewRay{origin, direction};
   return scene.bvh.occluded(
-    scene.trianglePositions, ray, distance, [&](const uint32_t triangleIndex) {
+    scene.trianglePositions,
+    ray,
+    distance,
+    [&](const uint32_t triangleIndex) {
       const auto& shading = scene.triangleShading[triangleIndex];
       return shading.occludes && (shading.objectChannelMask & shadowChannelMask) != 0;
+    },
+    [&](const uint32_t triangleIndex, const float u, const float v) {
+      return !hitAHole(scene, triangleIndex, u, v);
     });
 }
 
@@ -656,6 +684,14 @@ vm::vec3f gatherEmitters(
     v = 1.0f - v;
   }
 
+  // A hole in the texture emits nothing. The emitter's share of the sampling still
+  // counts its whole triangle, so turning these samples away is what scales its
+  // contribution down to the part of it that is actually there.
+  if (hitAHole(scene, emitter.triangleIndex, u, v))
+  {
+    return vm::vec3f{0, 0, 0};
+  }
+
   const auto samplePoint =
     emitterPosition.p0 + emitterPosition.e1 * u + emitterPosition.e2 * v;
 
@@ -785,7 +821,15 @@ vm::vec3f tracePreviewPixel(
   {
     const auto ray = PreviewRay{origin, direction};
     const auto hit = scene.bvh.intersect(
-      scene.trianglePositions, ray, MaxRayDistance, [](const uint32_t) { return true; });
+      scene.trianglePositions,
+      ray,
+      MaxRayDistance,
+      [](const uint32_t) { return true; },
+      [&](const uint32_t triangleIndex, const float u, const float v) {
+        // A hole is not there to be seen or bounced off either, so the ray simply
+        // carries on to whatever is behind it.
+        return !hitAHole(scene, triangleIndex, u, v);
+      });
 
     if (!hit)
     {

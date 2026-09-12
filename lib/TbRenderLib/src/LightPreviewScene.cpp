@@ -239,6 +239,9 @@ struct SkyClassifier
   }
 };
 
+/** Below this the texture is a hole rather than a picture. */
+constexpr auto TransparentAlpha = uint8_t(128);
+
 /**
  * Reads back one material's texture so that the tracer can look up albedo without the GL
  * context.
@@ -320,6 +323,7 @@ PreviewMaterial readMaterial(
   result.width = targetWidth;
   result.height = targetHeight;
   result.texels.resize(targetWidth * targetHeight);
+  result.opaque.assign(targetWidth * targetHeight, uint8_t(1));
 
   for (size_t y = 0; y < targetHeight; ++y)
   {
@@ -331,25 +335,49 @@ PreviewMaterial readMaterial(
       const auto sourceX0 = x * sourceWidth / targetWidth;
       const auto sourceX1 = std::max(sourceX0 + 1, (x + 1) * sourceWidth / targetWidth);
 
+      // Only the opaque source texels contribute a colour: letting a see-through one in
+      // would drag the colour towards whatever is stored behind the hole, which for a
+      // masked Quake texture is the palette's transparent index and nothing like the
+      // picture.
       auto sum = vm::vec3f{0, 0, 0};
-      auto count = 0.0f;
+      auto opaqueCount = 0.0f;
+      auto totalCount = 0.0f;
       for (auto sy = sourceY0; sy < sourceY1; ++sy)
       {
         for (auto sx = sourceX0; sx < sourceX1; ++sx)
         {
           const auto* texel = &pixels[(sy * sourceWidth + sx) * 4];
-          sum = sum
-                + vm::vec3f{
-                  float(texel[0]) / 255.0f,
-                  float(texel[1]) / 255.0f,
-                  float(texel[2]) / 255.0f};
-          count += 1.0f;
+          totalCount += 1.0f;
+          if (texel[3] >= TransparentAlpha)
+          {
+            sum = sum
+                  + vm::vec3f{
+                    float(texel[0]) / 255.0f,
+                    float(texel[1]) / 255.0f,
+                    float(texel[2]) / 255.0f};
+            opaqueCount += 1.0f;
+          }
         }
       }
 
       result.texels[y * targetWidth + x] =
-        count > 0.0f ? sum / count : result.averageColor;
+        opaqueCount > 0.0f ? sum / opaqueCount : result.averageColor;
+
+      // The preview works at a lower resolution than the texture, so a texel here can
+      // cover both hole and picture. It counts as a hole when most of what it covers is
+      // one, which keeps a silhouette close to the shape the texture actually has.
+      if (opaqueCount * 2.0f < totalCount)
+      {
+        result.opaque[y * targetWidth + x] = 0;
+        result.masked = true;
+      }
     }
+  }
+
+  if (!result.masked)
+  {
+    // Nothing to look up per texel, so the mask costs no memory and no test.
+    result.opaque.clear();
   }
 
   return result;
@@ -371,6 +399,13 @@ struct MaterialLookup
   }
 
   const PreviewMaterial& at(const uint32_t index) const { return cache.at(index); }
+
+  /** Looks the material up and records on the shading what a ray needs to know. */
+  void assignTo(const gl::Material* material, PreviewTriangleShading& shading) const
+  {
+    shading.materialIndex = indexOf(material);
+    shading.maskedTexture = at(shading.materialIndex).masked;
+  }
 };
 
 /**
@@ -536,7 +571,7 @@ void addBrushFace(
   }
 
   auto shading = PreviewTriangleShading{};
-  shading.materialIndex = materials.indexOf(material);
+  materials.assignTo(material, shading);
   shading.objectChannelMask = brushModel.objectChannelMask;
   shading.receivesLight = brushModel.receivesLight;
   shading.surfaceMinLight = brushModel.minLight;
@@ -631,7 +666,7 @@ void addPatch(
   }
 
   auto shading = PreviewTriangleShading{};
-  shading.materialIndex = materials.indexOf(material);
+  materials.assignTo(material, shading);
   shading.objectChannelMask = brushModel.objectChannelMask;
   shading.receivesLight = brushModel.receivesLight;
   shading.surfaceMinLight = brushModel.minLight;
@@ -740,7 +775,7 @@ void addEntityModel(
                        : nullptr;
 
   auto shading = PreviewTriangleShading{};
-  shading.materialIndex = materials.indexOf(skin);
+  materials.assignTo(skin, shading);
   shading.kind = PreviewSurfaceKind::NonSolid;
   shading.occludes = false;
 
@@ -923,6 +958,26 @@ void PreviewMaterialCache::clear()
   m_materials.push_back(std::make_shared<const PreviewMaterial>(std::move(fallback)));
 }
 
+namespace
+{
+
+/**
+ * The texel a coordinate lands on. Textures tile, so the coordinates wrap; std::fmod
+ * keeps the sign of its argument, hence the extra shift for faces with negative offsets.
+ */
+size_t wrapTexel(const float value, const size_t size)
+{
+  const auto scaled = value * float(size);
+  auto index = int64_t(std::floor(scaled)) % int64_t(size);
+  if (index < 0)
+  {
+    index += int64_t(size);
+  }
+  return size_t(index);
+}
+
+} // namespace
+
 vm::vec3f PreviewMaterial::sample(const vm::vec2f& uv) const
 {
   if (texels.empty() || width == 0 || height == 0)
@@ -930,21 +985,17 @@ vm::vec3f PreviewMaterial::sample(const vm::vec2f& uv) const
     return averageColor;
   }
 
-  // Textures tile, so the coordinates wrap; std::fmod keeps the sign of its argument,
-  // hence the extra shift for faces with negative offsets.
-  const auto wrap = [](const float value, const size_t size) {
-    const auto scaled = value * float(size);
-    auto index = int64_t(std::floor(scaled)) % int64_t(size);
-    if (index < 0)
-    {
-      index += int64_t(size);
-    }
-    return size_t(index);
-  };
+  return texels[wrapTexel(uv.y(), height) * width + wrapTexel(uv.x(), width)];
+}
 
-  const auto x = wrap(uv.x(), width);
-  const auto y = wrap(uv.y(), height);
-  return texels[y * width + x];
+bool PreviewMaterial::transparentAt(const vm::vec2f& uv) const
+{
+  if (!masked || opaque.empty() || width == 0 || height == 0)
+  {
+    return false;
+  }
+
+  return opaque[wrapTexel(uv.y(), height) * width + wrapTexel(uv.x(), width)] == 0;
 }
 
 PreviewScene buildPreviewScene(

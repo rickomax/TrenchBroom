@@ -86,7 +86,26 @@ struct PreviewMaterial
   std::vector<vm::vec3f> texels;
   vm::vec3f averageColor = vm::vec3f{0.5f, 0.5f, 0.5f};
 
+  /**
+   * Whether any of the texture is see-through, which is what makes it worth asking
+   * about a single texel at all. A texture with none is the common case and the tests
+   * below are skipped for it.
+   */
+  bool masked = false;
+
+  /**
+   * One byte per texel, zero where the texture is see-through. Only filled in for a
+   * masked material.
+   */
+  std::vector<uint8_t> opaque;
+
   vm::vec3f sample(const vm::vec2f& uv) const;
+
+  /**
+   * Whether the texture has a hole at the given coordinates, where a ray carries on as
+   * though the surface were not there.
+   */
+  bool transparentAt(const vm::vec2f& uv) const;
 };
 
 /**
@@ -99,6 +118,12 @@ struct PreviewTriangleShading
   vm::vec2f uv1;
   vm::vec2f uv2;
   uint32_t materialIndex = 0;
+  /**
+   * Whether this triangle's texture has holes in it, kept here so that the ray that
+   * hits it can tell without reaching for the material first. See
+   * PreviewMaterial::transparentAt.
+   */
+  bool maskedTexture = false;
   PreviewSurfaceKind kind = PreviewSurfaceKind::Solid;
   /** Whether shadow rays are blocked by this triangle. */
   bool occludes = true;

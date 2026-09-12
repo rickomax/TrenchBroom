@@ -106,6 +106,59 @@ public:
     addTriangle(origin, origin + edgeU + edgeV, origin + edgeV);
   }
 
+  /**
+   * Adds a material whose texture is two texels wide: a hole on the left half and
+   * picture on the right. Returns its index.
+   */
+  uint32_t addMaskedMaterial(const vm::vec3f& color)
+  {
+    auto material = PreviewMaterial{};
+    material.name = "{masked";
+    material.averageColor = color;
+    material.width = 2;
+    material.height = 1;
+    material.texels = {color, color};
+    material.masked = true;
+    material.opaque = {uint8_t(0), uint8_t(1)};
+    scene.materials.push_back(
+      std::make_shared<const PreviewMaterial>(std::move(material)));
+    return uint32_t(scene.materials.size() - 1);
+  }
+
+  /**
+   * Adds a quad that lands on the same texel of its texture wherever it is hit, since
+   * every corner of both its triangles takes the same coordinates.
+   *
+   * A ray crossing it therefore either meets a hole or meets picture, whichever the
+   * coordinates name, and the test does not depend on where across the quad it crossed.
+   */
+  void addMaskedQuad(
+    const vm::vec3f& origin,
+    const vm::vec3f& edgeU,
+    const vm::vec3f& edgeV,
+    const vm::vec3f& normal,
+    const uint32_t materialIndex,
+    const vm::vec2f& uv,
+    const vm::vec3f& emission = vm::vec3f{0, 0, 0})
+  {
+    addQuad(
+      origin,
+      edgeU,
+      edgeV,
+      normal,
+      PreviewSurfaceKind::Solid,
+      emission,
+      1.0f,
+      materialIndex);
+
+    for (auto i = scene.triangleShading.size() - 2; i < scene.triangleShading.size(); ++i)
+    {
+      auto& shading = scene.triangleShading[i];
+      shading.uv0 = shading.uv1 = shading.uv2 = uv;
+      shading.maskedTexture = scene.materials[materialIndex]->masked;
+    }
+  }
+
   void addPointLight(const float intensity, const PreviewAttenuation attenuation)
   {
     scene.lights.push_back(makePointLight(intensity, attenuation));
@@ -190,7 +243,56 @@ float display(const float lightValue)
   return lightValue / 255.0f;
 }
 
+/** Coordinates landing on the hole of a material from addMaskedMaterial. */
+const auto HoleUV = vm::vec2f{0.25f, 0.5f};
+
+/** Coordinates landing on the picture of a material from addMaskedMaterial. */
+const auto PictureUV = vm::vec2f{0.75f, 0.5f};
+
 } // namespace
+
+TEST_CASE("PreviewMaterial::transparentAt")
+{
+  auto material = PreviewMaterial{};
+  material.width = 2;
+  material.height = 1;
+  material.texels = {vm::vec3f{1, 1, 1}, vm::vec3f{1, 1, 1}};
+  material.opaque = {uint8_t(0), uint8_t(1)};
+
+  SECTION("a texture with nothing see-through in it is asked nothing")
+  {
+    // The mask is only filled in for a masked material, so the flag has to be what
+    // decides, not the mask.
+    material.masked = false;
+    CHECK_FALSE(material.transparentAt(HoleUV));
+    CHECK_FALSE(material.transparentAt(PictureUV));
+  }
+
+  SECTION("the hole is where the mask says it is")
+  {
+    material.masked = true;
+    CHECK(material.transparentAt(HoleUV));
+    CHECK_FALSE(material.transparentAt(PictureUV));
+  }
+
+  SECTION("the mask tiles along with the texture")
+  {
+    material.masked = true;
+
+    CHECK(material.transparentAt(HoleUV + vm::vec2f{3, 0}));
+    CHECK_FALSE(material.transparentAt(PictureUV + vm::vec2f{3, 0}));
+
+    CHECK(material.transparentAt(HoleUV - vm::vec2f{4, 2}));
+    CHECK_FALSE(material.transparentAt(PictureUV - vm::vec2f{4, 2}));
+  }
+
+  SECTION("a material with no mask at all has no holes")
+  {
+    material.masked = true;
+    material.opaque.clear();
+    CHECK_FALSE(material.transparentAt(HoleUV));
+  }
+}
 
 TEST_CASE("tracePreviewPixel")
 {
@@ -366,6 +468,115 @@ TEST_CASE("tracePreviewPixel")
     test.finish();
 
     CHECK(test.shade(64) == Catch::Approx(0.0).margin(0.001));
+  }
+
+  SECTION("a hole in a texture is not there for any ray")
+  {
+    // The quad the rays have to get past is black, so a ray that stops at it reads as
+    // nothing at all, while the floor behind it is white and lit.
+    const auto makeScene = [](const float height, const vm::vec2f& uv) {
+      auto test = std::make_unique<TestScene>();
+      test->addPointLight(300.0f, PreviewAttenuation::None);
+      const auto masked = test->addMaskedMaterial(vm::vec3f{0, 0, 0});
+      test->addMaskedQuad(
+        vm::vec3f{-50, -50, height},
+        vm::vec3f{100, 0, 0},
+        vm::vec3f{0, 100, 0},
+        vm::vec3f{0, 0, 1},
+        masked,
+        uv);
+      test->finish();
+      return test;
+    };
+
+    SECTION("the camera sees through a hole")
+    {
+      // Above the light, so that only the camera's own ray has to get past the quad.
+      CHECK(
+        makeScene(150.0f, HoleUV)->shade(64)
+        == Catch::Approx(display(300.0f)).margin(0.01));
+    }
+
+    SECTION("the camera does not see through the picture around it")
+    {
+      CHECK(makeScene(150.0f, PictureUV)->shade(64) == Catch::Approx(0.0).margin(0.001));
+    }
+
+    SECTION("a shadow ray passes through a hole")
+    {
+      // Between the floor and the light, with the camera below it, so that only the
+      // shadow ray has to get past the quad.
+      CHECK(
+        makeScene(50.0f, HoleUV)->shade(64, 25.0f)
+        == Catch::Approx(display(300.0f)).margin(0.01));
+    }
+
+    SECTION("a shadow ray is stopped by the picture around it")
+    {
+      CHECK(
+        makeScene(50.0f, PictureUV)->shade(64, 25.0f)
+        == Catch::Approx(0.0).margin(0.001));
+    }
+
+    SECTION("light does not bounce off a hole")
+    {
+      // A white quad hanging over the floor with the light underneath it: its underside
+      // is lit, so what it bounces down onto the floor adds to the floor's own reading,
+      // but only where the quad is actually there.
+      const auto shadeWithBounce = [](const std::optional<vm::vec2f> uv) {
+        auto test = TestScene{};
+
+        auto light = TestScene::makePointLight(100.0f, PreviewAttenuation::None);
+        light.origin = vm::vec3f{0, 0, 20};
+        test.scene.lights.push_back(light);
+
+        if (uv)
+        {
+          const auto masked = test.addMaskedMaterial(vm::vec3f{1, 1, 1});
+          test.addMaskedQuad(
+            vm::vec3f{-400, -400, 50},
+            vm::vec3f{800, 0, 0},
+            vm::vec3f{0, 800, 0},
+            vm::vec3f{0, 0, -1},
+            masked,
+            *uv);
+        }
+
+        test.finish();
+        test.setBounces(1);
+        return test.shade(4000, 25.0f);
+      };
+
+      const auto withoutQuad = shadeWithBounce(std::nullopt);
+      const auto throughHoles = shadeWithBounce(HoleUV);
+      const auto offThePicture = shadeWithBounce(PictureUV);
+
+      // An all holes quad leaves the floor exactly as it was without one at all, and the
+      // same quad made of picture is what a bounce off it is worth.
+      CHECK(throughHoles == Catch::Approx(withoutQuad).margin(0.01));
+      CHECK(offThePicture > withoutQuad + 0.05f);
+    }
+
+    SECTION("a hole in an emitting surface emits nothing")
+    {
+      const auto shadeEmitter = [](const vm::vec2f& uv) {
+        auto test = TestScene{};
+        const auto masked = test.addMaskedMaterial(vm::vec3f{0, 0, 0});
+        test.addMaskedQuad(
+          vm::vec3f{-200, -200, 100},
+          vm::vec3f{400, 0, 0},
+          vm::vec3f{0, 400, 0},
+          vm::vec3f{0, 0, -1},
+          masked,
+          uv,
+          vm::vec3f{0.5f, 0.5f, 0.5f});
+        test.finish();
+        return test.shade(4000, 50.0f);
+      };
+
+      CHECK(shadeEmitter(HoleUV) == Catch::Approx(0.0).margin(0.001));
+      CHECK(shadeEmitter(PictureUV) > 0.1f);
+    }
   }
 
   SECTION("suns")
