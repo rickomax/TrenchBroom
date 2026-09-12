@@ -51,6 +51,12 @@ enum class MapFormat;
  * If closed is true, the spline wraps around: the segment from the last control point
  * back to the first is swept as well.
  *
+ * alignmentLock is the editor's texture lock: with it on, a template face's UVs are
+ * carried onto the copy it becomes, so a pattern runs along the curve the way it ran
+ * along the template. With it off, the copies keep the alignment the template was
+ * authored with and the geometry moves under it, which is what texture lock means
+ * everywhere else.
+ *
  * Returns an error if the lattice or the spline is degenerate, or if no brushes
  * could be created.
  */
@@ -60,6 +66,7 @@ Result<std::vector<Brush>> createSplineBrushes(
   const std::vector<SplinePoint>& points,
   const std::vector<const Brush*>& templateBrushes,
   const vm::bbox3d& templateBounds,
-  bool closed = false);
+  bool closed = false,
+  bool alignmentLock = true);
 
 } // namespace tb::mdl

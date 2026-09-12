@@ -84,18 +84,22 @@ vm::mat4x4d spanUVTransform(
 
 /**
  * Returns copies of the template brush's faces, transformed into the span's world
- * space with alignment lock, so each copy carries the template's UVs realigned to the
- * deformed geometry. Faces whose transformation fails are returned untransformed.
+ * space, which is what the generated faces take their attributes and alignment from.
+ *
+ * With alignment lock on, the UVs are carried across with the geometry, so the copy
+ * shows the same part of the texture the template did. With it off, only the axes
+ * follow the new plane and the alignment stays as authored. Faces whose transformation
+ * fails are returned untransformed.
  */
 std::vector<BrushFace> transformTemplateFaces(
-  const Brush& templateBrush, const vm::mat4x4d& transform)
+  const Brush& templateBrush, const vm::mat4x4d& transform, const bool alignmentLock)
 {
   auto faces = std::vector<BrushFace>{};
   faces.reserve(templateBrush.faceCount());
   for (const auto& face : templateBrush.faces())
   {
     auto copy = face;
-    if (copy.transform(transform, true).is_error())
+    if (copy.transform(transform, alignmentLock).is_error())
     {
       copy = face;
     }
@@ -151,7 +155,8 @@ Result<std::vector<Brush>> createSplineBrushes(
   const std::vector<SplinePoint>& points,
   const std::vector<const Brush*>& templateBrushes,
   const vm::bbox3d& templateBounds,
-  const bool closed)
+  const bool closed,
+  const bool alignmentLock)
 {
   if (templateBounds.size().x() <= 0.0)
   {
@@ -209,7 +214,8 @@ Result<std::vector<Brush>> createSplineBrushes(
       apex = apex / double(vertices.size());
       const auto deformedApex = vm::round(deformIntoSpan(apex, templateBounds, a, b));
 
-      const auto templateFaces = transformTemplateFaces(*templateBrush, uvTransform);
+      const auto templateFaces =
+        transformTemplateFaces(*templateBrush, uvTransform, alignmentLock);
 
       const auto materialName =
         !templateBrush->faces().empty()

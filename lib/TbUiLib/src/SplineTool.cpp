@@ -25,6 +25,7 @@
 #include "gl/Camera.h"
 #include "mdl/Brush.h"
 #include "mdl/BrushNode.h"
+#include "mdl/EditorContext.h"
 #include "mdl/Entity.h"
 #include "mdl/EntityNode.h"
 #include "mdl/GroupNode.h"
@@ -1212,7 +1213,11 @@ std::vector<mdl::Node*> SplineTool::createBrushNodes(
            m_points,
            contents.brushes,
            contents.bounds,
-           m_closed)
+           m_closed,
+           // Texture lock decides whether the template's UVs are carried onto the
+           // copies. It is read as the spline is generated, so toggling it takes effect
+           // on the next change to the spline rather than rewriting one already drawn.
+           map.editorContext().alignmentLock())
          | kdl::transform([](auto brushes) {
              return brushes | std::views::transform([](auto& brush) {
                       return static_cast<mdl::Node*>(

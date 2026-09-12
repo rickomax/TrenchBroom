@@ -271,6 +271,84 @@ TEST_CASE("createSplineBrushes")
     CHECK(checkedFaces > 0);
   }
 
+  SECTION("texture lock decides whether the template's UVs follow the curve")
+  {
+    auto uvTemplate = makeCuboid(templateBounds, "some_material");
+    for (auto& face : uvTemplate.faces())
+    {
+      auto attributes = face.attributes();
+      attributes.setScale(vm::vec2f{2.0f, 2.0f});
+      attributes.setRotation(30.0f);
+      face.setAttributes(attributes);
+    }
+    const auto uvTemplates = std::vector<const Brush*>{&uvTemplate};
+
+    // A right angle, so the second leg's faces are turned a quarter turn from the
+    // template's: a locked texture has to be realigned to stay on the surface, and an
+    // unlocked one has not.
+    const auto points = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{192, 0, 0}},
+      SplinePoint{vm::vec3d{192, 192, 0}},
+    };
+
+    const auto sweep = [&](const bool alignmentLock) {
+      return createSplineBrushes(
+               MapFormat::Standard,
+               worldBounds,
+               points,
+               uvTemplates,
+               templateBounds,
+               false,
+               alignmentLock)
+             | kdl::value();
+    };
+
+    const auto authored = [](const BrushFace& face) {
+      return face.attributes().scale() == vm::vec2f{2.0f, 2.0f}
+             && face.attributes().rotation() == 30.0f;
+    };
+
+    SECTION("with it off the copies keep the alignment the template was authored with")
+    {
+      const auto brushes = sweep(false);
+      REQUIRE(!brushes.empty());
+
+      auto checkedFaces = 0;
+      for (const auto& brush : brushes)
+      {
+        for (const auto& face : brush.faces())
+        {
+          CHECK(authored(face));
+          CHECK(face.attributes().materialName() == "some_material");
+          ++checkedFaces;
+        }
+      }
+      CHECK(checkedFaces > 0);
+    }
+
+    SECTION("with it on the UVs are realigned onto the deformed geometry")
+    {
+      const auto brushes = sweep(true);
+      REQUIRE(!brushes.empty());
+
+      // Somewhere around the corner the alignment had to give, or the texture would
+      // not have stayed on the surface.
+      auto realignedFaces = 0;
+      for (const auto& brush : brushes)
+      {
+        for (const auto& face : brush.faces())
+        {
+          if (!authored(face))
+          {
+            ++realignedFaces;
+          }
+        }
+      }
+      CHECK(realignedFaces > 0);
+    }
+  }
+
   SECTION("vertices are snapped to integer coordinates")
   {
     const auto points = std::vector<SplinePoint>{
