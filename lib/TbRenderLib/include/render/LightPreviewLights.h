@@ -157,6 +157,12 @@ struct PreviewSurfaceLightTemplate
 constexpr auto MaxPreviewBounces = int32_t(16);
 
 /**
+ * What "_range" is when a map does not say: ericw-tools halves every lightmap, and a
+ * preview that does not is twice as bright as the compile it stands in for.
+ */
+constexpr auto DefaultRangeScale = 0.5f;
+
+/**
  * Lighting that has no position: the sky domes, the global minimum light, and the knobs
  * that scale every light in the map.
  */
@@ -172,8 +178,13 @@ struct PreviewGlobalLighting
 
   /** "_dist": scales the fade distance of every light. */
   float distScale = 1.0f;
-  /** "_range": scales the brightness of every light without changing its reach. */
-  float rangeScale = 1.0f;
+  /**
+   * "_range": scales the brightness of every light without changing its reach.
+   *
+   * The compilers halve every lightmap unless the map says otherwise, so this is what a
+   * map that says nothing gets.
+   */
+  float rangeScale = DefaultRangeScale;
   /** "_gamma": applied to the final image. */
   float gamma = 1.0f;
   /** "_maxlight": upper clamp, 0 means unclamped. */

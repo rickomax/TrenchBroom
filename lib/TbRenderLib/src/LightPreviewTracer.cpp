@@ -882,34 +882,46 @@ vm::vec3f tracePreviewPixel(
         scene, settings, position, normal, shading, depth > 0, localMinLight, rng);
     }
 
-    // "_range" scales every light's brightness without changing how far it reaches.
-    irradiance = irradiance * scene.globals.rangeScale;
+    if (shading.receivesLight)
+    {
+      // A surface light is a light like any other, so it belongs in the lightmap the
+      // steps below act on rather than beside it. Its contribution comes back in display
+      // units, which is what dividing puts back.
+      irradiance =
+        irradiance + gatherEmitters(scene, position, normal, rng) / PreviewLightUnitScale;
+    }
+
+    // The three kinds of minimum light are all floors rather than contributions: the
+    // global one, the one a brush model carries, and whatever a delay 4 light in line of
+    // sight provides. The compilers put them in while lighting, so they are scaled by
+    // everything below like any other light.
+    auto floorLight = maximum(scene.globals.minLight, shading.surfaceMinLight);
+    floorLight = maximum(floorLight, localMinLight);
+    irradiance = maximum(irradiance, floorLight);
 
     // Subtractive lights can push the total below zero, but a surface cannot emit
     // negative light.
     irradiance = maximum(irradiance, vm::vec3f{0, 0, 0});
 
+    // "_maxlight" is a ceiling on the brightest channel at twice its own value, and the
+    // whole colour is brought down to it together rather than each channel being cut off
+    // on its own, so that a surface up against it keeps its hue.
     if (scene.globals.maxLight > 0.0f)
     {
-      irradiance = vm::vec3f{
-        std::min(irradiance.x(), scene.globals.maxLight),
-        std::min(irradiance.y(), scene.globals.maxLight),
-        std::min(irradiance.z(), scene.globals.maxLight)};
+      const auto ceiling = scene.globals.maxLight * 2.0f;
+      const auto peak =
+        std::max(irradiance.x(), std::max(irradiance.y(), irradiance.z()));
+      if (peak > ceiling)
+      {
+        irradiance = irradiance * (ceiling / peak);
+      }
     }
 
-    // The three kinds of minimum light are all floors rather than contributions: the
-    // global one, the one a brush model carries, and whatever a delay 4 light in line of
-    // sight provides.
-    auto floorLight = maximum(scene.globals.minLight, shading.surfaceMinLight);
-    floorLight = maximum(floorLight, localMinLight);
-    irradiance = maximum(irradiance, floorLight);
+    // "_range" scales every light's brightness without changing how far it reaches, and
+    // comes last, once everything that feeds the lightmap is in.
+    irradiance = irradiance * scene.globals.rangeScale;
 
-    auto outgoing = irradiance * PreviewLightUnitScale;
-
-    if (shading.receivesLight)
-    {
-      outgoing = outgoing + gatherEmitters(scene, position, normal, rng);
-    }
+    const auto outgoing = irradiance * PreviewLightUnitScale;
 
     surface = surface + multiply(albedo, outgoing);
     radiance = radiance + multiply(throughput, surface * shading.alpha);

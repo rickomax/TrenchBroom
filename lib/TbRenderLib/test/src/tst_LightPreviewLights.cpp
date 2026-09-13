@@ -137,6 +137,30 @@ TEST_CASE("extractLighting")
       CHECK(lighting.lights.front().color == vm::approx{vm::vec3f{1.0f, 0.5f, 0.0f}});
     }
 
+    SECTION("three numbers mean different things in the two spellings")
+    {
+      SECTION("\"light\" is a colour, and the brightness stays at its default")
+      {
+        addEntity(map, {{"classname", "light"}, {"light", "255 128 0"}});
+
+        const auto lighting = extractLighting(map);
+        REQUIRE(lighting.lights.size() == 1);
+        CHECK(lighting.lights.front().intensity == Catch::Approx(300.0));
+        CHECK(
+          lighting.lights.front().color
+          == vm::approx{vm::vec3f{1.0f, 128.0f / 255.0f, 0.0f}, 0.001f});
+      }
+
+      SECTION("GoldSrc \"_light\" carries the brightness in the colour")
+      {
+        addEntity(map, {{"classname", "light"}, {"_light", "255 128 0"}});
+
+        const auto lighting = extractLighting(map);
+        REQUIRE(lighting.lights.size() == 1);
+        CHECK(lighting.lights.front().intensity == Catch::Approx(255.0));
+      }
+    }
+
     SECTION("reads the GoldSrc _light form")
     {
       addEntity(map, {{"classname", "light"}, {"_light", "255 128 0 400"}});
@@ -259,7 +283,7 @@ TEST_CASE("extractLighting")
 
     SECTION("reads the cone from either spelling")
     {
-      SECTION("ericw-tools angle and _softangle")
+      SECTION("ericw-tools angle and _softangle, which are whole cone widths")
       {
         addEntity(
           map,
@@ -271,9 +295,39 @@ TEST_CASE("extractLighting")
         const auto lighting = extractLighting(map);
         REQUIRE(lighting.lights.size() == 1);
 
+        // Half of each, since the cone reaches that far from its axis.
         const auto& light = lighting.lights.front();
-        CHECK(light.cosOuterCone == Catch::Approx(std::cos(vm::to_radians(60.0f))));
-        CHECK(light.cosInnerCone == Catch::Approx(std::cos(vm::to_radians(30.0f))));
+        CHECK(light.cosOuterCone == Catch::Approx(std::cos(vm::to_radians(30.0f))));
+        CHECK(light.cosInnerCone == Catch::Approx(std::cos(vm::to_radians(15.0f))));
+      }
+
+      SECTION("a spotlight that says nothing is forty degrees across")
+      {
+        addEntity(map, {{"classname", "light_spot"}, {"mangle", "0 -90 0"}});
+
+        const auto lighting = extractLighting(map);
+        REQUIRE(lighting.lights.size() == 1);
+
+        const auto& light = lighting.lights.front();
+        CHECK(light.cosOuterCone == Catch::Approx(std::cos(vm::to_radians(20.0f))));
+        // Nothing said where the hot spot ends, so the edge is hard.
+        CHECK(light.cosInnerCone == Catch::Approx(light.cosOuterCone));
+      }
+
+      SECTION("a hot spot as wide as the cone leaves a hard edge")
+      {
+        addEntity(
+          map,
+          {{"classname", "light"},
+           {"mangle", "0 -90 0"},
+           {"angle", "60"},
+           {"_softangle", "90"}});
+
+        const auto lighting = extractLighting(map);
+        REQUIRE(lighting.lights.size() == 1);
+
+        const auto& light = lighting.lights.front();
+        CHECK(light.cosInnerCone == Catch::Approx(light.cosOuterCone));
       }
 
       SECTION("GoldSrc _cone and _cone2")
@@ -463,6 +517,28 @@ TEST_CASE("extractLighting")
       const auto lighting = extractLighting(map);
       REQUIRE(lighting.lights.size() == 1);
       CHECK(lighting.lights.front().angleScale == Catch::Approx(0.25));
+    }
+
+    SECTION("an _anglescale outside its range also takes worldspawn's")
+    {
+      // Which is how a light asks for the map's value rather than for an angle that has
+      // no effect at all.
+      setWorldspawn(map, {{"_anglescale", "0.25"}});
+      addEntity(map, {{"classname", "light"}, {"_anglescale", "-1"}});
+      addEntity(map, {{"classname", "light"}, {"_anglescale", "2"}});
+
+      const auto lighting = extractLighting(map);
+      REQUIRE(lighting.lights.size() == 2);
+      CHECK(lighting.lights[0].angleScale == Catch::Approx(0.25));
+      CHECK(lighting.lights[1].angleScale == Catch::Approx(0.25));
+    }
+
+    SECTION("a map that says nothing about _range still has its lightmap halved")
+    {
+      setWorldspawn(map, {});
+
+      const auto lighting = extractLighting(map);
+      CHECK(lighting.globals.rangeScale == Catch::Approx(0.5));
     }
   }
 

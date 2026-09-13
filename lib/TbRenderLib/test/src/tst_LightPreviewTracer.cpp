@@ -52,6 +52,10 @@ public:
 
   TestScene()
   {
+    // The expected values below are worked out in lightmap units, so the scaling a map
+    // would get is left out; the section that covers it puts it back.
+    scene.globals.rangeScale = 1.0f;
+
     scene.materials.push_back(std::make_shared<const PreviewMaterial>());
 
     auto material = PreviewMaterial{};
@@ -828,6 +832,77 @@ TEST_CASE("tracePreviewPixel")
 
       CHECK(test.shade(64) == Catch::Approx(0.0).margin(0.001));
     }
+  }
+
+  SECTION("the scaling a map asks for comes last")
+  {
+    // The compilers scale a finished lightmap rather than each light: minimum light and
+    // surface lights are in it by then, the ceiling acts on the whole colour at twice
+    // its own value, and the range scale is applied after both.
+    const auto lit = [](const float range, const float maxLight, const float minLight) {
+      auto test = TestScene{};
+      test.scene.globals.rangeScale = range;
+      test.scene.globals.maxLight = maxLight;
+      test.scene.globals.minLight = vm::vec3f{minLight, minLight, minLight};
+      test.addPointLight(300.0f, PreviewAttenuation::None);
+      test.finish();
+      return test.shade(64);
+    };
+
+    SECTION("\"_range\" halves what a light puts down")
+    {
+      CHECK(lit(0.5f, 0.0f, 0.0f) == Catch::Approx(display(150.0f)).margin(0.01));
+    }
+
+    SECTION("\"_maxlight\" is a ceiling at twice its value, below the range scale")
+    {
+      // 300 is above the ceiling of 2 * 100, so it comes down to 200 and is then halved.
+      CHECK(lit(0.5f, 100.0f, 0.0f) == Catch::Approx(display(100.0f)).margin(0.01));
+
+      // A light already under the ceiling is left alone.
+      CHECK(lit(0.5f, 200.0f, 0.0f) == Catch::Approx(display(150.0f)).margin(0.01));
+    }
+
+    SECTION("minimum light is scaled along with everything else")
+    {
+      // The floor is 400, above what the light puts down, and is then halved.
+      CHECK(lit(0.5f, 0.0f, 400.0f) == Catch::Approx(display(200.0f)).margin(0.01));
+    }
+  }
+
+  SECTION("a ceiling brings the whole colour down together")
+  {
+    // Cutting each channel off on its own would turn a warm light grey as it clamped.
+    auto test = TestScene{};
+    test.scene.globals.rangeScale = 1.0f;
+    test.scene.globals.maxLight = 100.0f;
+
+    auto light = TestScene::makePointLight(400.0f, PreviewAttenuation::None);
+    light.color = vm::vec3f{1.0f, 0.5f, 0.25f};
+    test.scene.lights.push_back(light);
+    test.finish();
+
+    auto camera = PreviewCamera{};
+    camera.position = vm::vec3f{0, 0, 200};
+    camera.forward = vm::vec3f{0, 0, -1};
+    camera.right = vm::vec3f{1, 0, 0};
+    camera.up = vm::vec3f{0, 1, 0};
+    camera.halfWidth = camera.halfHeight = 0.0002f;
+    camera.width = camera.height = 1;
+
+    auto settings = PreviewTraceSettings{};
+    auto sum = vm::vec3f{0, 0, 0};
+    for (auto i = 0; i < 64; ++i)
+    {
+      sum = sum + tracePreviewPixel(test.scene, camera, settings, 0, 0, uint32_t(i));
+    }
+    const auto color = sum / 64.0f;
+
+    // The brightest channel sits on the ceiling of 2 * 100 and the others keep their
+    // share of it.
+    CHECK(color.x() == Catch::Approx(display(200.0f)).margin(0.01));
+    CHECK(color.y() == Catch::Approx(display(100.0f)).margin(0.01));
+    CHECK(color.z() == Catch::Approx(display(50.0f)).margin(0.01));
   }
 
   SECTION("a light does not reach a surface on another channel")

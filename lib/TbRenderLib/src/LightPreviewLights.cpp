@@ -257,7 +257,11 @@ struct LightValue
 
 std::optional<LightValue> parseLightValue(const mdl::Entity& entity)
 {
-  const auto* value = findProperty(entity, {"light", "_light"});
+  // The two spellings part company over three numbers: GoldSrc's "_light" carries the
+  // brightness in the magnitude of the colour, while ericw-tools reads "light" as a
+  // colour alone and leaves the brightness at its default.
+  const auto* goldSrcValue = entity.property("_light");
+  const auto* value = goldSrcValue ? goldSrcValue : findProperty(entity, {"light"});
   if (!value)
   {
     return std::nullopt;
@@ -276,10 +280,11 @@ std::optional<LightValue> parseLightValue(const mdl::Entity& entity)
   }
   else if (numbers.size() == 3)
   {
-    // Three numbers are a colour; the brightness is carried by the colour's magnitude,
-    // which is how a GoldSrc "_light" without a fourth number behaves.
     result.color = normalizeColor(vm::vec3f{numbers[0], numbers[1], numbers[2]});
-    result.intensity = std::max({numbers[0], numbers[1], numbers[2]});
+    if (goldSrcValue)
+    {
+      result.intensity = std::max({numbers[0], numbers[1], numbers[2]});
+    }
   }
   else
   {
@@ -380,11 +385,14 @@ void readCommonKeys(
                       : goldSrc ? PreviewAttenuation::InverseSquare
                                 : PreviewAttenuation::Linear;
   light.falloff = std::max(floatProperty(entity, {"_falloff"}).value_or(0.0f), 0.0f);
-  light.angleScale = std::clamp(
-    floatProperty(entity, {"_anglescale", "_anglesense"})
-      .value_or(globals.defaultAngleScale),
-    0.0f,
-    1.0f);
+  // An "_anglescale" outside the range it is defined over means "use the map's", which
+  // is how a light says so: the compilers read -1 that way rather than clamping it to a
+  // surface the angle has no effect on at all.
+  const auto entityAngleScale = floatProperty(entity, {"_anglescale", "_anglesense"});
+  light.angleScale =
+    entityAngleScale && *entityAngleScale >= 0.0f && *entityAngleScale <= 1.0f
+      ? *entityAngleScale
+      : globals.defaultAngleScale;
 
   light.deviance = std::max(floatProperty(entity, {"_deviance"}).value_or(0.0f), 0.0f);
   light.devianceSamples =
@@ -409,16 +417,27 @@ void readCommonKeys(
 /**
  * Reads the cone of a spotlight.
  *
- * ericw-tools spells the cone as "angle" for the outer edge and "_softangle" for where
- * the fade begins; GoldSrc spells them "_cone2" and "_cone". Both measure half angles.
+ * The two spellings do not measure the same thing. GoldSrc's "_cone2" is the half angle
+ * out to the edge of the cone and "_cone" the half angle of the hot spot inside it.
+ * ericw-tools' "angle" is the width of the whole cone and "_softangle" the width of the
+ * hot spot, so half of each is the angle from the axis that the light reaches --
+ * reading them as half angles gives a cone twice as wide as the compiler's.
  */
 void readSpotCone(const mdl::Entity& entity, PreviewLight& light)
 {
-  const auto outer = floatProperty(entity, {"_cone2", "angle"}).value_or(40.0f);
-  const auto inner = floatProperty(entity, {"_cone", "_softangle"}).value_or(0.0f);
+  const auto halfWidth =
+    [&](const std::initializer_list<const char*> keys, const float fallback) {
+      return floatProperty(entity, keys).value_or(fallback) * 0.5f;
+    };
+
+  const auto outer =
+    floatProperty(entity, {"_cone2"}).value_or(halfWidth({"angle", "_angle"}, 40.0f));
+  const auto inner = floatProperty(entity, {"_cone"})
+                       .value_or(halfWidth({"_softangle", "softangle"}, 0.0f));
 
   const auto clampedOuter = std::clamp(outer, 0.5f, 179.0f);
   light.cosOuterCone = std::cos(vm::to_radians(clampedOuter));
+  // A hot spot that is missing, or as wide as the cone or wider, means a hard edge.
   light.cosInnerCone = inner > 0.0f && inner < clampedOuter
                          ? std::cos(vm::to_radians(inner))
                          : light.cosOuterCone;
@@ -490,8 +509,10 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
   result.minLight = minLightColor * minLightIntensity;
 
   result.distScale = std::max(floatProperty(worldspawn, {"_dist"}).value_or(1.0f), 0.0f);
+  // ericw-tools halves every lightmap unless the map says otherwise, so a preview that
+  // leaves it at one is twice as bright as the compile it is standing in for.
   result.rangeScale =
-    std::max(floatProperty(worldspawn, {"_range"}).value_or(1.0f), 0.0f);
+    std::max(floatProperty(worldspawn, {"_range"}).value_or(DefaultRangeScale), 0.0f);
   result.gamma =
     std::clamp(floatProperty(worldspawn, {"_gamma"}).value_or(1.0f), 0.1f, 5.0f);
   result.maxLight =
@@ -769,7 +790,7 @@ void parseLightEntity(
     // aim would turn every such light into a spot pointing east.
     const auto targetDirection = directionFromTarget(entity, origin, targets);
     const auto hasCone =
-      findProperty(entity, {"_cone", "_cone2", "_softangle"}) != nullptr
+      findProperty(entity, {"_cone", "_cone2", "_softangle", "softangle"}) != nullptr
       || startsWithIgnoringCase(entity.classname(), "light_spot");
     const auto aimed = hasCone || findProperty(entity, {"mangle", "pitch"}) != nullptr;
     const auto angleDirection = aimed ? directionFromProperties(entity) : std::nullopt;
