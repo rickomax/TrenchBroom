@@ -25,6 +25,7 @@
 #include "mdl/GroupNode.h"
 #include "mdl/LayerNode.h"
 #include "mdl/Map.h"
+#include "mdl/MapFormat.h"
 #include "mdl/PatchNode.h"
 #include "mdl/WorldNode.h"
 
@@ -142,9 +143,11 @@ std::optional<int32_t> intProperty(
 }
 
 bool flagProperty(
-  const mdl::Entity& entity, const std::initializer_list<const char*> keys)
+  const mdl::Entity& entity,
+  const std::initializer_list<const char*> keys,
+  const bool fallback = false)
 {
-  return intProperty(entity, keys).value_or(0) != 0;
+  return intProperty(entity, keys).value_or(fallback ? 1 : 0) != 0;
 }
 
 /**
@@ -526,9 +529,33 @@ void readProjectedTexture(const mdl::Entity& entity, PreviewLight& light)
   light.projectUp = vm::normalize(vm::cross(light.projectRight, light.direction));
 }
 
-PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
+/**
+ * The values the compilers start a Quake 2 map from, which differ from the ones every
+ * other game gets: brighter overall, bouncing once by default and more gently, with
+ * surface lights turned down and colour allowed into a bounce.
+ *
+ * Only the ones a map does not set itself apply, which is what taking them before the
+ * map is read amounts to.
+ */
+void applyQuake2Defaults(PreviewGlobalLighting& result)
+{
+  result.rangeScale = 1.0f;
+  result.bounceColorScale = 0.5f;
+  result.surfaceLightScale = 0.65f;
+  result.surfaceSkyLightScale = 0.65f;
+  result.bounceScale = 0.85f;
+  result.bounces = 1;
+  result.bounceStyled = true;
+}
+
+PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn, const bool quake2)
 {
   auto result = PreviewGlobalLighting{};
+
+  if (quake2)
+  {
+    applyQuake2Defaults(result);
+  }
 
   const auto skyDomeIntensity = floatProperty(worldspawn, {"_sunlight2"}).value_or(0.0f);
   const auto skyDomeColor =
@@ -557,7 +584,7 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
   result.domeDirt = flagProperty(worldspawn, {"_sunlight2_dirt"});
   // "_bouncestyled" lets the light of a switchable or animated light bounce; without it
   // the compilers bounce only the steady lights.
-  result.bounceStyled = flagProperty(worldspawn, {"_bouncestyled"});
+  result.bounceStyled = flagProperty(worldspawn, {"_bouncestyled"}, result.bounceStyled);
 
   result.dirt = flagProperty(worldspawn, {"_dirt", "_dirty"});
   result.dirtMode = intProperty(worldspawn, {"_dirtmode"}).value_or(0);
@@ -574,7 +601,7 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
   // ericw-tools halves every lightmap unless the map says otherwise, so a preview that
   // leaves it at one is twice as bright as the compile it is standing in for.
   result.rangeScale =
-    std::max(floatProperty(worldspawn, {"_range"}).value_or(DefaultRangeScale), 0.0f);
+    std::max(floatProperty(worldspawn, {"_range"}).value_or(result.rangeScale), 0.0f);
   result.gamma =
     std::clamp(floatProperty(worldspawn, {"_gamma"}).value_or(1.0f), 0.1f, 5.0f);
   result.maxLight =
@@ -586,17 +613,22 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
   // bounce ignores the colour of the surface it came off unless that is asked for too.
   // "_bounce" is a count: how many times light is allowed to bounce. Clamped because the
   // preview pays for every extra bounce on every pass, where the compiler pays once.
-  result.bounces =
-    std::clamp(intProperty(worldspawn, {"_bounce"}).value_or(0), 0, MaxPreviewBounces);
-  result.bounceScale =
-    std::max(floatProperty(worldspawn, {"_bouncescale"}).value_or(1.0f), 0.0f);
+  result.bounces = std::clamp(
+    intProperty(worldspawn, {"_bounce"}).value_or(result.bounces), 0, MaxPreviewBounces);
+  result.bounceScale = std::max(
+    floatProperty(worldspawn, {"_bouncescale"}).value_or(result.bounceScale), 0.0f);
   result.bounceColorScale = std::clamp(
-    floatProperty(worldspawn, {"_bouncecolorscale"}).value_or(0.0f), 0.0f, 1.0f);
+    floatProperty(worldspawn, {"_bouncecolorscale"}).value_or(result.bounceColorScale),
+    0.0f,
+    1.0f);
 
-  result.surfaceLightScale =
-    std::max(floatProperty(worldspawn, {"_surflightscale"}).value_or(1.0f), 0.0f);
-  result.surfaceSkyLightScale =
-    std::max(floatProperty(worldspawn, {"_surflightskyscale"}).value_or(1.0f), 0.0f);
+  result.surfaceLightScale = std::max(
+    floatProperty(worldspawn, {"_surflightscale"}).value_or(result.surfaceLightScale),
+    0.0f);
+  result.surfaceSkyLightScale = std::max(
+    floatProperty(worldspawn, {"_surflightskyscale"})
+      .value_or(result.surfaceSkyLightScale),
+    0.0f);
   result.surfaceLightAtten =
     std::max(floatProperty(worldspawn, {"_surflight_atten"}).value_or(1.0f), 0.0f);
   result.surfaceLightMinLightScale = std::max(
@@ -962,7 +994,12 @@ PreviewLighting extractLighting(const mdl::Map& map)
   const auto& worldNode = map.worldNode();
   const auto& worldspawn = worldNode.entity();
 
-  result.globals = parseGlobals(worldspawn);
+  // The compilers start a Quake 2 map from a different set of defaults, so which game
+  // the map is for decides what a key the map leaves out is worth.
+  const auto quake2 = worldNode.mapFormat() == mdl::MapFormat::Quake2
+                      || worldNode.mapFormat() == mdl::MapFormat::Quake2_Valve;
+
+  result.globals = parseGlobals(worldspawn, quake2);
   addWorldspawnSuns(worldspawn, result);
 
   auto entities = std::vector<const mdl::Entity*>{};

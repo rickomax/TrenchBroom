@@ -542,6 +542,60 @@ TEST_CASE("extractLighting")
     }
   }
 
+  SECTION("a Quake 2 map starts from different defaults")
+  {
+    auto quake2Fixture = mdl::MapFixture{};
+    auto& quake2Map = quake2Fixture.create(mdl::Quake2FixtureConfig);
+
+    SECTION("the compilers leave a Quake 2 lightmap alone and bounce it once")
+    {
+      setWorldspawn(quake2Map, {});
+
+      const auto globals = extractLighting(quake2Map).globals;
+      CHECK(globals.rangeScale == Catch::Approx(1.0));
+      CHECK(globals.bounces == 1);
+      CHECK(globals.bounceScale == Catch::Approx(0.85));
+      CHECK(globals.bounceColorScale == Catch::Approx(0.5));
+      CHECK(globals.bounceStyled);
+      CHECK(globals.surfaceLightScale == Catch::Approx(0.65));
+      CHECK(globals.surfaceSkyLightScale == Catch::Approx(0.65));
+    }
+
+    SECTION("a Quake 2 map that sets a key still gets what it asked for")
+    {
+      setWorldspawn(
+        quake2Map,
+        {{"_range", "0.25"},
+         {"_bounce", "3"},
+         {"_bouncescale", "2"},
+         {"_bouncecolorscale", "0"},
+         {"_bouncestyled", "0"},
+         {"_surflightscale", "1.5"},
+         {"_surflightskyscale", "1.5"}});
+
+      const auto globals = extractLighting(quake2Map).globals;
+      CHECK(globals.rangeScale == Catch::Approx(0.25));
+      CHECK(globals.bounces == 3);
+      CHECK(globals.bounceScale == Catch::Approx(2.0));
+      CHECK(globals.bounceColorScale == Catch::Approx(0.0));
+      CHECK_FALSE(globals.bounceStyled);
+      CHECK(globals.surfaceLightScale == Catch::Approx(1.5));
+      CHECK(globals.surfaceSkyLightScale == Catch::Approx(1.5));
+    }
+
+    SECTION("the keys the compilers do not override still have their usual defaults")
+    {
+      setWorldspawn(quake2Map, {});
+
+      const auto globals = extractLighting(quake2Map).globals;
+      CHECK(globals.distScale == Catch::Approx(1.0));
+      CHECK(globals.gamma == Catch::Approx(1.0));
+      CHECK(globals.defaultAngleScale == Catch::Approx(0.5));
+      CHECK(globals.surfaceLightAtten == Catch::Approx(1.0));
+      CHECK_FALSE(globals.dirt);
+    }
+  }
+
   SECTION("surface lights")
   {
     SECTION("_surface names the texture that emits")

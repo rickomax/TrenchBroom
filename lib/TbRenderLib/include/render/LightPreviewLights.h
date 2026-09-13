@@ -190,12 +190,20 @@ constexpr auto MaxPreviewBounces = int32_t(16);
 /**
  * What "_range" is when a map does not say: ericw-tools halves every lightmap, and a
  * preview that does not is twice as bright as the compile it stands in for.
+ *
+ * A Quake 2 map is the exception and keeps its lightmap whole; see PreviewGlobalLighting
+ * for the rest of the defaults that game is compiled with.
  */
 constexpr auto DefaultRangeScale = 0.5f;
 
 /**
  * Lighting that has no position: the sky domes, the global minimum light, and the knobs
  * that scale every light in the map.
+ *
+ * The defaults here are the ones the compilers use for every game but Quake 2, which
+ * they give a brighter, bouncing set of its own: "_range" 1, "_bounce" 1, "_bouncescale"
+ * 0.85, "_bouncecolorscale" 0.5, "_bouncestyled" on, and both surface light scales 0.65.
+ * A Quake 2 map that sets one of those keys still gets what it asked for.
  */
 struct PreviewGlobalLighting
 {
@@ -225,7 +233,7 @@ struct PreviewGlobalLighting
    * "_range": scales the brightness of every light without changing its reach.
    *
    * The compilers halve every lightmap unless the map says otherwise, so this is what a
-   * map that says nothing gets.
+   * map that says nothing gets. A Quake 2 map gets 1 instead.
    */
   float rangeScale = DefaultRangeScale;
   /** "_gamma": applied to the final image. */
@@ -238,7 +246,7 @@ struct PreviewGlobalLighting
 
   /**
    * "_bounce": how many times light bounces. Zero, the default, means the compilers
-   * compute no indirect light at all.
+   * compute no indirect light at all; a Quake 2 map bounces once.
    */
   int32_t bounces = 0;
   /** "_bouncescale": how strong indirect light is. */
