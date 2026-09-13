@@ -1023,13 +1023,25 @@ vm::vec3f tracePreviewPixel(
 
     const auto position = origin + direction * hit->distance;
 
-    // Faces are one sided, but the camera can end up behind one, so shade whichever side
-    // the ray arrived on.
-    const auto geometricNormal = shading.normal;
-    const auto normal =
-      vm::dot(geometricNormal, direction) < 0.0f ? geometricNormal : -geometricNormal;
-
     const auto w = 1.0f - hit->u - hit->v;
+
+    // A surface the map asks to be smoothed is shaded with the normal its corners carry
+    // rather than the one its plane has, which is what rounds off brushwork built as a
+    // run of flat faces.
+    const auto geometricNormal =
+      shading.smoothIndex >= 0
+        ? vm::normalize(
+            scene.smoothNormals[size_t(shading.smoothIndex)].normal0 * w
+            + scene.smoothNormals[size_t(shading.smoothIndex)].normal1 * hit->u
+            + scene.smoothNormals[size_t(shading.smoothIndex)].normal2 * hit->v)
+        : shading.normal;
+
+    // Faces are one sided, but the camera can end up behind one, so shade whichever side
+    // the ray arrived on. Which side that is comes from the plane rather than from a
+    // smoothed normal, which can lean past the edge of the surface it belongs to.
+    const auto normal =
+      vm::dot(shading.normal, direction) < 0.0f ? geometricNormal : -geometricNormal;
+
     const auto uv = shading.uv0 * w + shading.uv1 * hit->u + shading.uv2 * hit->v;
     const auto albedo = scene.materials[shading.materialIndex]->sample(uv);
 

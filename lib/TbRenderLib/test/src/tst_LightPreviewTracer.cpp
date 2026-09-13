@@ -1133,6 +1133,37 @@ TEST_CASE("tracePreviewPixel")
     CHECK(test.shade(256, 40.0f) == Catch::Approx(display(300.0f)).margin(0.02));
   }
 
+  SECTION("a smoothed surface is shaded with the normal its corners carry")
+  {
+    const auto lit = [](const std::optional<vm::vec3f>& cornerNormal) {
+      auto test = TestScene{};
+
+      auto light = TestScene::makePointLight(300.0f, PreviewAttenuation::None);
+      light.angleScale = 1.0f;
+      test.scene.lights.push_back(light);
+
+      if (cornerNormal)
+      {
+        test.scene.smoothNormals.push_back(
+          PreviewSmoothNormals{*cornerNormal, *cornerNormal, *cornerNormal});
+        for (auto& shading : test.scene.triangleShading)
+        {
+          shading.smoothIndex = 0;
+        }
+      }
+
+      test.finish();
+      return test.shade(64);
+    };
+
+    // Flat, the floor faces the light square on.
+    CHECK(lit(std::nullopt) == Catch::Approx(display(300.0f)).margin(0.01));
+
+    // Leaning sixty degrees away from it, half of the light lands.
+    const auto tilted = vm::normalize(vm::vec3f{std::sqrt(3.0f) / 2.0f, 0, 0.5f});
+    CHECK(lit(tilted) == Catch::Approx(display(150.0f)).margin(0.02));
+  }
+
   SECTION("a light does not reach a surface on another channel")
   {
     auto test = TestScene{};

@@ -51,8 +51,10 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <map>
 #include <optional>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -410,6 +412,12 @@ struct MaterialLookup
 };
 
 /**
+ * What "_phong" asks for when it does not name an angle, which is everything short of a
+ * right angle.
+ */
+constexpr auto DefaultPhongAngle = 89.0f;
+
+/**
  * The lighting keys a brush model can carry, which apply to every face of that model.
  */
 struct BrushModelLighting
@@ -428,6 +436,8 @@ struct BrushModelLighting
   bool shadowsWorldOnly = false;
   /** "_dirt" "-1": this model is never darkened by dirt. */
   bool noDirt = false;
+  /** "_phong_angle", or the compilers' own when "_phong" asks without naming one. */
+  float phongAngle = 0.0f;
   /** "_alpha": how much of the surface a ray sees, when the model says so itself. */
   std::optional<float> alpha;
 };
@@ -570,6 +580,13 @@ BrushModelLighting readBrushModelLighting(
   // "_dirt" "-1" on a model keeps dirt off it whatever the map asks for.
   result.noDirt = number("_dirt").value_or(0.0f) < 0.0f;
 
+  // An angle of its own wins; "_phong" on its own asks for the compilers' default, which
+  // smooths everything short of a right angle.
+  const auto phongAngle = number("_phong_angle").value_or(0.0f);
+  result.phongAngle = phongAngle != 0.0f                       ? phongAngle
+                      : number("_phong").value_or(0.0f) > 0.0f ? DefaultPhongAngle
+                                                               : 0.0f;
+
   return result;
 }
 
@@ -648,6 +665,7 @@ void addBrushFace(
   shading.shadowsSelfOnly = brushModel.shadowsSelfOnly;
   shading.shadowsWorldOnly = brushModel.shadowsWorldOnly;
   shading.noDirt = brushModel.noDirt;
+  shading.phongAngle = brushModel.phongAngle;
 
   if (skyClassifier.isSky(material, surfaceFlags))
   {
@@ -751,6 +769,7 @@ void addPatch(
   shading.shadowsSelfOnly = brushModel.shadowsSelfOnly;
   shading.shadowsWorldOnly = brushModel.shadowsWorldOnly;
   shading.noDirt = brushModel.noDirt;
+  shading.phongAngle = brushModel.phongAngle;
 
   if (skyClassifier.isSky(material, 0))
   {
@@ -1079,6 +1098,136 @@ bool PreviewMaterial::transparentAt(const vm::vec2f& uv) const
   return opaque[wrapTexel(uv.y(), height) * width + wrapTexel(uv.x(), width)] == 0;
 }
 
+/**
+ * Smooths the normal across faces that meet within the angle their model asks for, which
+ * is what the compilers shade curved brushwork with.
+ *
+ * A corner's normal is the average of the normals of every surface touching it that is
+ * within the angle, weighted by how much of each surface meets there: its area times the
+ * angle it turns through at that corner. Faces further apart than the angle are left
+ * alone, which is what keeps a smoothed arch from rounding off the wall it sits in.
+ *
+ * The compilers weigh each whole face; this weighs each triangle a face was cut into,
+ * which comes to nearly the same thing and does not need the faces kept around.
+ */
+void applySmoothNormals(PreviewScene& scene)
+{
+  const auto count = scene.triangleShading.size();
+
+  auto wantsPhong = false;
+  for (const auto& shading : scene.triangleShading)
+  {
+    wantsPhong = wantsPhong || shading.phongAngle > 0.0f;
+  }
+  if (!wantsPhong)
+  {
+    return;
+  }
+
+  // The corners of every triangle, gathered by where they are, so that the surfaces
+  // meeting at a point can be found without comparing every pair.
+  struct Corner
+  {
+    uint32_t triangle;
+    int32_t index;
+  };
+
+  const auto key = [](const vm::vec3f& p) {
+    // Brush vertices are snapped to the grid, so rounding to a hundredth of a unit puts
+    // the ones that are meant to be the same point in the same bucket.
+    const auto round = [](const float v) { return int64_t(std::lround(v * 100.0f)); };
+    return std::tuple{round(p.x()), round(p.y()), round(p.z())};
+  };
+
+  auto corners = std::map<std::tuple<int64_t, int64_t, int64_t>, std::vector<Corner>>{};
+
+  const auto cornerPosition = [&](const uint32_t triangle, const int32_t index) {
+    const auto& position = scene.trianglePositions[triangle];
+    return index == 0   ? position.p0
+           : index == 1 ? position.p0 + position.e1
+                        : position.p0 + position.e2;
+  };
+
+  for (uint32_t i = 0; i < uint32_t(count); ++i)
+  {
+    if (scene.triangleShading[i].phongAngle <= 0.0f)
+    {
+      continue;
+    }
+    for (int32_t j = 0; j < 3; ++j)
+    {
+      corners[key(cornerPosition(i, j))].push_back(Corner{i, j});
+    }
+  }
+
+  for (uint32_t i = 0; i < uint32_t(count); ++i)
+  {
+    auto& shading = scene.triangleShading[i];
+    if (shading.phongAngle <= 0.0f)
+    {
+      continue;
+    }
+
+    auto smoothed = PreviewSmoothNormals{shading.normal, shading.normal, shading.normal};
+
+    for (int32_t j = 0; j < 3; ++j)
+    {
+      const auto position = cornerPosition(i, j);
+      auto sum = vm::vec3f{0, 0, 0};
+
+      for (const auto& corner : corners[key(position)])
+      {
+        const auto& other = scene.triangleShading[corner.triangle];
+        if (other.objectIndex != shading.objectIndex)
+        {
+          continue;
+        }
+
+        // Both surfaces have to be willing, and the tighter of the two angles decides,
+        // which is how one face keeps another from smoothing into it.
+        const auto threshold = std::min(shading.phongAngle, other.phongAngle);
+        if (vm::dot(shading.normal, other.normal) < std::cos(vm::to_radians(threshold)))
+        {
+          continue;
+        }
+
+        const auto& otherPosition = scene.trianglePositions[corner.triangle];
+        const auto area =
+          0.5f * vm::length(vm::cross(otherPosition.e1, otherPosition.e2));
+
+        // How far the surface turns through this corner, so that a long thin triangle
+        // counts for as little as it looks.
+        const auto a = cornerPosition(corner.triangle, (corner.index + 1) % 3) - position;
+        const auto b = cornerPosition(corner.triangle, (corner.index + 2) % 3) - position;
+        const auto lengths = vm::length(a) * vm::length(b);
+        const auto angle = lengths > 0.0f
+                             ? std::acos(std::clamp(vm::dot(a, b) / lengths, -1.0f, 1.0f))
+                             : 0.0f;
+
+        sum = sum + other.normal * (area * angle);
+      }
+
+      if (vm::squared_length(sum) > 0.0f)
+      {
+        const auto normal = vm::normalize(sum);
+        (j == 0   ? smoothed.normal0
+         : j == 1 ? smoothed.normal1
+                  : smoothed.normal2) = normal;
+      }
+    }
+
+    // Nothing was near enough to smooth with, so the surface stays flat and pays for no
+    // interpolation while it is traced.
+    if (
+      smoothed.normal0 != shading.normal || smoothed.normal1 != shading.normal
+      || smoothed.normal2 != shading.normal)
+    {
+      shading.smoothIndex = int32_t(scene.smoothNormals.size());
+      scene.smoothNormals.push_back(smoothed);
+    }
+  }
+}
+
 PreviewScene buildPreviewScene(
   const mdl::Map& map,
   gl::Gl& gl,
@@ -1185,6 +1334,7 @@ PreviewScene buildPreviewScene(
   // whole list; the entries are shared rather than copied.
   scene.materials = materialCache.materials();
 
+  applySmoothNormals(scene);
   applySurfaceLights(scene, lighting);
   buildEmitterList(scene);
   resolveProjectedTextures(scene, materialCache);

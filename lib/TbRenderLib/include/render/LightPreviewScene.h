@@ -159,6 +159,25 @@ struct PreviewTriangleShading
   bool shadowsWorldOnly = false;
   /** "_dirt" "-1" on the brush model: this surface is never darkened by dirt. */
   bool noDirt = false;
+  /**
+   * "_phong_angle" on the brush model: how far apart two faces' normals may be and still
+   * be smoothed across. Zero, the usual case, means the surface is shaded flat.
+   */
+  float phongAngle = 0.0f;
+  /**
+   * Where this triangle's smoothed corner normals are in PreviewScene::smoothNormals, or
+   * -1 when it is shaded flat. Kept aside so that a map using no phong pays nothing for
+   * the three normals a smoothed triangle needs.
+   */
+  int32_t smoothIndex = -1;
+};
+
+/** The smoothed normals at the three corners of one triangle. See phong shading. */
+struct PreviewSmoothNormals
+{
+  vm::vec3f normal0;
+  vm::vec3f normal1;
+  vm::vec3f normal2;
 };
 
 /**
@@ -227,6 +246,8 @@ struct PreviewScene
   std::vector<PreviewTriangleShading> triangleShading;
   std::vector<std::shared_ptr<const PreviewMaterial>> materials;
   std::vector<PreviewLight> lights;
+  /** Smoothed corner normals, indexed by PreviewTriangleShading::smoothIndex. */
+  std::vector<PreviewSmoothNormals> smoothNormals;
   std::vector<PreviewEmitter> emitters;
   float totalEmitterArea = 0.0f;
 
