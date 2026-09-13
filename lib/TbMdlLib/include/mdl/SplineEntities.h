@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include "mdl/Brush.h"
 #include "mdl/Entity.h"
 #include "mdl/Spline.h"
 
@@ -43,6 +44,23 @@ struct SplineTemplateEntity
   vm::bbox3d bounds;
 
   kdl_reflect_decl(SplineTemplateEntity, entity, bounds);
+};
+
+/**
+ * A brush entity belonging to a spline's template: the entity itself, without the
+ * brushes it holds in the map, and those brushes.
+ *
+ * Its brushes are swept like any other template brush, but the copies are not left in
+ * the spline's own entity with the rest: each copy is given an entity of its own
+ * carrying these properties, so that a template's func_detail sweeps into func_details
+ * and its trigger sweeps into triggers rather than all of it turning into worldspawn.
+ */
+struct SplineTemplateBrushEntity
+{
+  Entity entity;
+  std::vector<Brush> brushes;
+
+  kdl_reflect_decl(SplineTemplateBrushEntity, entity, brushes);
 };
 
 /**

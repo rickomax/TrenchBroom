@@ -193,6 +193,76 @@ TEST_CASE("SplineEntity")
     }
   }
 
+  SECTION("template brush entity snapshot round-trip")
+  {
+    const auto worldBounds = vm::bbox3d{8192.0};
+    const auto builder = BrushBuilder{MapFormat::Standard, worldBounds};
+    const auto makeBrush = [&](const vm::bbox3d& bounds) {
+      return builder.createCuboid(bounds, "some_material") | kdl::value();
+    };
+
+    auto templateEntity = Entity{};
+    templateEntity.addOrUpdateProperty("classname", "func_detail");
+    templateEntity.addOrUpdateProperty("_phong", "1");
+
+    const auto brushEntities = std::vector<SplineTemplateBrushEntity>{
+      SplineTemplateBrushEntity{
+        std::move(templateEntity),
+        {makeBrush(vm::bbox3d{{0, -16, -16}, {32, 16, 16}}),
+         makeBrush(vm::bbox3d{{32, -16, -16}, {64, 16, 16}})}},
+    };
+
+    const auto entity = writeSplineTemplateBrushEntities(Entity{}, brushEntities);
+    CHECK(entity.property("_spline_template_solid_0") != nullptr);
+    CHECK(entity.property("_spline_template_solid_0_brush_0") != nullptr);
+    CHECK(entity.property("_spline_template_solid_0_brush_1") != nullptr);
+
+    const auto parsed =
+      parseSplineTemplateBrushEntities(entity, MapFormat::Standard, worldBounds);
+    REQUIRE(parsed.size() == 1);
+
+    CHECK(parsed.front().entity.classname() == "func_detail");
+    CHECK(*parsed.front().entity.property("_phong") == "1");
+
+    REQUIRE(parsed.front().brushes.size() == 2);
+    CHECK(parsed.front().brushes[0].bounds().max.x() == vm::approx{32.0});
+    CHECK(parsed.front().brushes[1].bounds().min.x() == vm::approx{32.0});
+
+    SECTION("the brush snapshot is written under its own prefix")
+    {
+      // "_spline_template_brush_" is a prefix of the key these would have had, so
+      // rewriting the plain brush snapshot would have taken them with it.
+      const auto both = writeSplineTemplateBrushes(
+        entity, {makeBrush(vm::bbox3d{{0, 0, 0}, {16, 16, 16}})});
+
+      CHECK(both.property("_spline_template_brush_0") != nullptr);
+      CHECK(
+        parseSplineTemplateBrushEntities(both, MapFormat::Standard, worldBounds).size()
+        == 1);
+    }
+
+    SECTION("an empty snapshot removes the entities and their brushes")
+    {
+      const auto clearedEntity = writeSplineTemplateBrushEntities(entity, {});
+      CHECK(clearedEntity.property("_spline_template_solid_0") == nullptr);
+      CHECK(clearedEntity.property("_spline_template_solid_0_brush_0") == nullptr);
+      CHECK(
+        parseSplineTemplateBrushEntities(clearedEntity, MapFormat::Standard, worldBounds)
+          .empty());
+    }
+
+    SECTION("an entity whose brushes are all gone contributes nothing")
+    {
+      auto withoutBrushes = entity;
+      withoutBrushes.removeProperty("_spline_template_solid_0_brush_0");
+      withoutBrushes.removeProperty("_spline_template_solid_0_brush_1");
+
+      CHECK(
+        parseSplineTemplateBrushEntities(withoutBrushes, MapFormat::Standard, worldBounds)
+          .empty());
+    }
+  }
+
   SECTION("splineEntityId")
   {
     // A spline with no data has nothing to tie generated entities to.

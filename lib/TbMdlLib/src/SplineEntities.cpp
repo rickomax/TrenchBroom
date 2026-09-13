@@ -33,6 +33,7 @@ namespace tb::mdl
 {
 
 kdl_reflect_impl(SplineTemplateEntity);
+kdl_reflect_impl(SplineTemplateBrushEntity);
 
 std::optional<vm::bbox3d> splineTemplateEntityBounds(
   const std::vector<SplineTemplateEntity>& templateEntities)

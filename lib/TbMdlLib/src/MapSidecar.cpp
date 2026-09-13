@@ -116,6 +116,7 @@ const std::vector<std::string>& sidecarPropertyPrefixes()
     SplinePropertyKeys::PointPrefix,
     SplinePropertyKeys::TemplateBrushPrefix,
     SplinePropertyKeys::TemplateEntityPrefix,
+    SplinePropertyKeys::TemplateSolidPrefix,
     SplinePropertyKeys::Subdivisions,
     SplinePropertyKeys::Closed,
     SplinePropertyKeys::LockUVs,

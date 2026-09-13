@@ -93,6 +93,25 @@ enum class SplineUVMode
  * Returns an error if the lattice or the spline is degenerate, or if no brushes
  * could be created.
  */
+/**
+ * The brushes of each copy on its own, in the order the copies run along the spline,
+ * rather than all of them together. See createSplineBrushes, which is this flattened.
+ *
+ * A template brush entity is replicated as an entity per copy, the way a template point
+ * entity is, so which copy a brush belongs to is what decides which entity it goes in.
+ * A copy whose cells all collapsed contributes an empty entry rather than being left
+ * out, so that the entries stay in step with the copies.
+ */
+Result<std::vector<std::vector<Brush>>> createSplineBrushCopies(
+  MapFormat mapFormat,
+  const vm::bbox3d& worldBounds,
+  const std::vector<SplinePoint>& points,
+  const std::vector<const Brush*>& templateBrushes,
+  const vm::bbox3d& templateBounds,
+  bool closed = false,
+  SplineUVMode uvMode = SplineUVMode::Follow,
+  bool keepTemplateSize = false);
+
 Result<std::vector<Brush>> createSplineBrushes(
   MapFormat mapFormat,
   const vm::bbox3d& worldBounds,

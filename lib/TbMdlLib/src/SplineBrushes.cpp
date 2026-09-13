@@ -33,7 +33,10 @@
 #include "vm/vec.h"
 #include "vm/vec_ext.h"
 
+#include <algorithm>
+#include <iterator>
 #include <optional>
+#include <ranges>
 #include <vector>
 
 namespace tb::mdl
@@ -228,7 +231,7 @@ void copyFaceAttributes(
 
 } // namespace
 
-Result<std::vector<Brush>> createSplineBrushes(
+Result<std::vector<std::vector<Brush>>> createSplineBrushCopies(
   const MapFormat mapFormat,
   const vm::bbox3d& worldBounds,
   const std::vector<SplinePoint>& points,
@@ -262,7 +265,7 @@ Result<std::vector<Brush>> createSplineBrushes(
 
   const auto builder = BrushBuilder{mapFormat, worldBounds};
 
-  auto brushes = std::vector<Brush>{};
+  auto copies = std::vector<std::vector<Brush>>{};
 
   // One copy of every template brush per span between two consecutive frames. Each
   // template brush is decomposed into tetrahedra before deforming: a tetrahedron is a
@@ -278,6 +281,7 @@ Result<std::vector<Brush>> createSplineBrushes(
   // snapping cannot open gaps.
   for (size_t i = 0; i < frames.size() - 1; ++i)
   {
+    auto& copy = copies.emplace_back();
     const auto& a = frames[i];
     // Kept at its own size, the copy runs a template's length straight along the span
     // rather than bending around it, so the curve neither stretches nor bends it. It
@@ -330,7 +334,7 @@ Result<std::vector<Brush>> createSplineBrushes(
             materialName)
             | kdl::transform([&](Brush brush) {
                 copyFaceAttributes(brush, templateFaces, uvMode);
-                brushes.push_back(std::move(brush));
+                copy.push_back(std::move(brush));
               })
             | kdl::transform_error([](const auto&) {
                 // Skip degenerate tetrahedra, e.g. where the deformation or the
@@ -341,12 +345,44 @@ Result<std::vector<Brush>> createSplineBrushes(
     }
   }
 
-  if (brushes.empty())
+  if (std::ranges::all_of(copies, [](const auto& copy) { return copy.empty(); }))
   {
     return Error{"Could not create any spline brushes"};
   }
 
-  return brushes;
+  return copies;
+}
+
+Result<std::vector<Brush>> createSplineBrushes(
+  const MapFormat mapFormat,
+  const vm::bbox3d& worldBounds,
+  const std::vector<SplinePoint>& points,
+  const std::vector<const Brush*>& templateBrushes,
+  const vm::bbox3d& templateBounds,
+  const bool closed,
+  const SplineUVMode uvMode,
+  const bool keepTemplateSize)
+{
+  return createSplineBrushCopies(
+           mapFormat,
+           worldBounds,
+           points,
+           templateBrushes,
+           templateBounds,
+           closed,
+           uvMode,
+           keepTemplateSize)
+         | kdl::transform([](auto copies) {
+             auto brushes = std::vector<Brush>{};
+             for (auto& copy : copies)
+             {
+               brushes.insert(
+                 brushes.end(),
+                 std::make_move_iterator(copy.begin()),
+                 std::make_move_iterator(copy.end()));
+             }
+             return brushes;
+           });
 }
 
 } // namespace tb::mdl

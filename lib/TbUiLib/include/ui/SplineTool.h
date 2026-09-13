@@ -117,6 +117,7 @@ private:
   std::optional<mdl::IdType> m_templateGroupId;
   std::vector<mdl::Brush> m_templateBrushes;
   std::vector<mdl::SplineTemplateEntity> m_templateEntities;
+  std::vector<mdl::SplineTemplateBrushEntity> m_templateBrushEntities;
 
   /** Whether clicking empty space appends new points. */
   bool m_addPointMode = false;
@@ -320,10 +321,13 @@ private:
    */
   void commitSpline(const std::string& commandName);
 
-  /** The brushes and point entities the template is made of, in template space. */
+  /** The brushes and entities the template is made of, in template space. */
   struct TemplateContents
   {
+    /** The template's worldspawn brushes, which sweep into the spline's own entity. */
     std::vector<const mdl::Brush*> brushes;
+    /** The template's brush entities, which sweep into entities of their own class. */
+    std::vector<mdl::SplineTemplateBrushEntity> brushEntities;
     std::vector<mdl::SplineTemplateEntity> entities;
     /** The lattice the sweep deforms, which the brushes size when there are any. */
     vm::bbox3d bounds;
@@ -333,15 +337,16 @@ private:
   std::vector<mdl::Node*> createBrushNodes(const TemplateContents& contents) const;
 
   /**
-   * The point entities to place along the curve, each marked as belonging to the
-   * spline with the given id. Unlike the brushes these cannot be children of the
-   * spline's entity, since an entity holds only brushes and patches, so they are
-   * added beside it and the marker is what ties them back to it.
+   * The entities to place along the curve, each marked as belonging to the spline with
+   * the given id: a copy of every template point entity, and one of every template
+   * brush entity holding that copy's swept brushes. Unlike the worldspawn brushes these
+   * cannot be children of the spline's entity, since an entity holds only brushes and
+   * patches, so they are added beside it and the marker is what ties them back to it.
    */
   std::vector<mdl::Node*> createEntityNodes(
     const TemplateContents& contents, const std::string& splineId) const;
 
-  /** The point entities the spline currently owns, found by their marker. */
+  /** The entities the spline currently owns, found by their marker. */
   std::vector<mdl::Node*> findGeneratedEntityNodes() const;
 
 private:

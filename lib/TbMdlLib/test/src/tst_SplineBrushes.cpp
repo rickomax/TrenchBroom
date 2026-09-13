@@ -94,6 +94,59 @@ TEST_CASE("createSplineBrushes")
             .is_error());
   }
 
+  SECTION("createSplineBrushCopies keeps the copies apart")
+  {
+    // Four template lengths of spline, so four copies, which is what a template brush
+    // entity needs kept apart to become an entity per copy.
+    const auto points = std::vector<SplinePoint>{
+      SplinePoint{vm::vec3d{0, 0, 0}},
+      SplinePoint{vm::vec3d{256, 0, 0}},
+    };
+
+    const auto copies =
+      createSplineBrushCopies(
+        MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
+      | kdl::value();
+
+    REQUIRE(copies.size() == 4);
+
+    // Every copy holds the same brushes it would hold in the flat list, in the same
+    // order, and each one sits a template length further along than the last.
+    const auto flat =
+      createSplineBrushes(
+        MapFormat::Standard, worldBounds, points, templateBrushes, templateBounds)
+      | kdl::value();
+
+    auto flattened = std::vector<Brush>{};
+    for (const auto& copy : copies)
+    {
+      CHECK_FALSE(copy.empty());
+      for (const auto& brush : copy)
+      {
+        flattened.push_back(brush);
+      }
+    }
+
+    REQUIRE(flattened.size() == flat.size());
+    for (size_t i = 0; i < flat.size(); ++i)
+    {
+      CHECK(flattened[i].vertexPositions() == flat[i].vertexPositions());
+    }
+
+    // The copies run along the curve in order and meet end to end, so each one is a
+    // whole copy rather than a slice of two. Their lengths differ, since it is the
+    // curve's own parameterisation that decides where one ends and the next begins.
+    CHECK(unitedBounds(copies.front()).min.x() == vm::approx{0.0});
+    CHECK(unitedBounds(copies.back()).max.x() == vm::approx{256.0});
+
+    for (size_t i = 0; i + 1 < copies.size(); ++i)
+    {
+      CHECK(
+        unitedBounds(copies[i]).max.x()
+        == vm::approx{unitedBounds(copies[i + 1]).min.x()});
+    }
+  }
+
   SECTION("straight spline reproduces the tiled template")
   {
     const auto points = std::vector<SplinePoint>{
