@@ -549,8 +549,15 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
   const auto minLightColor = colorProperty(worldspawn, {"_minlight_color", "_mincolor"})
                                .value_or(vm::vec3f{1, 1, 1});
   result.minLight = minLightColor * minLightIntensity;
+  result.minLightColor = minLightColor;
+  result.minLightMottle =
+    flagProperty(worldspawn, {"_minlight_mottle", "_minlightMottle"});
 
   result.addMinLight = flagProperty(worldspawn, {"_addmin"});
+  result.domeDirt = flagProperty(worldspawn, {"_sunlight2_dirt"});
+  // "_bouncestyled" lets the light of a switchable or animated light bounce; without it
+  // the compilers bounce only the steady lights.
+  result.bounceStyled = flagProperty(worldspawn, {"_bouncestyled"});
 
   result.dirt = flagProperty(worldspawn, {"_dirt", "_dirty"});
   result.dirtMode = intProperty(worldspawn, {"_dirtmode"}).value_or(0);
@@ -590,6 +597,12 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
     std::max(floatProperty(worldspawn, {"_surflightscale"}).value_or(1.0f), 0.0f);
   result.surfaceSkyLightScale =
     std::max(floatProperty(worldspawn, {"_surflightskyscale"}).value_or(1.0f), 0.0f);
+  result.surfaceLightAtten =
+    std::max(floatProperty(worldspawn, {"_surflight_atten"}).value_or(1.0f), 0.0f);
+  result.surfaceLightMinLightScale = std::max(
+    floatProperty(worldspawn, {"_surflight_minlight_scale"}).value_or(1.0f), 0.0f);
+  result.skySurface = colorProperty(worldspawn, {"_sky_surface", "_sun_surface"})
+                        .value_or(vm::vec3f{0, 0, 0});
 
   return result;
 }
@@ -604,7 +617,8 @@ void addWorldspawnSuns(const mdl::Entity& worldspawn, PreviewLighting& lighting)
                         const std::initializer_list<const char*> intensityKeys,
                         const std::initializer_list<const char*> colorKeys,
                         const std::initializer_list<const char*> mangleKeys,
-                        const float penumbra) {
+                        const float penumbra,
+                        const bool dirt) {
     const auto intensity = floatProperty(worldspawn, intensityKeys).value_or(0.0f);
     if (intensity <= 0.0f)
     {
@@ -619,6 +633,9 @@ void addWorldspawnSuns(const mdl::Entity& worldspawn, PreviewLighting& lighting)
     light.angleScale = floatProperty(worldspawn, {"_anglescale", "_anglesense"})
                          .value_or(lighting.globals.defaultAngleScale);
     light.penumbra = penumbra;
+    // "_sunlight_dirt" is what asks for a sun to be darkened where a surface is shut in;
+    // a sun says nothing about it otherwise, so it takes part only if the map does.
+    light.dirt = dirt ? 1 : 0;
 
     auto direction = vm::vec3f{0, 0, -1};
     if (const auto* mangle = findProperty(worldspawn, mangleKeys))
@@ -637,12 +654,15 @@ void addWorldspawnSuns(const mdl::Entity& worldspawn, PreviewLighting& lighting)
   const auto penumbra =
     std::max(floatProperty(worldspawn, {"_sunlight_penumbra"}).value_or(0.0f), 0.0f);
 
+  const auto sunDirt = flagProperty(worldspawn, {"_sunlight_dirt"});
+
   addSun(
     {"_sunlight", "_sun_light"},
     {"_sunlight_color", "_sun_color"},
     {"_sunlight_mangle", "_sun_mangle", "_sun_angle"},
-    penumbra);
-  addSun({"_sun2"}, {"_sun2_color"}, {"_sun2_mangle"}, penumbra);
+    penumbra,
+    sunDirt);
+  addSun({"_sun2"}, {"_sun2_color"}, {"_sun2_mangle"}, penumbra, sunDirt);
 }
 
 /**
@@ -739,6 +759,10 @@ void parseSurfaceLight(
   }
 
   surfaceLight.offset = floatProperty(entity, {"_surface_offset"}).value_or(2.0f);
+  surfaceLight.atten =
+    std::max(floatProperty(entity, {"_surflight_atten"}).value_or(1.0f), 0.0f);
+  surfaceLight.minLightScale =
+    std::max(floatProperty(entity, {"_surflight_minlight_scale"}).value_or(1.0f), 0.0f);
   surfaceLight.spotlight = flagProperty(entity, {"_surface_spotlight"});
   surfaceLight.styleScale = averageLightStyleBrightness(
     intProperty(entity, {"style"}).value_or(0), findProperty(entity, {"pattern"}));
@@ -991,10 +1015,10 @@ PreviewLighting extractLighting(const mdl::Map& map)
   // Dirt costs a sheaf of rays at every point that is shaded, so nothing pays for it
   // unless something in the map has asked for it: the map as a whole, its minimum light,
   // a sun, or any one light.
-  result.globals.dirtInUse = result.globals.dirt || result.globals.minLightDirt
-                             || std::ranges::any_of(result.lights, [](const auto& light) {
-                                  return light.dirt > 0;
-                                });
+  result.globals.dirtInUse =
+    result.globals.dirt || result.globals.minLightDirt || result.globals.domeDirt
+    || std::ranges::any_of(
+      result.lights, [](const auto& light) { return light.dirt > 0; });
 
   return result;
 }

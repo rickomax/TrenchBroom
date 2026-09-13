@@ -139,8 +139,33 @@ struct PreviewTriangleShading
   int32_t objectChannelMask = 1;
   /** Radiance emitted by this triangle, for surface lights. */
   vm::vec3f emission = vm::vec3f{0, 0, 0};
-  /** Per brush model minimum light (_minlight on a bmodel), premultiplied by nothing. */
+  /**
+   * How brightly an emitting triangle shows itself, as against how much it gives off.
+   * "_surflight_minlight_scale" is what parts the two: a surface can light a room
+   * without looking lit itself.
+   */
+  float selfEmissionScale = 1.0f;
+  /**
+   * "_surflight_atten": how fast the light off this triangle fades with distance, as a
+   * multiple of the distance it is measured over. One is the plain inverse square.
+   */
+  float emissionAtten = 1.0f;
+  /**
+   * "_surflightskydist": added to the distance the light off this triangle is measured
+   * over, which pushes a sky further away than it really is.
+   */
+  float emissionDistanceOffset = 0.0f;
+  /**
+   * Whether this triangle gives off light in every direction rather than out of its own
+   * face, which is how the compilers treat a sky lighting the map beneath it.
+   */
+  bool omnidirectionalEmitter = false;
+  /** Per brush model minimum light (_minlight on a bmodel), colour and all. */
   vm::vec3f surfaceMinLight = vm::vec3f{0, 0, 0};
+  /** The colour of that minimum light on its own, which its mottle is tinted by. */
+  vm::vec3f surfaceMinLightColor = vm::vec3f{1, 1, 1};
+  /** Whether this model's minimum light is broken up by noise ("_minlight_mottle"). */
+  bool surfaceMinLightMottle = false;
   /** Per brush model ceiling ("_maxlight" on a bmodel); 0 means the map's. */
   float surfaceMaxLight = 0.0f;
   /**

@@ -423,6 +423,8 @@ constexpr auto DefaultPhongAngle = 89.0f;
 struct BrushModelLighting
 {
   vm::vec3f minLight = vm::vec3f{0, 0, 0};
+  vm::vec3f minLightColor = vm::vec3f{1, 1, 1};
+  bool minLightMottle = false;
   /** Which model this is, with zero for the world; only shadows care. */
   int32_t objectIndex = 0;
   float maxLight = 0.0f;
@@ -529,6 +531,16 @@ BrushModelLighting readBrushModelLighting(
       }
     }
     result.minLight = color * *minLight;
+    result.minLightColor = color;
+  }
+
+  for (const auto* key : {"_minlight_mottle", "_minlightMottle"})
+  {
+    if (const auto mottle = number(key))
+    {
+      result.minLightMottle = *mottle != 0.0f;
+      break;
+    }
   }
 
   result.maxLight = std::max(number("_maxlight").value_or(0.0f), 0.0f);
@@ -659,6 +671,8 @@ void addBrushFace(
   shading.objectChannelMask = brushModel.objectChannelMask;
   shading.receivesLight = brushModel.receivesLight;
   shading.surfaceMinLight = brushModel.minLight;
+  shading.surfaceMinLightColor = brushModel.minLightColor;
+  shading.surfaceMinLightMottle = brushModel.minLightMottle;
   shading.surfaceMaxLight = brushModel.maxLight;
   shading.lightColorScale = brushModel.lightColorScale;
   shading.objectIndex = brushModel.objectIndex;
@@ -763,6 +777,8 @@ void addPatch(
   shading.objectChannelMask = brushModel.objectChannelMask;
   shading.receivesLight = brushModel.receivesLight;
   shading.surfaceMinLight = brushModel.minLight;
+  shading.surfaceMinLightColor = brushModel.minLightColor;
+  shading.surfaceMinLightMottle = brushModel.minLightMottle;
   shading.surfaceMaxLight = brushModel.maxLight;
   shading.lightColorScale = brushModel.lightColorScale;
   shading.objectIndex = brushModel.objectIndex;
@@ -938,6 +954,38 @@ void applySurfaceLights(PreviewScene& scene, const PreviewLighting& lighting)
     shading.emission =
       shading.emission
       + surfaceLight.color * surfaceLight.intensity * scale * PreviewLightUnitScale;
+    shading.emissionAtten = surfaceLight.atten * lighting.globals.surfaceLightAtten;
+    shading.selfEmissionScale =
+      surfaceLight.minLightScale * lighting.globals.surfaceLightMinLightScale;
+  }
+}
+
+/**
+ * Makes every sky face give off the colour "_sky_surface" names, which is how a map
+ * lights itself from its sky rather than from a sun aimed through it.
+ */
+void applySkySurfaceLight(PreviewScene& scene)
+{
+  const auto& color = scene.globals.skySurface;
+  if (vm::squared_length(color) <= 0.0f)
+  {
+    return;
+  }
+
+  for (auto& shading : scene.triangleShading)
+  {
+    if (shading.kind != PreviewSurfaceKind::Sky)
+    {
+      continue;
+    }
+
+    // The sky's own scale applies, the way it does to a sky face lit as a surface light.
+    shading.emission = shading.emission + color * scene.globals.surfaceSkyLightScale;
+
+    // A sky lights what is under it from every direction rather than out of the face it
+    // happens to be drawn on, and can be treated as further away than it is.
+    shading.omnidirectionalEmitter = true;
+    shading.emissionDistanceOffset = scene.globals.skySurfaceDistance;
   }
 }
 
@@ -1336,6 +1384,7 @@ PreviewScene buildPreviewScene(
 
   applySmoothNormals(scene);
   applySurfaceLights(scene, lighting);
+  applySkySurfaceLight(scene);
   buildEmitterList(scene);
   resolveProjectedTextures(scene, materialCache);
 

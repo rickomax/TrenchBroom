@@ -658,6 +658,70 @@ TEST_CASE("tracePreviewPixel")
     CHECK(test.shade(30000, 50.0f) == Catch::Approx(0.5f * formFactor).margin(0.02));
   }
 
+  SECTION("\"_surflight_atten\" fades a surface light faster")
+  {
+    const auto lit = [](const float atten) {
+      auto test = TestScene{};
+      test.addQuad(
+        vm::vec3f{-200, -200, 100},
+        vm::vec3f{400, 0, 0},
+        vm::vec3f{0, 400, 0},
+        vm::vec3f{0, 0, -1},
+        PreviewSurfaceKind::Solid,
+        vm::vec3f{0.5f, 0.5f, 0.5f});
+
+      for (auto i = test.scene.triangleShading.size() - 2;
+           i < test.scene.triangleShading.size();
+           ++i)
+      {
+        test.scene.triangleShading[i].emissionAtten = atten;
+      }
+      test.finish();
+      return test.shade(30000, 50.0f);
+    };
+
+    // Asking it to fade twice as fast reads as if it were twice as far away, so a
+    // quarter of the light lands.
+    const auto plain = lit(1.0f);
+    CHECK(plain > 0.05f);
+    CHECK(lit(2.0f) == Catch::Approx(plain / 4.0f).epsilon(0.05));
+  }
+
+  SECTION("a sky gives off light in every direction and can be pushed further away")
+  {
+    const auto lit = [](const bool omnidirectional, const float distanceOffset) {
+      auto test = TestScene{};
+      // Turned away from the floor, so only an omnidirectional emitter reaches it.
+      test.addQuad(
+        vm::vec3f{-200, -200, 100},
+        vm::vec3f{400, 0, 0},
+        vm::vec3f{0, 400, 0},
+        vm::vec3f{0, 0, 1},
+        PreviewSurfaceKind::Solid,
+        vm::vec3f{0.5f, 0.5f, 0.5f});
+
+      for (auto i = test.scene.triangleShading.size() - 2;
+           i < test.scene.triangleShading.size();
+           ++i)
+      {
+        test.scene.triangleShading[i].omnidirectionalEmitter = omnidirectional;
+        test.scene.triangleShading[i].emissionDistanceOffset = distanceOffset;
+      }
+      test.finish();
+      return test.shade(30000, 50.0f);
+    };
+
+    // Facing away, a surface light reaches nothing below it.
+    CHECK(lit(false, 0.0f) == Catch::Approx(0.0).margin(0.001));
+
+    // A sky reaches it whichever way the face it is drawn on points.
+    const auto near = lit(true, 0.0f);
+    CHECK(near > 0.05f);
+
+    // Pushing it further away dims it.
+    CHECK(lit(true, 200.0f) < near * 0.8f);
+  }
+
   SECTION("indirect light follows the map unless the preview overrides it")
   {
     const auto shadeWith =
@@ -742,6 +806,47 @@ TEST_CASE("tracePreviewPixel")
     CHECK(full > none);
     // What the bounce adds is proportional to the scale.
     CHECK(half - none == Catch::Approx(0.5f * (full - none)).epsilon(0.05));
+  }
+
+  SECTION("a light carrying a style bounces only when the map asks")
+  {
+    // The same room as above: direct light plus a bounce off the ceiling, where the
+    // light now carries a style. "_bouncestyled" is what lets that bounce happen.
+    const auto shadeWith = [](const int32_t style, const bool bounceStyled) {
+      auto test = TestScene{};
+      test.scene.globals.bounceStyled = bounceStyled;
+      test.addQuad(
+        vm::vec3f{-400, -400, 0},
+        vm::vec3f{800, 0, 0},
+        vm::vec3f{0, 800, 0},
+        vm::vec3f{0, 0, 1},
+        PreviewSurfaceKind::Solid,
+        vm::vec3f{0.6f, 0.6f, 0.6f});
+      test.addQuad(
+        vm::vec3f{-400, -400, 400},
+        vm::vec3f{800, 0, 0},
+        vm::vec3f{0, 800, 0},
+        vm::vec3f{0, 0, -1},
+        PreviewSurfaceKind::Solid,
+        vm::vec3f{0.6f, 0.6f, 0.6f});
+
+      auto light = TestScene::makePointLight(400.0f, PreviewAttenuation::Linear);
+      light.style = style;
+      test.scene.lights.push_back(light);
+
+      test.setBounces(1);
+      test.finish();
+      return test.shade(6000);
+    };
+
+    const auto steady = shadeWith(0, false);
+    const auto styled = shadeWith(3, false);
+    const auto styledAllowed = shadeWith(3, true);
+
+    // A styled light lights the floor directly either way, but its bounce is held back.
+    CHECK(styled < steady);
+    // Letting it bounce brings the room back to what a steady light would have given.
+    CHECK(styledAllowed == Catch::Approx(steady).epsilon(0.02));
   }
 
   SECTION("the sky dome lights whatever can see sky")
@@ -1162,6 +1267,100 @@ TEST_CASE("tracePreviewPixel")
     // Leaning sixty degrees away from it, half of the light lands.
     const auto tilted = vm::normalize(vm::vec3f{std::sqrt(3.0f) / 2.0f, 0, 0.5f});
     CHECK(lit(tilted) == Catch::Approx(display(150.0f)).margin(0.02));
+  }
+
+  SECTION("\"_minlight_mottle\" breaks the minimum light up")
+  {
+    const auto lit = [](const bool mottle, const float cameraX) {
+      auto test = TestScene{};
+      test.scene.globals.minLight = vm::vec3f{100, 100, 100};
+      test.scene.globals.minLightColor = vm::vec3f{1, 1, 1};
+      test.scene.globals.minLightMottle = mottle;
+      test.finish();
+
+      auto camera = PreviewCamera{};
+      camera.position = vm::vec3f{cameraX, 0, 200};
+      camera.forward = vm::vec3f{0, 0, -1};
+      camera.right = vm::vec3f{1, 0, 0};
+      camera.up = vm::vec3f{0, 1, 0};
+      camera.halfWidth = camera.halfHeight = 0.0002f;
+      camera.width = camera.height = 1;
+
+      auto settings = PreviewTraceSettings{};
+      auto sum = vm::vec3f{0, 0, 0};
+      for (auto i = 0; i < 16; ++i)
+      {
+        sum = sum + tracePreviewPixel(test.scene, camera, settings, 0, 0, uint32_t(i));
+      }
+      return (sum / 16.0f).x();
+    };
+
+    const auto flat = lit(false, 0.0f);
+
+    // Without it the floor reads the same everywhere.
+    CHECK(lit(false, 144.0f) == Catch::Approx(flat).margin(0.001));
+
+    // With it the readings wander from place to place. Two places can land on nearly the
+    // same value, so what is checked is the spread across several of them.
+    auto lowest = 1.0e9f;
+    auto highest = -1.0e9f;
+    for (const auto x : {0.0f, 144.0f, 240.0f, 72.0f, 192.0f})
+    {
+      const auto value = lit(true, x);
+      lowest = std::min(lowest, value);
+      highest = std::max(highest, value);
+
+      // The noise only ever adds, and never more than forty eight lightmap units on top
+      // of the hundred already there.
+      CHECK(value >= flat - 0.001f);
+      CHECK(value <= display(148.0f) + 0.001f);
+    }
+
+    CHECK(highest - lowest > display(20.0f));
+  }
+
+  SECTION("a surface light can light a room without looking lit itself")
+  {
+    // "_surflight_minlight_scale" parts what an emitting surface shows from what it
+    // gives off.
+    const auto seen = [](const float selfScale) {
+      auto test = TestScene{};
+      test.addQuad(
+        vm::vec3f{-50, -50, 100},
+        vm::vec3f{100, 0, 0},
+        vm::vec3f{0, 100, 0},
+        vm::vec3f{0, 0, -1},
+        PreviewSurfaceKind::Solid,
+        vm::vec3f{0.5f, 0.5f, 0.5f});
+
+      for (auto i = test.scene.triangleShading.size() - 2;
+           i < test.scene.triangleShading.size();
+           ++i)
+      {
+        test.scene.triangleShading[i].selfEmissionScale = selfScale;
+      }
+      test.finish();
+
+      // Looking up at the emitter from below it.
+      auto camera = PreviewCamera{};
+      camera.position = vm::vec3f{0, 0, 50};
+      camera.forward = vm::vec3f{0, 0, 1};
+      camera.right = vm::vec3f{1, 0, 0};
+      camera.up = vm::vec3f{0, 1, 0};
+      camera.halfWidth = camera.halfHeight = 0.0002f;
+      camera.width = camera.height = 1;
+
+      auto settings = PreviewTraceSettings{};
+      auto sum = vm::vec3f{0, 0, 0};
+      for (auto i = 0; i < 16; ++i)
+      {
+        sum = sum + tracePreviewPixel(test.scene, camera, settings, 0, 0, uint32_t(i));
+      }
+      return (sum / 16.0f).x();
+    };
+
+    CHECK(seen(1.0f) == Catch::Approx(0.5).margin(0.01));
+    CHECK(seen(0.0f) == Catch::Approx(0.0).margin(0.001));
   }
 
   SECTION("a light does not reach a surface on another channel")

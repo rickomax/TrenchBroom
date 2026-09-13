@@ -400,6 +400,73 @@ bool hitAHole(
 }
 
 /**
+ * The permutation the mottle noise is built on, taken from ericw-tools so that a preview
+ * breaks its minimum light up in the same places a compile does. Its light tool is under
+ * the GPL, version 2 or later, which this is a use of under version 3.
+ */
+constexpr uint8_t MottlePermutation[256] = {
+  11,  255, 250, 82,  217, 9,   144, 93,  136, 153, 55,  71,  73,  204, 96,  180,
+  126, 8,   50,  46,  113, 91,  238, 143, 30,  215, 191, 243, 65,  58,  208, 33,
+  86,  1,   182, 118, 83,  115, 207, 52,  94,  112, 205, 48,  99,  254, 117, 101,
+  157, 140, 72,  242, 244, 154, 10,  135, 155, 168, 125, 183, 148, 116, 187, 166,
+  25,  156, 177, 231, 165, 57,  221, 105, 28,  211, 127, 41,  142, 253, 146, 87,
+  122, 229, 162, 137, 194, 174, 167, 15,  220, 26,  235, 3,   39,  80,  88,  42,
+  202, 12,  97,  53,  70,  123, 170, 110, 214, 192, 173, 84,  169, 188, 64,  102,
+  147, 158, 100, 69,  213, 193, 43,  20,  13,  237, 171, 103, 32,  190, 223, 150,
+  131, 206, 85,  124, 163, 18,  139, 132, 79,  29,  216, 232, 178, 74,  24,  141,
+  201, 181, 152, 4,   7,   159, 134, 212, 226, 245, 164, 239, 47,  66,  27,  40,
+  197, 81,  78,  219, 228, 241, 121, 23,  120, 230, 76,  252, 199, 184, 45,  203,
+  161, 89,  16,  21,  119, 5,   209, 196, 68,  130, 195, 176, 225, 233, 128, 22,
+  248, 179, 249, 61,  108, 138, 145, 31,  49,  107, 56,  172, 224, 210, 6,   160,
+  189, 104, 200, 44,  175, 133, 77,  62,  106, 92,  186, 227, 14,  38,  247, 37,
+  17,  222, 36,  75,  129, 185, 251, 240, 54,  151, 2,   98,  149, 0,   63,  218,
+  60,  198, 19,  59,  90,  246, 234, 67,  51,  109, 95,  236, 35,  34,  114, 111};
+
+/**
+ * A slow, smooth noise from nought to forty eight, which "_minlight_mottle" adds to the
+ * minimum light so that a surface lit by nothing else does not read as a flat wash.
+ *
+ * A value is looked up at each of the eight lattice points around the position, sixteen
+ * units apart, and mixed between them.
+ */
+float mottle(const vm::vec3f& position)
+{
+  const auto scaled = position * (1.0f / 16.0f);
+
+  const auto floorOf = [](const float v) { return int64_t(std::floor(v)); };
+  const auto x = floorOf(scaled.x());
+  const auto y = floorOf(scaled.y());
+  const auto z = floorOf(scaled.z());
+
+  const auto fx = float(scaled.x() - float(x));
+  const auto fy = float(scaled.y() - float(y));
+  const auto fz = float(scaled.z() - float(z));
+
+  const auto at = [](const int64_t px, const int64_t py, const int64_t pz) {
+    const auto wrap = [](const int64_t v) { return size_t(((v % 256) + 256) % 256); };
+    auto value = MottlePermutation[wrap(px)];
+    value = MottlePermutation[wrap(int64_t(value) + py)];
+    value = MottlePermutation[wrap(int64_t(value) + pz)];
+    return float(value);
+  };
+
+  const auto mix = [](const float a, const float b, const float t) {
+    return a + (b - a) * t;
+  };
+
+  const auto z0 = mix(
+    mix(at(x, y, z), at(x + 1, y, z), fx),
+    mix(at(x, y + 1, z), at(x + 1, y + 1, z), fx),
+    fy);
+  const auto z1 = mix(
+    mix(at(x, y, z + 1), at(x + 1, y, z + 1), fx),
+    mix(at(x, y + 1, z + 1), at(x + 1, y + 1, z + 1), fx),
+    fy);
+
+  return mix(z0, z1, fz) / 255.0f * 48.0f;
+}
+
+/**
  * How many directions a surface looks in for what is closing in on it.
  *
  * The compilers take forty eight every time, which they can afford once per lightmap
@@ -751,8 +818,12 @@ vm::vec3f gatherDirectLight(
     {
       // A light's own "_bouncescale" says how much of it is allowed to bounce, so it
       // applies to the light landing on a surface the path is about to bounce off, not
-      // to the light the camera sees directly.
-      const auto bounceScale = bounceSource ? light.bounceScale : 1.0f;
+      // to the light the camera sees directly. A light carrying a style does not bounce
+      // at all unless the map asks for it, since a bounce cannot be switched along with
+      // what cast it.
+      const auto styledAndUnbounced = light.style != 0 && !scene.globals.bounceStyled;
+      const auto bounceScale =
+        bounceSource ? (styledAndUnbounced ? 0.0f : light.bounceScale) : 1.0f;
       result = result + candidate.contribution * (scale * bounceScale * dirt);
     }
   };
@@ -870,7 +941,11 @@ vm::vec3f gatherEmitters(
 
   // An emitter radiates from its front face only, so take the cosine at the light end
   // with the sign of the side we are looking at.
-  const auto cosLight = -vm::dot(emitterShading.normal, toLight);
+  // A sky gives off light in every direction rather than out of the face it is drawn on,
+  // so which way that face points does not come into it; a surface light does.
+  const auto cosLight = emitterShading.omnidirectionalEmitter
+                          ? 0.5f
+                          : -vm::dot(emitterShading.normal, toLight);
   if (cosLight <= 0.0f)
   {
     return vm::vec3f{0, 0, 0};
@@ -890,7 +965,15 @@ vm::vec3f gatherEmitters(
     return vm::vec3f{0, 0, 0};
   }
 
-  const auto geometry = cosSurface * cosLight / distanceSquared;
+  // "_surflightskydist" pushes a sky further away than it is, and "_surflight_atten"
+  // stretches the distance a surface is measured over, so one asked to fade twice as
+  // fast reads as if it were twice as far away.
+  const auto atten = emitterShading.emissionAtten;
+  const auto measuredDistance =
+    (distance + emitterShading.emissionDistanceOffset) * (atten > 0.0f ? atten : 1.0f);
+  const auto attenuatedDistanceSquared = measuredDistance * measuredDistance;
+
+  const auto geometry = cosSurface * cosLight / attenuatedDistanceSquared;
   return emitterShading.emission
          * (geometry * scene.totalEmitterArea / vm::constants<float>::pi());
 }
@@ -1045,7 +1128,10 @@ vm::vec3f tracePreviewPixel(
     const auto uv = shading.uv0 * w + shading.uv1 * hit->u + shading.uv2 * hit->v;
     const auto albedo = scene.materials[shading.materialIndex]->sample(uv);
 
-    auto surface = depth == 0 ? shading.emission : vm::vec3f{0, 0, 0};
+    // What an emitting surface shows of itself, which "_surflight_minlight_scale" can
+    // turn down without taking anything away from what it gives off.
+    auto surface =
+      depth == 0 ? shading.emission * shading.selfEmissionScale : vm::vec3f{0, 0, 0};
 
     auto irradiance = vm::vec3f{0, 0, 0};
     auto localMinLight = vm::vec3f{0, 0, 0};
@@ -1082,17 +1168,31 @@ vm::vec3f tracePreviewPixel(
                        / PreviewLightUnitScale;
     }
 
-    // The three kinds of minimum light: the global one, the one a brush model carries,
-    // and whatever a delay 4 light in line of sight provides. The compilers put them in
-    // while lighting, so they are scaled by everything below like any other light.
+    // The three kinds of minimum light: the one a brush model carries, which stands in
+    // for the map's, the map's own, and whatever a delay 4 light in line of sight
+    // provides. The compilers put them in while lighting, so they are scaled by
+    // everything below like any other light.
     //
     // They are floors under what a surface receives rather than contributions to it,
     // unless "_addmin" asks for the opposite.
-    auto floorLight = maximum(scene.globals.minLight, shading.surfaceMinLight);
+    const auto modelHasMinLight = vm::squared_length(shading.surfaceMinLight) > 0.0f;
+    auto floorLight = modelHasMinLight ? shading.surfaceMinLight : scene.globals.minLight;
+
+    // Broken up by a slow noise, if the surface asks for it, before anything scales it.
+    const auto mottled =
+      modelHasMinLight ? shading.surfaceMinLightMottle : scene.globals.minLightMottle;
+    if (mottled && vm::squared_length(floorLight) > 0.0f)
+    {
+      const auto color =
+        modelHasMinLight ? shading.surfaceMinLightColor : scene.globals.minLightColor;
+      floorLight = floorLight + color * mottle(position);
+    }
+
     if (scene.globals.minLightDirt)
     {
       floorLight = floorLight * dirtScaleFactor(scene.globals, nullptr, occlusion, 0.0f);
     }
+
     floorLight = maximum(floorLight, localMinLight);
     irradiance = scene.globals.addMinLight ? irradiance + floorLight
                                            : maximum(irradiance, floorLight);

@@ -171,6 +171,13 @@ struct PreviewSurfaceLightTemplate
   int32_t lightChannelMask = 1;
   bool spotlight = false;
   std::string group;
+  /** "_surflight_atten": how fast the light off this surface fades with distance. */
+  float atten = 1.0f;
+  /**
+   * "_surflight_minlight_scale": how brightly the surface shows itself, as against how
+   * much it gives off. Zero leaves it dark while it still lights everything else.
+   */
+  float minLightScale = 1.0f;
 };
 
 /**
@@ -197,8 +204,15 @@ struct PreviewGlobalLighting
   /** "_sunlight3": the same for the lower hemisphere. */
   vm::vec3f groundDome = vm::vec3f{0, 0, 0};
 
-  /** "_minlight": a floor on the light every surface receives. */
+  /** "_minlight": a floor on the light every surface receives, colour and all. */
   vm::vec3f minLight = vm::vec3f{0, 0, 0};
+  /** "_minlight_color" on its own, which is what the mottle below is tinted by. */
+  vm::vec3f minLightColor = vm::vec3f{1, 1, 1};
+  /**
+   * "_minlight_mottle": whether the minimum light is broken up by a slow noise, so that
+   * a room lit by nothing else does not read as a flat wash.
+   */
+  bool minLightMottle = false;
   /**
    * "_addmin": whether the minimum light is added to what a surface receives rather
    * than being a floor under it.
@@ -235,6 +249,16 @@ struct PreviewGlobalLighting
   /** "_surflightscale" and "_surflightskyscale". */
   float surfaceLightScale = 1.0f;
   float surfaceSkyLightScale = 1.0f;
+  /** "_surflight_atten" and "_surflight_minlight_scale" for the map as a whole. */
+  float surfaceLightAtten = 1.0f;
+  float surfaceLightMinLightScale = 1.0f;
+  /**
+   * "_sky_surface": the colour every sky face gives off, which is how a map lights
+   * itself from its sky rather than from a sun. Black, the default, gives off nothing.
+   */
+  vm::vec3f skySurface = vm::vec3f{0, 0, 0};
+  /** "_surflightskydist": how much further away than it is the sky is treated as. */
+  float skySurfaceDistance = 0.0f;
 
   /**
    * "_dirt": whether light is darkened where a surface is closed in on, which is the
@@ -252,6 +276,14 @@ struct PreviewGlobalLighting
   float dirtAngle = 88.0f;
   /** "_minlight_dirt": whether the minimum light is darkened along with the rest. */
   bool minLightDirt = false;
+  /** "_sunlight2_dirt": whether the sky and ground domes are darkened along with it. */
+  bool domeDirt = false;
+
+  /**
+   * "_bouncestyled": whether a light carrying a style bounces. The compilers bounce only
+   * the steady lights otherwise, since a bounce cannot be switched along with its source.
+   */
+  bool bounceStyled = false;
 
   /**
    * Whether anything in the map asks for dirt. Nothing pays for the rays it costs
