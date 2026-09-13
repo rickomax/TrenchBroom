@@ -22,6 +22,7 @@
 
 #include "vm/constants.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <optional>
@@ -241,10 +242,13 @@ private:
   int m_bounces = 0;
 };
 
-/** A lightmap value of 255 is a fully lit white surface. */
+/**
+ * What the tracer puts on screen for a lightmap value, which is not that value over 255:
+ * the engines draw the lightmap with an overbright, so 128 is a fully lit white surface.
+ */
 float display(const float lightValue)
 {
-  return lightValue / 255.0f;
+  return lightValue * PreviewLightUnitScale;
 }
 
 /** Coordinates landing on the hole of a material from addMaskedMaterial. */
@@ -254,6 +258,67 @@ const auto HoleUV = vm::vec2f{0.25f, 0.5f};
 const auto PictureUV = vm::vec2f{0.75f, 0.5f};
 
 } // namespace
+
+TEST_CASE("previewDisplayValue")
+{
+  /**
+   * What a Quake engine puts on screen for a light of the given strength, worked out the
+   * way ericw-tools and the engine do it rather than the way the preview does: the
+   * compilers scale the lightmap by "_range", raise it to the power of the gamma on a
+   * 0..255 scale and clamp it, and the engine then doubles it as it draws.
+   */
+  const auto engine = [](const float light, const float rangeScale, const float gamma) {
+    auto lightmap = light * rangeScale;
+    if (gamma != 1.0f)
+    {
+      lightmap = std::pow(lightmap / 255.0f, 1.0f / gamma) * 255.0f;
+    }
+    lightmap = std::clamp(lightmap, 0.0f, 255.0f);
+    return int(std::lround(std::min(2.0f * lightmap / 255.0f, 1.0f) * 255.0f));
+  };
+
+  /** The same light through the preview, which traces in lightmap units. */
+  const auto preview = [](const float light, const float rangeScale, const float gamma) {
+    return int(
+      previewDisplayValue(light * rangeScale * PreviewLightUnitScale, 1.0f / gamma));
+  };
+
+  SECTION("what the preview draws is what the engine draws")
+  {
+    // Within one level of 255 everywhere, the rounding of calling 128 rather than 127.5
+    // the fully lit value.
+    for (const auto gamma : {0.5f, 0.8f, 1.0f, 1.5f, 2.0f, 3.0f})
+    {
+      for (const auto light : {0.0f, 10.0f, 32.0f, 64.0f, 128.0f, 200.0f, 255.0f, 400.0f})
+      {
+        CAPTURE(gamma, light);
+        CHECK(std::abs(preview(light, 0.5f, gamma) - engine(light, 0.5f, gamma)) <= 1);
+      }
+    }
+  }
+
+  SECTION("a gamma of one is the scale on its own")
+  {
+    CHECK(previewDisplayValue(0.0f, 1.0f) == 0);
+    CHECK(previewDisplayValue(0.5f, 1.0f) == 128);
+    CHECK(previewDisplayValue(1.0f, 1.0f) == 255);
+  }
+
+  SECTION("what a surface cannot do is emit more light than white, or less than none")
+  {
+    CHECK(previewDisplayValue(4.0f, 1.0f) == 255);
+    CHECK(previewDisplayValue(-1.0f, 1.0f) == 0);
+    // Nor can a gamma make a negative value into a real one, which std::pow would.
+    CHECK(previewDisplayValue(-1.0f, 1.0f / 2.0f) == 0);
+  }
+
+  SECTION("a gamma above one lifts what is dark without touching black or white")
+  {
+    const auto lifted = previewDisplayValue(0.25f, 1.0f / 2.0f);
+    CHECK(lifted > previewDisplayValue(0.25f, 1.0f));
+    CHECK(previewDisplayValue(0.0f, 1.0f / 2.0f) == 0);
+  }
+}
 
 TEST_CASE("PreviewMaterial::transparentAt")
 {
@@ -937,6 +1002,28 @@ TEST_CASE("tracePreviewPixel")
 
       CHECK(test.shade(64) == Catch::Approx(0.0).margin(0.001));
     }
+  }
+
+  SECTION("the engines draw the lightmap with an overbright")
+  {
+    // A lightmap is not shown as it is stored. Quake and Quake 2 both double it as they
+    // draw, so 128 rather than 255 is a fully lit white surface -- ericw-tools calls 128
+    // "the logical value for 1.0 lighting", halves every lightmap through the default
+    // "_range", and reads "_maxlight" as half the ceiling it clamps to. The literals
+    // here are deliberate: they are what pins the scale, which display() only converts
+    // by.
+    auto test = TestScene{};
+    test.addPointLight(128.0f, PreviewAttenuation::None);
+    test.finish();
+    CHECK(test.shade(256) == Catch::Approx(1.0).margin(0.01));
+
+    // Which is why a map that says nothing lands in the same place: the compilers halve
+    // a light of 256 to the 128 the engine doubles back.
+    auto halved = TestScene{};
+    halved.scene.globals.rangeScale = 0.5f;
+    halved.addPointLight(256.0f, PreviewAttenuation::None);
+    halved.finish();
+    CHECK(halved.shade(256) == Catch::Approx(1.0).margin(0.01));
   }
 
   SECTION("the scaling a map asks for comes last")

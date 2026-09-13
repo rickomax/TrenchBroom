@@ -196,12 +196,7 @@ void traceTile(PreviewTraceJob& job, const uint32_t pass, const uint32_t tile)
         auto* texel = &job.display[index * 4];
         for (size_t i = 0; i < 3; ++i)
         {
-          auto value = std::clamp(color[i], 0.0f, 1.0f);
-          if (job.gamma != 1.0f)
-          {
-            value = std::pow(value, inverseGamma);
-          }
-          texel[i] = uint8_t(std::lround(value * 255.0f));
+          texel[i] = previewDisplayValue(color[i], inverseGamma);
         }
         texel[3] = 255;
       }

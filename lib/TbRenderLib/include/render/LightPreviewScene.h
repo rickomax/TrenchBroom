@@ -25,6 +25,8 @@
 #include "vm/bbox.h"
 #include "vm/vec.h"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -48,10 +50,48 @@ namespace tb::render
 {
 
 /**
- * Both the "light" key and the lightmap the compilers write run to 255 for a fully lit
- * surface, so dividing by 255 at the end of shading puts the preview in display range.
+ * What one unit of the "light" key is worth on screen.
+ *
+ * The compilers do not write a fully lit surface as 255. The engines light the world
+ * with an overbright, doubling the lightmap as they draw it, so 128 is what a surface at
+ * full brightness is stored as and 255 is twice as bright as white. ericw-tools is built
+ * around that throughout: it calls 128 "the logical value for 1.0 lighting", halves every
+ * lightmap through the default "_range" of 0.5, reads "_maxlight" as half the ceiling it
+ * clamps to, and multiplies the lightmap by two in its own preview. A preview that
+ * divided by 255 would show half the light the game does.
+ *
+ * Dividing by 128 is that overbright, which is what puts the preview and the compile in
+ * the same place.
  */
-constexpr auto PreviewLightUnitScale = 1.0f / 255.0f;
+constexpr auto PreviewLightUnitScale = 1.0f / 128.0f;
+
+/**
+ * How much brighter than the stored lightmap the engine draws: the overbright above,
+ * written as the factor it multiplies by.
+ *
+ * "_gamma" is the one thing the compilers apply to the stored lightmap rather than to
+ * what is drawn, so dividing it out is what puts a value back on the scale ericw-tools
+ * raises to the power.
+ */
+constexpr auto PreviewOverbright = 255.0f / 128.0f;
+
+/**
+ * Turns one traced channel into the 0..255 the preview draws.
+ *
+ * "_gamma" is why this is not just a multiply: the compilers raise the lightmap they
+ * wrote to the power, which is before the engine's overbright rather than after it, so
+ * the value goes back onto that scale and comes off it again. Clamping is last for the
+ * same reason -- what the compilers clamp is the lightmap, not the light they gathered.
+ */
+inline uint8_t previewDisplayValue(const float light, const float inverseGamma)
+{
+  auto value = std::max(light, 0.0f);
+  if (inverseGamma != 1.0f)
+  {
+    value = std::pow(value / PreviewOverbright, inverseGamma) * PreviewOverbright;
+  }
+  return uint8_t(std::lround(std::min(value, 1.0f) * 255.0f));
+}
 
 /**
  * How a surface interacts with rays.
