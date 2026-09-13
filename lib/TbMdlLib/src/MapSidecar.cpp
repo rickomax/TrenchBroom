@@ -55,9 +55,9 @@ namespace
 
 constexpr auto SidecarHeader = "// TrenchBroom tool data";
 
-/** Quotes a key or value the way the map format does, so that values containing spaces
- * survive the round trip. */
-std::string quote(const std::string& str)
+} // namespace
+
+std::string quoteSidecarString(const std::string& str)
 {
   auto result = std::string{"\""};
   for (const auto c : str)
@@ -72,12 +72,7 @@ std::string quote(const std::string& str)
   return result;
 }
 
-/**
- * Reads a quoted string starting at the given position, which must be the opening quote,
- * and moves the position past the closing quote. Returns nullopt if the string is not
- * terminated.
- */
-std::optional<std::string> unquote(const std::string& str, size_t& position)
+std::optional<std::string> unquoteSidecarString(const std::string& str, size_t& position)
 {
   if (position >= str.size() || str[position] != '"')
   {
@@ -105,8 +100,6 @@ std::optional<std::string> unquote(const std::string& str, size_t& position)
   return std::nullopt;
 }
 
-} // namespace
-
 kdl_reflect_impl(SidecarRecord);
 
 const std::vector<std::string>& sidecarPropertyPrefixes()
@@ -122,8 +115,12 @@ const std::vector<std::string>& sidecarPropertyPrefixes()
     TerrainPropertyKeys::DefaultMaterial,
     SplinePropertyKeys::PointPrefix,
     SplinePropertyKeys::TemplateBrushPrefix,
+    SplinePropertyKeys::TemplateEntityPrefix,
+    SplinePropertyKeys::TemplateSolidPrefix,
     SplinePropertyKeys::Subdivisions,
     SplinePropertyKeys::Closed,
+    SplinePropertyKeys::LockUVs,
+    SplinePropertyKeys::KeepSize,
     SplinePropertyKeys::TemplateGroupId,
   };
   return prefixes;
@@ -276,10 +273,12 @@ std::string serializeSidecar(const std::vector<SidecarRecord>& records)
   for (const auto& record : records)
   {
     stream << "{\n";
-    stream << quote(SidecarPropertyKeys::DataId) << " " << quote(record.id) << "\n";
+    stream << quoteSidecarString(SidecarPropertyKeys::DataId) << " "
+           << quoteSidecarString(record.id) << "\n";
     for (const auto& property : record.properties)
     {
-      stream << quote(property.key()) << " " << quote(property.value()) << "\n";
+      stream << quoteSidecarString(property.key()) << " "
+             << quoteSidecarString(property.value()) << "\n";
     }
     stream << "}\n";
   }
@@ -331,7 +330,7 @@ Result<std::vector<SidecarRecord>> parseSidecar(const std::string& str)
     }
 
     auto position = size_t(0);
-    const auto key = unquote(line, position);
+    const auto key = unquoteSidecarString(line, position);
     if (!key)
     {
       return Error{"Malformed tool data property key"};
@@ -343,7 +342,7 @@ Result<std::vector<SidecarRecord>> parseSidecar(const std::string& str)
       ++position;
     }
 
-    const auto value = unquote(line, position);
+    const auto value = unquoteSidecarString(line, position);
     if (!value)
     {
       return Error{"Malformed tool data property value"};

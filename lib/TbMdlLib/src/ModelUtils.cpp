@@ -21,9 +21,12 @@
 
 #include "mdl/BrushFace.h"
 #include "mdl/BrushFaceHandle.h"
+#include "mdl/BrushNode.h"
 #include "mdl/EditorContext.h"
+#include "mdl/EntityNode.h"
 #include "mdl/HitAdapter.h"
 #include "mdl/NodeQueries.h"
+#include "mdl/TerrainEntity.h"
 
 #include "kd/contracts.h"
 #include "kd/ranges/cartesian_product_view.h"
@@ -142,6 +145,17 @@ Node* findOutermostClosedGroupOrNode(Node* node)
   if (auto* group = findOutermostClosedGroup(node))
   {
     return group;
+  }
+
+  // A terrain's brushes are generated from its height field, so one of them on its own
+  // is not something to take hold of: picking one means picking the terrain.
+  if (auto* brushNode = dynamic_cast<BrushNode*>(node))
+  {
+    if (auto* entityNode = brushNode->entity();
+        entityNode && isTerrainEntity(entityNode->entity()))
+    {
+      return entityNode;
+    }
   }
 
   return node;

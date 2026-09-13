@@ -24,9 +24,11 @@
 #include "Result.h"
 #include "gl/ResourceId.h"
 #include "mdl/BrushFaceHandle.h"
+#include "mdl/CustomTextures.h"
 #include "mdl/ExportOptions.h"
 #include "mdl/NodeHandleManager.h"
 #include "mdl/NodeIndex.h"
+#include "mdl/Palette.h"
 #include "mdl/Selection.h"
 
 #include "vm/bbox.h"
@@ -49,6 +51,7 @@ class Logger;
 
 namespace gl
 {
+class MaterialCollection;
 class MaterialManager;
 class ResourceManager;
 
@@ -111,6 +114,9 @@ private:
   std::unique_ptr<EntityDefinitionManager> m_entityDefinitionManager;
   std::unique_ptr<EntityModelManager> m_entityModelManager;
   std::unique_ptr<gl::MaterialManager> m_materialManager;
+
+  /** Textures brought in from image files that no wad holds yet. */
+  std::vector<CustomTexture> m_customTextures;
   std::unique_ptr<TagManager> m_tagManager;
 
   std::unique_ptr<EditorContext> m_editorContext;
@@ -246,6 +252,27 @@ public: // misc
   gl::MaterialManager& materialManager();
   const gl::MaterialManager& materialManager() const;
 
+public: // custom textures
+  /**
+   * The textures the map carries itself, brought in from image files and not written to
+   * a wad yet. They are available to faces straight away; saving the map is what puts
+   * them in a wad, after which they come back from it like any other texture and this
+   * list is empty again.
+   */
+  const std::vector<CustomTexture>& customTextures() const;
+
+  /** Adds a texture the map carries itself, and makes it available to faces. */
+  void addCustomTexture(CustomTexture customTexture);
+
+  /** Forgets the carried textures, once a wad holds them instead. */
+  void clearCustomTextures();
+
+  /**
+   * The palette the game's textures are drawn from, or nullopt for a game whose
+   * textures carry their own colours and so has none.
+   */
+  std::optional<Palette> materialPalette() const;
+
   TagManager& tagManager();
   const TagManager& tagManager() const;
 
@@ -354,6 +381,8 @@ private: // Asset management
 
   void reloadMaterials();
   void loadMaterials();
+  /** The collection holding the textures the map carries itself, if it carries any. */
+  std::optional<gl::MaterialCollection> makeCustomTextureCollection() const;
   void clearMaterials();
 
   void setMaterials();

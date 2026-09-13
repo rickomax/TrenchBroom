@@ -180,7 +180,15 @@ public: // property management
   std::vector<EntityProperty> propertiesWithPrefix(const std::string& property) const;
   std::vector<EntityProperty> numberedProperties(const std::string& property) const;
 
-  void transform(const vm::mat4x4d& transformation, bool updateAngleProperty);
+  /**
+   * Applies the given transformation to this entity's properties.
+   *
+   * Returns an error, leaving the entity untouched, if the entity carries something the
+   * transformation cannot be applied to: a terrain's height field lies along the axes,
+   * so it cannot be turned. The caller is expected to let the whole operation fail then,
+   * rather than move the entity's brushes away from what its properties describe.
+   */
+  Result<void> transform(const vm::mat4x4d& transformation, bool updateAngleProperty);
 };
 
 } // namespace tb::mdl

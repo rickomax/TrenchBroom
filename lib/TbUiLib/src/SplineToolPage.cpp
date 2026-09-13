@@ -25,11 +25,11 @@
 #include <QLabel>
 #include <QPushButton>
 
-#include <utility>
-
 #include "mdl/Map.h"
 #include "ui/MapDocument.h"
 #include "ui/SplineTool.h"
+
+#include <utility>
 
 namespace tb::ui
 {
@@ -59,14 +59,15 @@ void SplineToolPage::createGui()
   m_templateLabel = new QLabel{tr("<none>")};
   m_linkButton = new QPushButton{tr("Link")};
   m_linkButton->setToolTip(
-    tr("Use the selected group or the selected brushes as the spline's template"));
+    tr("Use the selected group, or the selected brushes and entities, as the spline's "
+       "template"));
   m_linkButton->setFocusPolicy(Qt::NoFocus);
   m_unlinkButton = new QPushButton{tr("Unlink")};
   m_unlinkButton->setFocusPolicy(Qt::NoFocus);
   m_breakButton = new QPushButton{tr("Break")};
   m_breakButton->setToolTip(
-    tr("Duplicate the generated brushes as standard, editable brushes and unlink "
-       "the spline's template"));
+    tr("Duplicate the generated brushes and entities as standard, editable ones and "
+       "unlink the spline's template"));
   m_breakButton->setFocusPolicy(Qt::NoFocus);
 
   m_roll = new QDoubleSpinBox{};
@@ -110,6 +111,25 @@ void SplineToolPage::createGui()
        "are created on that segment as well"));
   m_closed->setFocusPolicy(Qt::NoFocus);
 
+  m_lockUVs = new QCheckBox{tr("Lock UVs")};
+  m_lockUVs->setToolTip(
+    tr("Keep the copies' textures the shape the template drew them, instead of letting "
+       "the squeezing that fits each copy to its segment squash the picture with it. "
+       "This is what moving and turning brushes with texture lock on already does. Maps "
+       "in the Valve format hold it exactly; the standard format picks its texture axes "
+       "from each face, so a turned face keeps some of the squeeze there."));
+  m_lockUVs->setFocusPolicy(Qt::NoFocus);
+
+  m_keepSize = new QCheckBox{tr("Keep size")};
+  m_keepSize->setToolTip(
+    tr("Place every copy at the size the template is drawn at, instead of stretching it "
+       "to fill its part of the curve. Copies are then identical to the template and to "
+       "each other, with the texture sitting on them exactly as it sits on the template, "
+       "and the curve is divided so that one copy never runs into the next. Use it for "
+       "something the spline is scattering rather than building, a tree or a lamp post, "
+       "where a copy squeezed to fit is a copy of the wrong shape."));
+  m_keepSize->setFocusPolicy(Qt::NoFocus);
+
   auto* layout = new QHBoxLayout{};
   layout->setContentsMargins(0, 0, 0, 0);
 
@@ -131,6 +151,19 @@ void SplineToolPage::createGui()
   layout->addWidget(new QLabel{tr("Lock:")});
   layout->addWidget(m_lockTwist);
   layout->addWidget(m_closed);
+  layout->addWidget(m_lockUVs);
+  layout->addWidget(m_keepSize);
+
+  // Neither of these is needed any more. Both were answers to generated faces losing
+  // the template's texture offset, which happened because they were given their
+  // material only after their UVs had been set, and an offset is kept modulo the
+  // texture: a face that thinks its texture is one pixel across keeps nothing. With the
+  // material in place first, a sweep left to itself reproduces the template's alignment
+  // and its copies still meet, which is what both options were reaching for and neither
+  // managed as well. They are hidden rather than removed so that a map that has one of
+  // them set still reads and writes it.
+  m_lockUVs->setVisible(false);
+  m_keepSize->setVisible(false);
   layout->addWidget(m_removePointButton);
   layout->addWidget(m_breakButton);
   layout->addStretch();
@@ -146,8 +179,7 @@ void SplineToolPage::createGui()
   connect(m_linkButton, &QPushButton::clicked, this, [this]() { m_tool.linkTemplate(); });
   connect(
     m_unlinkButton, &QPushButton::clicked, this, [this]() { m_tool.unlinkTemplate(); });
-  connect(
-    m_breakButton, &QPushButton::clicked, this, [this]() { m_tool.breakSpline(); });
+  connect(m_breakButton, &QPushButton::clicked, this, [this]() { m_tool.breakSpline(); });
   connect(
     m_roll,
     QOverload<double>::of(&QDoubleSpinBox::valueChanged),
@@ -194,6 +226,18 @@ void SplineToolPage::createGui()
       m_tool.setClosed(checked);
     }
   });
+  connect(m_lockUVs, &QCheckBox::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setLockUVs(checked);
+    }
+  });
+  connect(m_keepSize, &QCheckBox::toggled, this, [this](const bool checked) {
+    if (!m_updatingControls)
+    {
+      m_tool.setKeepSize(checked);
+    }
+  });
 }
 
 void SplineToolPage::connectObservers()
@@ -236,6 +280,12 @@ void SplineToolPage::updateControls()
   m_removePointButton->setEnabled(m_tool.canRemovePoint());
   m_closed->setEnabled(m_tool.hasPoints());
   m_closed->setChecked(m_tool.closed());
+
+  // Nothing to align until a template says what is being swept.
+  m_lockUVs->setEnabled(m_tool.hasTemplate());
+  m_lockUVs->setChecked(m_tool.lockUVs());
+  m_keepSize->setEnabled(m_tool.hasTemplate());
+  m_keepSize->setChecked(m_tool.keepSize());
 
   m_updatingControls = false;
 }

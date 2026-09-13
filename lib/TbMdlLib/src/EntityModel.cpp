@@ -118,6 +118,11 @@ const vm::bbox3f& EntityModelFrame::bounds() const
   return m_bounds;
 }
 
+const std::vector<vm::vec3f>& EntityModelFrame::triangles() const
+{
+  return m_tris;
+}
+
 std::optional<float> EntityModelFrame::intersect(const vm::ray3f& ray) const
 {
   auto closestDistance = std::optional<float>{};

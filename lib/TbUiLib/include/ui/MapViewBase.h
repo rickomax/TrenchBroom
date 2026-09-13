@@ -27,6 +27,7 @@
 #include "ui/ToolBoxConnector.h"
 
 #include <filesystem>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -344,7 +345,18 @@ private: // implement RenderView interface
   void validatePortalFileRenderer(render::RenderContext& renderContext);
 
   void renderCompass(render::RenderBatch& renderBatch);
-  void renderFPS(render::RenderContext& renderContext, render::RenderBatch& renderBatch);
+  void renderHeadsUp(
+    render::RenderContext& renderContext, render::RenderBatch& renderBatch);
+
+protected:
+  /**
+   * Drawn last, after the render batch, and so over everything else in the view. The 3D
+   * view uses it for the light preview.
+   */
+  virtual void renderOverlay(render::RenderContext& renderContext);
+
+  /** An extra line for the heads up display, or nothing. */
+  virtual std::string overlayStatusText() const;
 
 public: // implement InputEventProcessor interface
   void processEvent(const KeyEvent& event) override;

@@ -85,6 +85,7 @@
 #include "ui/CompilationDialog.h"
 #include "ui/Console.h"
 #include "ui/CrashReporter.h"
+#include "ui/CustomTextureUtils.h"
 #include "ui/EdgeTool.h"
 #include "ui/FaceInspector.h"
 #include "ui/FaceTool.h"
@@ -996,6 +997,12 @@ bool MapWindow::saveDocument()
 
   if (map.persistent())
   {
+    // The textures the map carries need a wad of their own before the map can name it.
+    if (!saveCustomTextures(map, map.path(), this))
+    {
+      return false;
+    }
+
     const auto startTime = std::chrono::high_resolution_clock::now();
     return map.save() | kdl::transform([&]() {
              const auto endTime = std::chrono::high_resolution_clock::now();
@@ -1035,6 +1042,12 @@ bool MapWindow::saveDocumentAs()
   }
 
   const auto path = pathFromQString(newFileName);
+
+  // Offered next to where the map is going, not where it came from.
+  if (!saveCustomTextures(map, path, this))
+  {
+    return false;
+  }
 
   const auto startTime = std::chrono::high_resolution_clock::now();
   return map.saveAs(path) | kdl::transform([&]() {
@@ -2338,9 +2351,7 @@ static void debugSegfault()
 void MapWindow::debugCrash()
 {
   auto items = QStringList{};
-  items << "Null pointer dereference"
-        << "Unhandled exception"
-        << "Contract failed";
+  items << "Null pointer dereference" << "Unhandled exception" << "Contract failed";
 
   bool ok;
   const auto item =
@@ -2436,8 +2447,10 @@ void MapWindow::dragEnterEvent(QDragEnterEvent* event)
            return false;
          }
 
-         const auto fileInfo = QFileInfo{url.toLocalFile()};
-         return fileInfo.isFile() && fileInfo.fileName().toLower().endsWith(".wad");
+         const auto pathQStr = url.toLocalFile();
+         const auto fileInfo = QFileInfo{pathQStr};
+         return (fileInfo.isFile() && fileInfo.fileName().toLower().endsWith(".wad"))
+                || isCustomTextureImage(pathQStr);
        }))
   {
     event->accept();
@@ -2452,14 +2465,27 @@ void MapWindow::dropEvent(QDropEvent* event)
     return;
   }
 
-  auto pathQStrs = QStringList{};
-  pathQStrs.reserve(urls.size());
+  // An image is converted into a texture the map carries itself, a wad is added to the
+  // map's wad list; a drop can hold both, so they are sorted out here.
+  auto wadPathQStrs = QStringList{};
+  auto imagePathQStrs = QStringList{};
   for (const auto& url : urls)
   {
-    pathQStrs.push_back(url.toLocalFile());
+    const auto pathQStr = url.toLocalFile();
+    (isCustomTextureImage(pathQStr) ? imagePathQStrs : wadPathQStrs).push_back(pathQStr);
   }
 
-  if (addWadPaths(pathQStrs, m_document->map(), this))
+  auto accepted = false;
+  if (!imagePathQStrs.isEmpty())
+  {
+    accepted = importCustomTextures(imagePathQStrs, m_document->map(), this) || accepted;
+  }
+  if (!wadPathQStrs.isEmpty())
+  {
+    accepted = addWadPaths(wadPathQStrs, m_document->map(), this) || accepted;
+  }
+
+  if (accepted)
   {
     event->acceptProposedAction();
   }

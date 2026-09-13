@@ -23,15 +23,22 @@
 #include "ui/MapViewBase.h"
 
 #include <filesystem>
+#include <string>
 #include <vector>
 
 class QKeyEvent;
+class QTimer;
 
 namespace tb
 {
 namespace gl
 {
 class PerspectiveCamera;
+}
+
+namespace render
+{
+class LightPreview;
 }
 
 namespace ui
@@ -45,6 +52,13 @@ private:
   std::unique_ptr<gl::PerspectiveCamera> m_camera;
   std::unique_ptr<FlyModeHelper> m_flyModeHelper;
   bool m_ignoreCameraChangeEvents = false;
+
+  std::unique_ptr<render::LightPreview> m_lightPreview;
+  /**
+   * Asks for a frame while the preview still has work to do. The preview refines itself
+   * on its own threads, so nothing else would prompt the view to show the newer image.
+   */
+  QTimer* m_lightPreviewTimer = nullptr;
 
   NotifierConnection m_notifierConnection;
 
@@ -60,6 +74,12 @@ private: // notification
   void connectObservers();
   void cameraDidChange(const gl::Camera& camera);
   void preferenceDidChange(const std::filesystem::path& path);
+
+private: // light preview
+  void invalidateLightPreview();
+  void invalidateLightPreviewMaterials();
+  void updateLightPreviewSettings();
+  void releaseLightPreviewResources();
 
 protected: // QWidget overrides
   void keyPressEvent(QKeyEvent* event) override;
@@ -126,6 +146,8 @@ private: // implement MapViewBase interface
     MapViewToolBox& toolBox,
     render::RenderContext& renderContext,
     render::RenderBatch& renderBatch) override;
+  void renderOverlay(render::RenderContext& renderContext) override;
+  std::string overlayStatusText() const override;
 
   void beforePopupMenu() override;
 

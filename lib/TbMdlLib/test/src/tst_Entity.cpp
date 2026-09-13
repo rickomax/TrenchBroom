@@ -25,6 +25,8 @@
 #include "mdl/EntityProperties.h"
 #include "mdl/PropertyDefinition.h"
 
+#include "kd/result.h"
+
 #include "vm/bbox.h"
 #include "vm/mat.h"
 #include "vm/mat_ext.h"
@@ -699,7 +701,7 @@ TEST_CASE("EntityTest")
     SECTION("Requires classname for rotation")
     {
       const auto rotation = vm::rotation_matrix(0.0, 0.0, vm::to_radians(90.0));
-      entity.transform(rotation, true);
+      REQUIRE(entity.transform(rotation, true).is_success());
 
       // rotation had no effect
       CHECK(entity.rotation() == vm::mat4x4d::identity());
@@ -712,7 +714,7 @@ TEST_CASE("EntityTest")
       REQUIRE(entity.rotation() == vm::mat4x4d::identity());
 
       const auto rotation = vm::rotation_matrix(0.0, 0.0, vm::to_radians(90.0));
-      entity.transform(rotation, true);
+      REQUIRE(entity.transform(rotation, true).is_success());
 
       // rotation had no effect
       CHECK(entity.rotation() == vm::mat4x4d::identity());
@@ -724,7 +726,7 @@ TEST_CASE("EntityTest")
       entity.setOrigin(vm::vec3d{10, 20, 30});
 
       const auto rotation = vm::rotation_matrix(0.0, 0.0, vm::to_radians(90.0));
-      entity.transform(rotation, true);
+      REQUIRE(entity.transform(rotation, true).is_success());
 
       CHECK(entity.rotation() == rotation);
       CHECK(entity.origin() == vm::vec3d{-20, 10, 30});
@@ -738,7 +740,7 @@ TEST_CASE("EntityTest")
       entity.setDefinition(&definition);
 
       const auto rotation = vm::rotation_matrix(0.0, 0.0, vm::to_radians(90.0));
-      entity.transform(rotation, true);
+      REQUIRE(entity.transform(rotation, true).is_success());
 
       CHECK(entity.rotation() == vm::mat4x4d::identity());
       CHECK(entity.origin() == vm::vec3d{-64, 32, 0});
@@ -749,10 +751,11 @@ TEST_CASE("EntityTest")
       entity.setClassname("some_class");
 
       const auto rotation = vm::rotation_matrix(0.0, 0.0, vm::to_radians(90.0));
-      entity.transform(rotation, true);
+      REQUIRE(entity.transform(rotation, true).is_success());
       REQUIRE(entity.rotation() == rotation);
 
-      entity.transform(vm::translation_matrix(vm::vec3d{100, 0, 0}), true);
+      REQUIRE(entity.transform(vm::translation_matrix(vm::vec3d{100, 0, 0}), true)
+                .is_success());
       CHECK(entity.rotation() == rotation);
     }
 
@@ -768,7 +771,8 @@ TEST_CASE("EntityTest")
         entity.modelTransformation(defaultModelScaleExpression)
         == vm::scaling_matrix(vm::vec3d{2, 2, 2}));
 
-      entity.transform(vm::translation_matrix(vm::vec3d{8, 7, 6}), true);
+      REQUIRE(
+        entity.transform(vm::translation_matrix(vm::vec3d{8, 7, 6}), true).is_success());
       CHECK(
         entity.modelTransformation(defaultModelScaleExpression)
         == vm::translation_matrix(vm::vec3d{8, 7, 6})
@@ -784,13 +788,13 @@ TEST_CASE("EntityTest")
 
       SECTION("If property update after transform is enabled")
       {
-        entity.transform(rotation, true);
+        REQUIRE(entity.transform(rotation, true).is_success());
         CHECK(*entity.property(EntityPropertyKeys::Angle) == "90");
       }
 
       SECTION("If property update after transform is disabled")
       {
-        entity.transform(rotation, false);
+        REQUIRE(entity.transform(rotation, false).is_success());
         CHECK(*entity.property(EntityPropertyKeys::Angle) == "0");
       }
     }

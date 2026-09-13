@@ -21,6 +21,8 @@
 
 #include "kd/reflection_decl.h"
 
+#include "vm/bbox.h"
+#include "vm/mat.h"
 #include "vm/vec.h"
 
 #include <cstddef>
@@ -148,6 +150,10 @@ std::vector<vm::vec3d> sampleSpline(
  * size, stretched or squished to fit its segment. A closed spline also sweeps the
  * segment from the last control point back to the first.
  *
+ * With wholeCopiesOnly, the segment is divided into floor(segmentLength / forwardSize)
+ * spans instead, so that no span is shorter than the profile and a copy placed at its
+ * own size never runs into the one after it.
+ *
  * The base orientation comes from a rotation minimizing frame transported across the
  * control points; locked points anchor the transport to their own upright frame.
  * Within each segment, the frame interpolates between its endpoint orientations, and
@@ -156,12 +162,47 @@ std::vector<vm::vec3d> sampleSpline(
  * Returns an empty vector if fewer than two control points are given.
  */
 std::vector<SweepFrame> buildSweepFrames(
-  const std::vector<SplinePoint>& points, double forwardSize, bool closed = false);
+  const std::vector<SplinePoint>& points,
+  double forwardSize,
+  bool closed = false,
+  bool wholeCopiesOnly = false);
 
 /**
  * The sweep frame at each control point, for display purposes (reference arrows).
  */
 std::vector<SweepFrame> computeNodeFrames(
   const std::vector<SplinePoint>& points, bool closed = false);
+
+/**
+ * Free-form deformation: maps a point inside the lattice onto the span between the
+ * cross-section frames a and b. The X position inside the lattice interpolates
+ * linearly between the two cross-sections, and the Y / Z offsets from the lattice
+ * center are applied along each frame's right / up direction, scaled by the frame's
+ * cross-section scale (which tapers the profile without changing its length).
+ *
+ * The X position is clamped to the lattice, so a point beyond either end of the
+ * template lands on the span's end cross-section rather than running off the curve.
+ */
+vm::vec3d deformIntoSpan(
+  const vm::vec3d& point,
+  const vm::bbox3d& lattice,
+  const SweepFrame& a,
+  const SweepFrame& b);
+
+/**
+ * The rotation that carries the lattice's axes onto the span's frame at the lattice X
+ * position of the given point: the X axis onto the span direction, and the Y / Z axes
+ * onto the right / up directions interpolated between the two frames. The
+ * cross-section scale is left out, so the result is a pure rotation and anything
+ * placed with it keeps its proportions.
+ *
+ * This is the deformation's orientation at that point, so an object placed with it
+ * turns with the curve the same way the swept geometry around it does.
+ */
+vm::mat4x4d spanOrientation(
+  const vm::vec3d& point,
+  const vm::bbox3d& lattice,
+  const SweepFrame& a,
+  const SweepFrame& b);
 
 } // namespace tb::mdl

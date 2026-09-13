@@ -186,9 +186,18 @@ std::optional<Terrain> parseTerrainEntity(const Entity& entity)
 
   if (const auto* cellSize = entity.property(TerrainPropertyKeys::CellSize))
   {
-    if (const auto parsed = kdl::str_to_double(*cellSize); parsed && *parsed > 0.0)
+    // Two numbers, or one for a terrain written before cells could be stretched, whose
+    // cells were square.
+    if (const auto parsed = vm::parse<double, 2>(*cellSize);
+        parsed && parsed->x() > 0.0 && parsed->y() > 0.0)
     {
-      terrain.cellSize = *parsed;
+      terrain.cellSizeX = parsed->x();
+      terrain.cellSizeY = parsed->y();
+    }
+    else if (const auto square = kdl::str_to_double(*cellSize); square && *square > 0.0)
+    {
+      terrain.cellSizeX = *square;
+      terrain.cellSizeY = *square;
     }
   }
 
@@ -249,12 +258,16 @@ Entity writeTerrainEntity(const Entity& entity, const Terrain& terrain)
     result.addOrUpdateProperty(SidecarPropertyKeys::DataId, generateSidecarId());
   }
 
+  const auto origin = fmt::format(
+    "{:g} {:g} {:g}", terrain.origin.x(), terrain.origin.y(), terrain.origin.z());
+  result.addOrUpdateProperty(TerrainPropertyKeys::Origin, origin);
+
+  // The ordinary origin as well, so that the entity has a sensible position of its own:
+  // while it has no brushes yet, and wherever the editor asks an entity where it is.
+  result.addOrUpdateProperty(EntityPropertyKeys::Origin, origin);
   result.addOrUpdateProperty(
-    TerrainPropertyKeys::Origin,
-    fmt::format(
-      "{:g} {:g} {:g}", terrain.origin.x(), terrain.origin.y(), terrain.origin.z()));
-  result.addOrUpdateProperty(
-    TerrainPropertyKeys::CellSize, fmt::format("{:g}", terrain.cellSize));
+    TerrainPropertyKeys::CellSize,
+    fmt::format("{:g} {:g}", terrain.cellSizeX, terrain.cellSizeY));
   result.addOrUpdateProperty(
     TerrainPropertyKeys::Columns, kdl::str_to_string(terrain.columns));
   result.addOrUpdateProperty(TerrainPropertyKeys::Rows, kdl::str_to_string(terrain.rows));

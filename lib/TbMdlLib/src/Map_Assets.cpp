@@ -21,6 +21,7 @@
 
 #include "Logger.h"
 #include "gl/MaterialManager.h"
+#include "mdl/CustomTextures.h"
 #include "mdl/EntityModelManager.h"
 #include "mdl/GameConfig.h"
 #include "mdl/GameInfo.h"
@@ -94,11 +95,20 @@ std::vector<std::filesystem::path> enabledMaterialCollections(const Map& map)
     const auto* materialCollectionStr =
       map.worldNode().entity().property(EntityPropertyKeys::TbEnabledMaterialCollections))
   {
-    const auto strs = kdl::str_split(*materialCollectionStr, ";");
-    return kdl::vec_sort_and_remove_duplicates(
-      strs
+    auto paths =
+      kdl::str_split(*materialCollectionStr, ";")
       | std::views::transform([](const auto& str) { return std::filesystem::path{str}; })
-      | kdl::ranges::to<std::vector>());
+      | kdl::ranges::to<std::vector>();
+
+    // The textures the map carries itself are always on. They were brought in by hand
+    // and are not written down anywhere the mapper could turn back on, so leaving them
+    // out of a list drawn up before they existed would hide them for good.
+    if (!map.customTextures().empty())
+    {
+      paths.push_back(CustomTextureCollectionName);
+    }
+
+    return kdl::vec_sort_and_remove_duplicates(std::move(paths));
   }
 
   // Otherwise, enable all material collections

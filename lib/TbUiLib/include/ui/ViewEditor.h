@@ -29,6 +29,7 @@
 
 class QCheckBox;
 class QButtonGroup;
+class QComboBox;
 
 namespace tb
 {
@@ -107,6 +108,12 @@ private:
 
   QCheckBox* m_showSoftBoundsCheckBox = nullptr;
 
+  QCheckBox* m_showLightPreviewCheckBox = nullptr;
+  QCheckBox* m_lightPreviewModelsCheckBox = nullptr;
+  QComboBox* m_lightPreviewIndirectComboBox = nullptr;
+  QComboBox* m_lightPreviewBouncesComboBox = nullptr;
+  QComboBox* m_lightPreviewQualityComboBox = nullptr;
+
   NotifierConnection m_notifierConnection;
 
 public:
@@ -131,6 +138,7 @@ private:
   void createTagFilter(QWidget* parent, const std::vector<mdl::SmartTag>& tags);
 
   QWidget* createRendererPanel(QWidget* parent);
+  QWidget* createLightPreviewPanel(QWidget* parent);
 
   void refreshGui();
   void refreshEntityDefinitionsPanel();
@@ -138,6 +146,7 @@ private:
   void refreshBrushesPanel();
   void refreshPatchesPanel();
   void refreshRendererPanel();
+  void refreshLightPreviewPanel();
 
   void showEntityClassnamesChanged(bool checked);
   void showGroupBoundsChanged(bool checked);
@@ -154,6 +163,11 @@ private:
   void showEdgesChanged(bool checked);
   void entityLinkModeChanged(int id);
   void showSoftMapBoundsChanged(bool checked);
+  void showLightPreviewChanged(bool checked);
+  void lightPreviewModelsChanged(bool checked);
+  void lightPreviewIndirectChanged(int index);
+  void lightPreviewBouncesChanged(int index);
+  void lightPreviewQualityChanged(int index);
   void restoreDefaultsClicked();
 };
 

@@ -178,8 +178,11 @@ target_sources(TbMdlLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SetVisibilityCommand.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SoftMapBounds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SoftMapBoundsValidator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/CustomTextures.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/WadFile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Spline.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineBrushes.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineEntities.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/SplineEntity.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/Terrain.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/TerrainHeightmap.cpp

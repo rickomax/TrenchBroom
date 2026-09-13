@@ -36,7 +36,6 @@
 #include "ui/GestureTracker.h"
 #include "ui/HandleDragTracker.h"
 #include "ui/InputState.h"
-#include "ui/ScaleTool.h"
 #include "ui/TerrainTool.h"
 
 #include "vm/intersection.h"
@@ -77,16 +76,6 @@ public:
   /** The plane new terrains are dragged out on. */
   virtual vm::plane3d creationPlane(const InputState& inputState) const = 0;
 
-  /**
-   * Picks the handles of the terrain's bounding box the way the scale tool picks the
-   * selection's, which differs between the 2D and 3D views. The hits carry the scale
-   * tool's handle types and targets, so its bbox maths can be applied to them.
-   */
-  virtual void pickScaleHandles(
-    const InputState& inputState,
-    const vm::bbox3d& bounds,
-    mdl::PickResult& pickResult) const = 0;
-
   /** The point on the given plane under the mouse, snapped to the grid. */
   std::optional<vm::vec3d> pointOnPlane(
     const InputState& inputState, const vm::plane3d& plane) const
@@ -100,29 +89,6 @@ public:
   }
 };
 
-/**
- * Falls back to the side of the box facing away from the camera that comes closest to
- * the pick ray, so that dragging works even when no handle is under the mouse. This is
- * what the scale tool does for the selection.
- */
-void pickScaleBackSide(
-  const InputState& inputState, const vm::bbox3d& bounds, mdl::PickResult& pickResult)
-{
-  if (pickResult.empty())
-  {
-    const auto& pickRay = inputState.pickRay();
-    const auto result = pickBackSideOfBox(pickRay, inputState.camera(), bounds);
-    if (result.pickedSideNormal != vm::vec3d{0, 0, 0})
-    {
-      pickResult.addHit(mdl::Hit{
-        ScaleTool::SideHitType,
-        result.distAlongRay,
-        vm::point_at_distance(pickRay, result.distAlongRay),
-        BBoxSide{result.pickedSideNormal}});
-    }
-  }
-}
-
 class PartDelegate2D : public PartDelegateBase
 {
 public:
@@ -134,52 +100,6 @@ public:
     const auto& camera = inputState.camera();
     const auto normal = vm::get_abs_max_component_axis(vm::vec3d{camera.direction()});
     return vm::plane3d{vm::vec3d{0, 0, 0}, normal};
-  }
-
-  void pickScaleHandles(
-    const InputState& inputState,
-    const vm::bbox3d& bounds,
-    mdl::PickResult& pickResult) const override
-  {
-    const auto& pickRay = inputState.pickRay();
-    const auto& camera = inputState.camera();
-    if (bounds.contains(pickRay.origin))
-    {
-      return;
-    }
-
-    auto localPickResult = mdl::PickResult{};
-
-    // Only the corners of the edges pointing at the camera can be grabbed in a 2D view,
-    // because the other handles are hidden behind the box.
-    for (const auto& edge : allEdges())
-    {
-      const auto points = pointsForBBoxEdge(bounds, edge);
-      if (!vm::is_parallel(points.direction(), vm::vec3d{camera.direction()}))
-      {
-        continue;
-      }
-
-      for (const auto& point : {points.start(), points.end()})
-      {
-        if (
-          const auto distance = camera.pickPointHandle(
-            pickRay, point, double(pref(Preferences::HandleRadius))))
-        {
-          localPickResult.addHit(mdl::Hit{
-            ScaleTool::EdgeHitType,
-            *distance,
-            vm::point_at_distance(pickRay, *distance),
-            edge});
-        }
-      }
-    }
-
-    pickScaleBackSide(inputState, bounds, localPickResult);
-    if (!localPickResult.empty())
-    {
-      pickResult.addHit(localPickResult.all().front());
-    }
   }
 };
 
@@ -204,75 +124,6 @@ public:
       }
     }
     return vm::plane3d{vm::vec3d{0, 0, 0}, vm::vec3d{0, 0, 1}};
-  }
-
-  void pickScaleHandles(
-    const InputState& inputState,
-    const vm::bbox3d& bounds,
-    mdl::PickResult& pickResult) const override
-  {
-    const auto& pickRay = inputState.pickRay();
-    const auto& camera = inputState.camera();
-    if (bounds.contains(pickRay.origin))
-    {
-      return;
-    }
-
-    auto localPickResult = mdl::PickResult{};
-
-    // The corner handles are made larger than the edge handles so that they win where
-    // the two overlap.
-    for (const auto& corner : allCorners())
-    {
-      const auto point = pointForBBoxCorner(bounds, corner);
-      if (
-        const auto distance = camera.pickPointHandle(
-          pickRay, point, double(pref(Preferences::HandleRadius)) * 2.0))
-      {
-        localPickResult.addHit(mdl::Hit{
-          ScaleTool::CornerHitType,
-          *distance,
-          vm::point_at_distance(pickRay, *distance),
-          corner});
-      }
-    }
-
-    for (const auto& edge : allEdges())
-    {
-      if (
-        const auto distance = camera.pickLineSegmentHandle(
-          pickRay,
-          pointsForBBoxEdge(bounds, edge),
-          double(pref(Preferences::HandleRadius))))
-      {
-        localPickResult.addHit(mdl::Hit{
-          ScaleTool::EdgeHitType,
-          *distance,
-          vm::point_at_distance(pickRay, *distance),
-          edge});
-      }
-    }
-
-    for (const auto& side : allSides())
-    {
-      const auto polygon = polygonForBBoxSide(bounds, side);
-      if (
-        const auto distance = vm::intersect_ray_polygon(
-          pickRay, polygon.vertices().begin(), polygon.vertices().end()))
-      {
-        localPickResult.addHit(mdl::Hit{
-          ScaleTool::SideHitType,
-          *distance,
-          vm::point_at_distance(pickRay, *distance),
-          side});
-      }
-    }
-
-    pickScaleBackSide(inputState, bounds, localPickResult);
-    if (!localPickResult.empty())
-    {
-      pickResult.addHit(localPickResult.all().front());
-    }
   }
 };
 
@@ -596,226 +447,6 @@ private:
   bool cancel() override { return false; }
 };
 
-/**
- * Scales the current terrain by dragging the handles of its bounding box, the way the
- * scale tool scales brushes.
- *
- * Resampling the terrain means rebuilding every brush, so the drag only draws the box it
- * would produce and the terrain is resampled once when it ends.
- */
-class TerrainScaleDragDelegate : public HandleDragTrackerDelegate
-{
-private:
-  TerrainTool& m_tool;
-  mdl::Hit m_dragStartHit;
-  vm::bbox3d m_boundsAtDragStart;
-  vm::vec3d m_cumulativeDelta;
-  vm::bbox3d m_currentBounds;
-
-public:
-  TerrainScaleDragDelegate(
-    TerrainTool& tool, mdl::Hit dragStartHit, const vm::bbox3d& boundsAtDragStart)
-    : m_tool{tool}
-    , m_dragStartHit{std::move(dragStartHit)}
-    , m_boundsAtDragStart{boundsAtDragStart}
-    , m_currentBounds{boundsAtDragStart}
-  {
-  }
-
-  HandlePositionProposer start(
-    const InputState& inputState,
-    const vm::vec3d& /* initialHandlePosition */,
-    const vm::vec3d& handleOffset) override
-  {
-    return makeProposer(inputState, handleOffset);
-  }
-
-  std::optional<UpdateDragConfig> modifierKeyChange(
-    const InputState& inputState, const DragState& dragState) override
-  {
-    return UpdateDragConfig{
-      makeProposer(inputState, dragState.handleOffset), ResetInitialHandlePosition::Keep};
-  }
-
-  DragStatus update(
-    const InputState& inputState,
-    const DragState& dragState,
-    const vm::vec3d& proposedHandlePosition) override
-  {
-    m_cumulativeDelta =
-      m_cumulativeDelta + (proposedHandlePosition - dragState.currentHandlePosition);
-
-    const auto [anchor, proportional] = modifierSettings(inputState);
-    const auto bounds = moveBBoxForHit(
-      m_boundsAtDragStart, m_dragStartHit, m_cumulativeDelta, proportional, anchor);
-
-    // An empty box means the drag collapsed or inverted the terrain, so the last usable
-    // bounds are kept until the mouse comes back.
-    if (!bounds.is_empty())
-    {
-      m_currentBounds = bounds;
-      m_tool.setScalePreview(bounds);
-    }
-    return DragStatus::Continue;
-  }
-
-  void end(const InputState&, const DragState&) override
-  {
-    m_tool.setScalePreview(std::nullopt);
-    if (!vm::is_zero(m_cumulativeDelta, vm::Cd::almost_zero()))
-    {
-      m_tool.applyScale(m_currentBounds);
-    }
-  }
-
-  void cancel(const DragState&) override { m_tool.setScalePreview(std::nullopt); }
-
-private:
-  /** The anchor and proportional axes the modifier keys ask for, matching the scale
-   * tool: Alt scales about the center, Shift scales every axis. */
-  static std::pair<AnchorPos, ProportionalAxes> modifierSettings(
-    const InputState& inputState)
-  {
-    const auto anchor = inputState.modifierKeysDown(ModifierKeys::Alt)
-                          ? AnchorPos::Center
-                          : AnchorPos::Opposite;
-
-    auto proportional = ProportionalAxes::None();
-    if (inputState.modifierKeysDown(ModifierKeys::Shift))
-    {
-      proportional = ProportionalAxes::All();
-
-      const auto& camera = inputState.camera();
-      if (camera.orthographicProjection())
-      {
-        // In a 2D view there is nothing to scale along the camera's axis.
-        proportional.setAxisProportional(
-          vm::find_abs_max_component(camera.direction()), false);
-      }
-    }
-
-    return {anchor, proportional};
-  }
-
-  HandlePositionProposer makeProposer(
-    const InputState& inputState, const vm::vec3d& handleOffset) const
-  {
-    const auto& grid = m_tool.grid();
-    if (
-      m_dragStartHit.type() == ScaleTool::EdgeHitType
-      && inputState.camera().orthographicProjection()
-      && !inputState.modifierKeysDown(ModifierKeys::Shift))
-    {
-      // A corner handle in a 2D view moves freely in the view plane.
-      const auto plane = vm::plane3d{
-        m_dragStartHit.hitPoint() + handleOffset,
-        vm::vec3d{inputState.camera().direction()} * -1.0};
-      return makeHandlePositionProposer(
-        makePlaneHandlePicker(plane, handleOffset), makeRelativeHandleSnapper(grid));
-    }
-
-    const auto handleLine = handleLineForHit(m_boundsAtDragStart, m_dragStartHit);
-    return makeHandlePositionProposer(
-      makeLineHandlePicker(handleLine, handleOffset),
-      makeAbsoluteLineHandleSnapper(grid, handleLine));
-  }
-};
-
-/** Scales the current terrain while the Scale mode is selected. */
-class TerrainScalePart : public ToolController, protected PartBase
-{
-public:
-  explicit TerrainScalePart(std::unique_ptr<PartDelegateBase> delegate)
-    : PartBase{std::move(delegate)}
-  {
-  }
-
-private:
-  Tool& tool() override { return m_delegate->tool(); }
-
-  const Tool& tool() const override { return m_delegate->tool(); }
-
-  void pick(const InputState& inputState, mdl::PickResult& pickResult) override
-  {
-    if (m_delegate->tool().scaling())
-    {
-      m_delegate->pickScaleHandles(inputState, bounds(), pickResult);
-    }
-  }
-
-  std::unique_ptr<GestureTracker> acceptMouseDrag(const InputState& inputState) override
-  {
-    using namespace mdl::HitFilters;
-
-    auto& tool = m_delegate->tool();
-    if (!tool.scaling() || !inputState.mouseButtonsPressed(MouseButtons::Left))
-    {
-      return nullptr;
-    }
-
-    const auto& hit = inputState.pickResult().first(type(ScaleTool::AnyHitType));
-    if (!hit.isMatch())
-    {
-      return nullptr;
-    }
-
-    const auto boundsAtDragStart = bounds();
-    const auto handleLine = handleLineForHit(boundsAtDragStart, hit);
-    return createHandleDragTracker(
-      TerrainScaleDragDelegate{tool, hit, boundsAtDragStart},
-      inputState,
-      handleLine.get_origin(),
-      hit.hitPoint());
-  }
-
-  void render(
-    const InputState& inputState,
-    render::RenderContext& renderContext,
-    render::RenderBatch& renderBatch) override
-  {
-    using namespace mdl::HitFilters;
-
-    auto& tool = m_delegate->tool();
-    if (!tool.scaling())
-    {
-      return;
-    }
-
-    auto renderService = render::RenderService{renderContext, renderBatch};
-
-    // While dragging, the box the terrain would be resampled into is drawn instead of
-    // the handles; the terrain itself only changes when the drag ends.
-    if (const auto& preview = tool.scalePreview())
-    {
-      renderService.setForegroundColor(pref(Preferences::TerrainPreviewColor));
-      renderService.setLineWidth(2.0f);
-      renderService.renderBounds(vm::bbox3f{*preview});
-      return;
-    }
-
-    renderService.setForegroundColor(pref(Preferences::ScaleHandleColor));
-    for (const auto& corner : allCorners())
-    {
-      renderService.renderHandle(vm::vec3f{pointForBBoxCorner(bounds(), corner)});
-    }
-
-    // Highlight the side the mouse is over, so it is clear what a drag would move.
-    const auto& hit = inputState.pickResult().first(type(ScaleTool::AnyHitType));
-    if (hit.isMatch() && hit.type() == ScaleTool::SideHitType)
-    {
-      auto highlight = render::RenderService{renderContext, renderBatch};
-      highlight.setShowBackfaces();
-      highlight.setForegroundColor(pref(Preferences::ScaleFillColor));
-      highlight.renderFilledPolygon(
-        vm::polygon3f{polygonForBBoxSide(bounds(), hit.target<BBoxSide>())}.vertices());
-    }
-  }
-
-  bool cancel() override { return false; }
-
-  vm::bbox3d bounds() const { return mdl::terrainBounds(m_delegate->tool().terrain()); }
-};
-
 } // namespace
 
 TerrainToolControllerBase::TerrainToolControllerBase(TerrainTool& tool)
@@ -859,8 +490,6 @@ TerrainToolController2D::TerrainToolController2D(TerrainTool& tool)
 {
   addController(
     std::make_unique<CreateTerrainPart>(std::make_unique<PartDelegate2D>(tool)));
-  addController(
-    std::make_unique<TerrainScalePart>(std::make_unique<PartDelegate2D>(tool)));
   addController(std::make_unique<SculptPart>(std::make_unique<PartDelegate2D>(tool)));
 }
 
@@ -869,8 +498,6 @@ TerrainToolController3D::TerrainToolController3D(TerrainTool& tool)
 {
   addController(
     std::make_unique<CreateTerrainPart>(std::make_unique<PartDelegate3D>(tool)));
-  addController(
-    std::make_unique<TerrainScalePart>(std::make_unique<PartDelegate3D>(tool)));
   addController(std::make_unique<SculptPart>(std::make_unique<PartDelegate3D>(tool)));
 }
 

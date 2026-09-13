@@ -56,6 +56,7 @@ void initializeShaders(Gl& gl, ShaderManager& shaderManager)
     FaceShader,
     PatchShader,
     EdgeShader,
+    LightPreviewShader,
     ColoredTextShader,
     TextBackgroundShader,
     MaterialBrowserShader,

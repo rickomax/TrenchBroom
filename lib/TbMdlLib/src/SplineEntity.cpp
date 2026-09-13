@@ -25,6 +25,7 @@
 #include "mdl/Entity.h"
 #include "mdl/EntityProperties.h"
 #include "mdl/MapSidecar.h"
+#include "mdl/SplineEntities.h"
 
 #include "kd/reflection_impl.h"
 #include "kd/result.h"
@@ -37,6 +38,7 @@
 #include <fmt/format.h>
 
 #include <array>
+#include <optional>
 #include <sstream>
 #include <string>
 
@@ -53,6 +55,112 @@ std::string pointKey(const size_t index)
 std::string templateBrushKey(const size_t index)
 {
   return fmt::format("{}{}", SplinePropertyKeys::TemplateBrushPrefix, index);
+}
+
+std::string templateEntityKey(const size_t index)
+{
+  return fmt::format("{}{}", SplinePropertyKeys::TemplateEntityPrefix, index);
+}
+
+std::string templateSolidKey(const size_t index)
+{
+  return fmt::format("{}{}", SplinePropertyKeys::TemplateSolidPrefix, index);
+}
+
+std::string templateSolidBrushKey(const size_t entityIndex, const size_t brushIndex)
+{
+  return fmt::format("{}_brush_{}", templateSolidKey(entityIndex), brushIndex);
+}
+
+/**
+ * An entity's properties as quoted key value pairs.
+ *
+ * The snapshot is one entity property value holding another entity's properties, so the
+ * inner keys and values are quoted the way the map format quotes them.
+ */
+std::string formatTemplateEntityProperties(const Entity& entity)
+{
+  auto stream = std::ostringstream{};
+  for (const auto& property : entity.properties())
+  {
+    stream << " " << quoteSidecarString(property.key()) << " "
+           << quoteSidecarString(property.value());
+  }
+  return stream.str();
+}
+
+/** The properties of a record written by formatTemplateEntityProperties. */
+std::vector<EntityProperty> parseTemplateEntityProperties(const std::string& value)
+{
+  auto properties = std::vector<EntityProperty>{};
+
+  auto position = value.find('"');
+  while (position != std::string::npos)
+  {
+    const auto key = unquoteSidecarString(value, position);
+    if (!key)
+    {
+      break;
+    }
+
+    position = value.find('"', position);
+    if (position == std::string::npos)
+    {
+      break;
+    }
+
+    const auto propertyValue = unquoteSidecarString(value, position);
+    if (!propertyValue)
+    {
+      break;
+    }
+
+    properties.emplace_back(*key, *propertyValue);
+    position = value.find('"', position);
+  }
+
+  return properties;
+}
+
+std::string formatTemplateEntity(const SplineTemplateEntity& templateEntity)
+{
+  return fmt::format(
+           "{} {} {} {} {} {}",
+           templateEntity.bounds.min.x(),
+           templateEntity.bounds.min.y(),
+           templateEntity.bounds.min.z(),
+           templateEntity.bounds.max.x(),
+           templateEntity.bounds.max.y(),
+           templateEntity.bounds.max.z())
+         + formatTemplateEntityProperties(templateEntity.entity);
+}
+
+std::optional<SplineTemplateEntity> parseTemplateEntity(const std::string& value)
+{
+  auto stream = std::istringstream{value};
+  auto coords = std::array<double, 6>{};
+  for (auto& coord : coords)
+  {
+    stream >> coord;
+  }
+  if (stream.fail())
+  {
+    return std::nullopt;
+  }
+
+  auto rest = std::string{};
+  std::getline(stream, rest);
+
+  auto entity = Entity{parseTemplateEntityProperties(rest)};
+  // A snapshot is only ever taken of a point entity, and the entity it is read back
+  // into has no definition to say so until it is put in the map.
+  entity.setPointEntity(true);
+
+  return SplineTemplateEntity{
+    std::move(entity),
+    vm::bbox3d{
+      vm::vec3d{coords[0], coords[1], coords[2]},
+      vm::vec3d{coords[3], coords[4], coords[5]}}};
 }
 
 std::string formatTemplateBrush(const Brush& brush)
@@ -242,6 +350,16 @@ std::optional<SplineEntityData> parseSplineEntity(const Entity& entity)
     data.closed = *closed != "0";
   }
 
+  if (const auto* lockUVs = entity.property(SplinePropertyKeys::LockUVs))
+  {
+    data.lockUVs = *lockUVs != "0";
+  }
+
+  if (const auto* keepSize = entity.property(SplinePropertyKeys::KeepSize))
+  {
+    data.keepSize = *keepSize != "0";
+  }
+
   return data;
 }
 
@@ -261,6 +379,8 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   result.removeProperty(SplinePropertyKeys::Subdivisions);
   result.removeProperty(SplinePropertyKeys::TemplateGroupId);
   result.removeProperty(SplinePropertyKeys::Closed);
+  result.removeProperty(SplinePropertyKeys::LockUVs);
+  result.removeProperty(SplinePropertyKeys::KeepSize);
 
   result.addOrUpdateProperty(EntityPropertyKeys::Classname, SplineEntityClassname);
 
@@ -289,6 +409,16 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
   if (data.closed)
   {
     result.addOrUpdateProperty(SplinePropertyKeys::Closed, "1");
+  }
+
+  if (data.lockUVs)
+  {
+    result.addOrUpdateProperty(SplinePropertyKeys::LockUVs, "1");
+  }
+
+  if (data.keepSize)
+  {
+    result.addOrUpdateProperty(SplinePropertyKeys::KeepSize, "1");
   }
 
   return result;
@@ -333,6 +463,133 @@ Entity writeSplineTemplateBrushes(const Entity& entity, const std::vector<Brush>
   }
 
   return result;
+}
+
+std::vector<SplineTemplateEntity> parseSplineTemplateEntities(const Entity& entity)
+{
+  auto entities = std::vector<SplineTemplateEntity>{};
+
+  for (size_t i = 0;; ++i)
+  {
+    const auto* value = entity.property(templateEntityKey(i));
+    if (!value)
+    {
+      break;
+    }
+    if (auto templateEntity = parseTemplateEntity(*value))
+    {
+      entities.push_back(std::move(*templateEntity));
+    }
+  }
+
+  return entities;
+}
+
+Entity writeSplineTemplateEntities(
+  const Entity& entity, const std::vector<SplineTemplateEntity>& entities)
+{
+  auto result = entity;
+
+  for (const auto& property : entity.properties())
+  {
+    if (property.hasPrefix(SplinePropertyKeys::TemplateEntityPrefix))
+    {
+      result.removeProperty(property.key());
+    }
+  }
+
+  for (size_t i = 0; i < entities.size(); ++i)
+  {
+    result.addOrUpdateProperty(templateEntityKey(i), formatTemplateEntity(entities[i]));
+  }
+
+  return result;
+}
+
+std::vector<SplineTemplateBrushEntity> parseSplineTemplateBrushEntities(
+  const Entity& entity, const MapFormat mapFormat, const vm::bbox3d& worldBounds)
+{
+  auto brushEntities = std::vector<SplineTemplateBrushEntity>{};
+
+  for (size_t i = 0;; ++i)
+  {
+    const auto* value = entity.property(templateSolidKey(i));
+    if (!value)
+    {
+      break;
+    }
+
+    auto brushEntity = SplineTemplateBrushEntity{};
+    brushEntity.entity = Entity{parseTemplateEntityProperties(*value)};
+    // It holds brushes, whatever the entity it is read back into would assume before it
+    // is put in the map.
+    brushEntity.entity.setPointEntity(false);
+
+    for (size_t j = 0;; ++j)
+    {
+      const auto* brushValue = entity.property(templateSolidBrushKey(i, j));
+      if (!brushValue)
+      {
+        break;
+      }
+      if (auto brush = parseTemplateBrush(*brushValue, mapFormat, worldBounds))
+      {
+        brushEntity.brushes.push_back(std::move(*brush));
+      }
+    }
+
+    // An entity that has lost all of its brushes has nothing left to sweep, and would
+    // otherwise generate empty entities all along the spline.
+    if (!brushEntity.brushes.empty())
+    {
+      brushEntities.push_back(std::move(brushEntity));
+    }
+  }
+
+  return brushEntities;
+}
+
+Entity writeSplineTemplateBrushEntities(
+  const Entity& entity, const std::vector<SplineTemplateBrushEntity>& brushEntities)
+{
+  auto result = entity;
+
+  // The brushes live under the same prefix as the entity they belong to, so this takes
+  // them with it.
+  for (const auto& property : entity.properties())
+  {
+    if (property.hasPrefix(SplinePropertyKeys::TemplateSolidPrefix))
+    {
+      result.removeProperty(property.key());
+    }
+  }
+
+  for (size_t i = 0; i < brushEntities.size(); ++i)
+  {
+    const auto& brushEntity = brushEntities[i];
+    result.addOrUpdateProperty(
+      templateSolidKey(i), formatTemplateEntityProperties(brushEntity.entity));
+
+    for (size_t j = 0; j < brushEntity.brushes.size(); ++j)
+    {
+      result.addOrUpdateProperty(
+        templateSolidBrushKey(i, j), formatTemplateBrush(brushEntity.brushes[j]));
+    }
+  }
+
+  return result;
+}
+
+bool isSplineGeneratedEntity(const Entity& entity)
+{
+  const auto* owner = entity.property(SplinePropertyKeys::GeneratedBy);
+  return owner && !owner->empty();
+}
+
+std::string splineEntityId(const Entity& entity)
+{
+  const auto* id = entity.property(SidecarPropertyKeys::DataId);
+  return id ? *id : std::string{};
 }
 
 } // namespace tb::mdl

@@ -19,6 +19,11 @@ target_sources(TbRenderLib
     ${CMAKE_CURRENT_SOURCE_DIR}/src/GridRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/GroupLinkRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/GroupRenderer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/LightPreview.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/LightPreviewBvh.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/LightPreviewLights.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/LightPreviewScene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/LightPreviewTracer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/LinkRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/MapRenderer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/ObjectRenderer.cpp
@@ -42,6 +47,9 @@ target_sources(TbRenderLib
     BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+# LightPreview traces on its own thread pool
+find_package(Threads REQUIRED)
+
 target_link_libraries(TbRenderLib
   PRIVATE
     CompilerConfig
@@ -49,6 +57,7 @@ target_link_libraries(TbRenderLib
     fmt::fmt-header-only
     KdLib
     TbPreferencesLib
+    Threads::Threads
   PUBLIC
     TbBaseLib
     TbGlLib

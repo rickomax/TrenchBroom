@@ -100,6 +100,12 @@ public:
    *
    * @throws ReaderException if reader doesn't have pixelCount bytes available
    */
+  /**
+   * The palette's colour table, for code that has to go the other way and pick an index
+   * for a colour.
+   */
+  const PaletteData& data() const;
+
   bool indexedToRgba(
     fs::Reader& reader,
     size_t pixelCount,

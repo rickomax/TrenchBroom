@@ -196,6 +196,9 @@ public:
     GLsizei imageSize,
     const GLvoid* data) override;
 
+  void getTexImage(
+    GLenum target, GLint level, GLenum format, GLenum type, GLvoid* pixels) override;
+
   void texParameterf(GLenum target, GLenum pname, GLfloat param) override;
   void texParameteri(GLenum target, GLenum pname, GLint param) override;
 

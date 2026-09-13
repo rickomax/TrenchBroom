@@ -207,10 +207,6 @@ void TerrainTool::setMode(const std::optional<TerrainToolMode> mode)
       // Without a sculpting mode there is no brush to draw.
       m_brushPosition = std::nullopt;
     }
-    if (!scaling())
-    {
-      m_scalePreview = std::nullopt;
-    }
     refreshViews();
     terrainDidChangeNotifier();
   }
@@ -218,12 +214,7 @@ void TerrainTool::setMode(const std::optional<TerrainToolMode> mode)
 
 bool TerrainTool::sculpting() const
 {
-  return !m_addMode && m_mode.has_value() && m_mode != TerrainToolMode::Scale;
-}
-
-bool TerrainTool::scaling() const
-{
-  return !m_addMode && m_mode == TerrainToolMode::Scale && hasTerrain();
+  return !m_addMode && m_mode.has_value();
 }
 
 std::optional<TerrainToolMode> TerrainTool::effectiveMode(const bool invert) const
@@ -244,7 +235,6 @@ std::optional<TerrainToolMode> TerrainTool::effectiveMode(const bool invert) con
   case TerrainToolMode::Smooth:
     return TerrainToolMode::Flatten;
   case TerrainToolMode::Texture:
-  case TerrainToolMode::Scale:
     return m_mode;
   }
   return m_mode;
@@ -415,7 +405,6 @@ void TerrainTool::removeTerrain()
   m_strokeOriginal = std::nullopt;
   m_strokeCells.clear();
   m_brushPosition = std::nullopt;
-  m_scalePreview = std::nullopt;
 
   refreshOtherTerrains();
   refreshViews();
@@ -506,45 +495,6 @@ void TerrainTool::breakTerrain()
   terrainDidChangeNotifier();
 }
 
-const std::optional<vm::bbox3d>& TerrainTool::scalePreview() const
-{
-  return m_scalePreview;
-}
-
-void TerrainTool::setScalePreview(std::optional<vm::bbox3d> bounds)
-{
-  if (bounds != m_scalePreview)
-  {
-    m_scalePreview = std::move(bounds);
-    refreshViews();
-  }
-}
-
-bool TerrainTool::applyScale(const vm::bbox3d& bounds)
-{
-  auto& map = m_document.map();
-  if (!hasTerrain())
-  {
-    return false;
-  }
-
-  auto scaled = m_terrain;
-  if (!mdl::scaleTerrain(scaled, bounds))
-  {
-    map.logger().error()
-      << "Could not scale terrain: the box is too small for a single cell, or needs "
-         "more than "
-      << mdl::TerrainMaxCells << " cells";
-    return false;
-  }
-
-  m_terrain = std::move(scaled);
-  // Scaling changes the number of cells, so the brushes cannot be swapped one by one
-  // and the whole terrain is rebuilt instead.
-  commitTerrain("Scale Terrain");
-  return true;
-}
-
 const std::optional<vm::vec3d>& TerrainTool::brushPosition() const
 {
   return m_brushPosition;
@@ -571,7 +521,6 @@ std::string TerrainTool::strokeCommandName() const
     return "Paint Terrain";
   case TerrainToolMode::Raise:
   case TerrainToolMode::Lower:
-  case TerrainToolMode::Scale:
     break;
   }
   return "Sculpt Terrain";
@@ -605,23 +554,35 @@ std::vector<size_t> TerrainTool::cellsInRadius(const vm::vec3d& position) const
 
   // A cell is affected when one of its corners lies within the radius, so the search
   // is limited to the cells the brush's bounding square covers.
-  const auto toCell = [&](const double world, const double origin, const size_t count) {
-    const auto index = std::llround(std::floor((world - origin) / m_terrain.cellSize));
+  const auto toCell = [&](
+                        const double world,
+                        const double origin,
+                        const double cellSize,
+                        const size_t count) {
+    const auto index = std::llround(std::floor((world - origin) / cellSize));
     return size_t(vm::clamp(index, 0ll, std::llround(double(count) - 1.0)));
   };
 
   const auto minColumn = toCell(
-    position.x() - m_radius - m_terrain.cellSize,
+    position.x() - m_radius - m_terrain.cellSizeX,
     m_terrain.origin.x(),
+    m_terrain.cellSizeX,
     m_terrain.columns);
   const auto maxColumn = toCell(
-    position.x() + m_radius + m_terrain.cellSize,
+    position.x() + m_radius + m_terrain.cellSizeX,
     m_terrain.origin.x(),
+    m_terrain.cellSizeX,
     m_terrain.columns);
   const auto minRow = toCell(
-    position.y() - m_radius - m_terrain.cellSize, m_terrain.origin.y(), m_terrain.rows);
+    position.y() - m_radius - m_terrain.cellSizeY,
+    m_terrain.origin.y(),
+    m_terrain.cellSizeY,
+    m_terrain.rows);
   const auto maxRow = toCell(
-    position.y() + m_radius + m_terrain.cellSize, m_terrain.origin.y(), m_terrain.rows);
+    position.y() + m_radius + m_terrain.cellSizeY,
+    m_terrain.origin.y(),
+    m_terrain.cellSizeY,
+    m_terrain.rows);
 
   for (auto row = minRow; row <= maxRow; ++row)
   {
@@ -636,7 +597,7 @@ std::vector<size_t> TerrainTool::cellsInRadius(const vm::vec3d& position) const
 bool TerrainTool::applyStroke(const vm::vec3d& position, const bool invert)
 {
   const auto mode = effectiveMode(invert);
-  if (!hasTerrain() || !mode || mode == TerrainToolMode::Scale)
+  if (!hasTerrain() || !mode)
   {
     return false;
   }
@@ -863,16 +824,6 @@ void TerrainTool::commitTerrain(const std::string& commandName)
 
   auto entity = mdl::writeTerrainEntity(
     m_terrainNode ? m_terrainNode->entity() : mdl::Entity{}, m_terrain);
-
-  // Give the entity an origin so that it has a sensible position while it has no
-  // brushes yet.
-  entity.addOrUpdateProperty(
-    "origin",
-    fmt::format(
-      "{:g} {:g} {:g}",
-      m_terrain.origin.x(),
-      m_terrain.origin.y(),
-      m_terrain.origin.z()));
 
   auto* newNode = new mdl::EntityNode{std::move(entity)};
   newNode->addChildren(createBrushNodes());

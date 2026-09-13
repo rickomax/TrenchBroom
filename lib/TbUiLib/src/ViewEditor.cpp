@@ -21,11 +21,13 @@
 
 #include <QButtonGroup>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QGridLayout>
 #include <QLabel>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QSignalBlocker>
 
 #include "PreferenceManager.h"
 #include "Preferences.h"
@@ -313,6 +315,7 @@ void ViewEditor::createGui()
     gridLayout->addWidget(patchesPanel, row++, 1);
   }
   gridLayout->addWidget(createRendererPanel(this), row++, 1);
+  gridLayout->addWidget(createLightPreviewPanel(this), row++, 1);
   gridLayout->addWidget(createEntityDefinitionsPanel(this), 0, 0, row, 1);
 
   setLayout(gridLayout);
@@ -616,6 +619,7 @@ void ViewEditor::refreshGui()
   refreshBrushesPanel();
   refreshPatchesPanel();
   refreshRendererPanel();
+  refreshLightPreviewPanel();
 }
 
 void ViewEditor::refreshEntityDefinitionsPanel()
@@ -670,6 +674,139 @@ void ViewEditor::refreshRendererPanel()
     QString::fromStdString(pref(Preferences::EntityLinkMode)),
     true);
   m_showSoftBoundsCheckBox->setChecked(pref(Preferences::ShowSoftMapBounds));
+}
+
+void ViewEditor::refreshLightPreviewPanel()
+{
+  const auto showLightPreview = pref(Preferences::ShowLightPreview);
+  m_showLightPreviewCheckBox->setChecked(showLightPreview);
+
+  m_lightPreviewModelsCheckBox->setChecked(pref(Preferences::LightPreviewShowModels));
+
+  // None of these do anything until the preview is switched on.
+  m_lightPreviewModelsCheckBox->setEnabled(showLightPreview);
+  m_lightPreviewIndirectComboBox->setEnabled(showLightPreview);
+  m_lightPreviewQualityComboBox->setEnabled(showLightPreview);
+
+  // The count only applies to the override: following the map uses the map's own
+  // "_bounce" count, and off bounces nothing at all.
+  const auto indirectOn =
+    pref(Preferences::LightPreviewIndirect) == Preferences::LightPreviewIndirectOn;
+  m_lightPreviewBouncesComboBox->setEnabled(showLightPreview && indirectOn);
+
+  if (const auto index =
+        m_lightPreviewBouncesComboBox->findData(pref(Preferences::LightPreviewBounces));
+      index >= 0)
+  {
+    const auto blocker = QSignalBlocker{m_lightPreviewBouncesComboBox};
+    m_lightPreviewBouncesComboBox->setCurrentIndex(index);
+  }
+
+  const auto indirect = QString::fromStdString(pref(Preferences::LightPreviewIndirect));
+  if (const auto index = m_lightPreviewIndirectComboBox->findData(indirect); index >= 0)
+  {
+    const auto blocker = QSignalBlocker{m_lightPreviewIndirectComboBox};
+    m_lightPreviewIndirectComboBox->setCurrentIndex(index);
+  }
+
+  const auto quality = QString::fromStdString(pref(Preferences::LightPreviewQuality));
+  if (const auto index = m_lightPreviewQualityComboBox->findData(quality); index >= 0)
+  {
+    const auto blocker = QSignalBlocker{m_lightPreviewQualityComboBox};
+    m_lightPreviewQualityComboBox->setCurrentIndex(index);
+  }
+}
+
+QWidget* ViewEditor::createLightPreviewPanel(QWidget* parent)
+{
+  auto* panel = new TitledPanel{"Light Preview", parent, false};
+  auto* inner = panel->getPanel();
+
+  m_showLightPreviewCheckBox = new QCheckBox{tr("Show light preview")};
+  m_showLightPreviewCheckBox->setToolTip(tr(
+    "Path traces the map's lighting over the 3D view. The preview refines itself while "
+    "the view is left alone, and starts over when the camera or the map changes."));
+
+  m_lightPreviewModelsCheckBox = new QCheckBox{tr("Include entity models")};
+  m_lightPreviewModelsCheckBox->setToolTip(tr(
+    "Lights entity models along with the brushwork. They never cast shadows, since a "
+    "model entity is not part of the BSP and so never reaches the compiled lightmap."));
+
+  m_lightPreviewIndirectComboBox = new QComboBox{};
+  m_lightPreviewIndirectComboBox->addItem(
+    tr("Indirect light from map"),
+    QString::fromStdString(Preferences::LightPreviewIndirectFromMap));
+  m_lightPreviewIndirectComboBox->addItem(
+    tr("Indirect light on"), QString::fromStdString(Preferences::LightPreviewIndirectOn));
+  m_lightPreviewIndirectComboBox->addItem(
+    tr("Indirect light off"),
+    QString::fromStdString(Preferences::LightPreviewIndirectOff));
+  m_lightPreviewIndirectComboBox->setToolTip(
+    tr("The compilers do not bounce light unless the map's \"_bounce\" key asks them to, "
+       "and that key is also how many bounces they make, which is what \"from map\" "
+       "follows. Overriding it is the preview's equivalent of passing \"-bounce\" on the "
+       "command line."));
+
+  m_lightPreviewBouncesComboBox = new QComboBox{};
+  for (const auto bounces : {1, 2, 3, 4, 8})
+  {
+    m_lightPreviewBouncesComboBox->addItem(
+      bounces == 1 ? tr("1 bounce") : tr("%1 bounces").arg(bounces), bounces);
+  }
+  m_lightPreviewBouncesComboBox->setToolTip(
+    tr("How many times light may bounce when indirect light is turned on here, the same "
+       "as the number given to \"_bounce\". Each bounce is dimmer than the last by the "
+       "brightness of the texture it came off, so on the dark textures most maps use, "
+       "the first bounce is the one that shows and the rest are hard to see."));
+
+  m_lightPreviewQualityComboBox = new QComboBox{};
+  m_lightPreviewQualityComboBox->addItem(
+    tr("Low quality"), QString::fromStdString(Preferences::LightPreviewQualityLow));
+  m_lightPreviewQualityComboBox->addItem(
+    tr("Medium quality"), QString::fromStdString(Preferences::LightPreviewQualityMedium));
+  m_lightPreviewQualityComboBox->addItem(
+    tr("High quality"), QString::fromStdString(Preferences::LightPreviewQualityHigh));
+  m_lightPreviewQualityComboBox->setToolTip(
+    tr("Trades resolution and the number of shadow rays each point spends against how "
+       "quickly the preview settles."));
+
+  connect(
+    m_showLightPreviewCheckBox,
+    &QAbstractButton::clicked,
+    this,
+    &ViewEditor::showLightPreviewChanged);
+  connect(
+    m_lightPreviewModelsCheckBox,
+    &QAbstractButton::clicked,
+    this,
+    &ViewEditor::lightPreviewModelsChanged);
+  connect(
+    m_lightPreviewIndirectComboBox,
+    &QComboBox::currentIndexChanged,
+    this,
+    &ViewEditor::lightPreviewIndirectChanged);
+  connect(
+    m_lightPreviewBouncesComboBox,
+    &QComboBox::currentIndexChanged,
+    this,
+    &ViewEditor::lightPreviewBouncesChanged);
+  connect(
+    m_lightPreviewQualityComboBox,
+    &QComboBox::currentIndexChanged,
+    this,
+    &ViewEditor::lightPreviewQualityChanged);
+
+  auto* layout = new QVBoxLayout{};
+  layout->setContentsMargins(0, 0, 0, 0);
+  layout->setSpacing(0);
+  layout->addWidget(m_showLightPreviewCheckBox);
+  layout->addWidget(m_lightPreviewModelsCheckBox);
+  layout->addWidget(m_lightPreviewIndirectComboBox);
+  layout->addWidget(m_lightPreviewBouncesComboBox);
+  layout->addWidget(m_lightPreviewQualityComboBox);
+
+  inner->setLayout(layout);
+  return panel;
 }
 
 void ViewEditor::showEntityClassnamesChanged(const bool checked)
@@ -787,6 +924,46 @@ void ViewEditor::showSoftMapBoundsChanged(const bool checked)
   setPref(Preferences::ShowSoftMapBounds, checked);
 }
 
+void ViewEditor::showLightPreviewChanged(const bool checked)
+{
+  setPref(Preferences::ShowLightPreview, checked);
+}
+
+void ViewEditor::lightPreviewModelsChanged(const bool checked)
+{
+  setPref(Preferences::LightPreviewShowModels, checked);
+}
+
+void ViewEditor::lightPreviewIndirectChanged(const int index)
+{
+  if (index >= 0)
+  {
+    setPref(
+      Preferences::LightPreviewIndirect,
+      m_lightPreviewIndirectComboBox->itemData(index).toString().toStdString());
+  }
+}
+
+void ViewEditor::lightPreviewBouncesChanged(const int index)
+{
+  if (index >= 0)
+  {
+    setPref(
+      Preferences::LightPreviewBounces,
+      m_lightPreviewBouncesComboBox->itemData(index).toInt());
+  }
+}
+
+void ViewEditor::lightPreviewQualityChanged(const int index)
+{
+  if (index >= 0)
+  {
+    setPref(
+      Preferences::LightPreviewQuality,
+      m_lightPreviewQualityComboBox->itemData(index).toString().toStdString());
+  }
+}
+
 void ViewEditor::restoreDefaultsClicked()
 {
   auto& prefs = PreferenceManager::instance();
@@ -803,6 +980,12 @@ void ViewEditor::restoreDefaultsClicked()
   prefs.resetToDefault(Preferences::ShowPointEntities);
   prefs.resetToDefault(Preferences::ShowBrushes);
   prefs.resetToDefault(Preferences::EntityLinkMode);
+  prefs.resetToDefault(Preferences::ShowLightPreview);
+  prefs.resetToDefault(Preferences::LightPreviewQuality);
+  prefs.resetToDefault(Preferences::LightPreviewShowModels);
+  prefs.resetToDefault(Preferences::LightPreviewIndirect);
+  prefs.resetToDefault(Preferences::LightPreviewBounces);
+  prefs.resetToDefault(Preferences::LightPreviewExposure);
   prefs.saveChanges();
 }
 
