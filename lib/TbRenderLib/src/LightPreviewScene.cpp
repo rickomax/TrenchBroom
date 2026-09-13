@@ -51,6 +51,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
@@ -414,9 +415,19 @@ struct MaterialLookup
 struct BrushModelLighting
 {
   vm::vec3f minLight = vm::vec3f{0, 0, 0};
+  /** Which model this is, with zero for the world; only shadows care. */
+  int32_t objectIndex = 0;
+  float maxLight = 0.0f;
+  float lightColorScale = 1.0f;
   int32_t objectChannelMask = 1;
   bool castsShadows = true;
   bool receivesLight = true;
+  /** "_shadowself": casts a shadow onto this model and nothing else. */
+  bool shadowsSelfOnly = false;
+  /** "_shadowworldonly": casts a shadow onto the world and nothing else. */
+  bool shadowsWorldOnly = false;
+  /** "_alpha": how much of the surface a ray sees, when the model says so itself. */
+  std::optional<float> alpha;
 };
 
 std::vector<float> parsePropertyFloats(const std::string& str)
@@ -441,9 +452,35 @@ std::vector<float> parsePropertyFloats(const std::string& str)
   return result;
 }
 
-BrushModelLighting readBrushModelLighting(const mdl::EntityNodeBase* entityNode)
+/**
+ * Hands out a number per brush model, so that a shadow can tell whether it is falling on
+ * the model that cast it. The world is zero, which is what a surface with no entity of
+ * its own gets.
+ */
+class BrushModelIndices
+{
+private:
+  std::unordered_map<const mdl::EntityNodeBase*, int32_t> m_indices;
+
+public:
+  int32_t indexOf(const mdl::EntityNodeBase* entityNode)
+  {
+    if (!entityNode || mdl::isWorldspawn(entityNode->entity().classname()))
+    {
+      return 0;
+    }
+
+    const auto [it, inserted] =
+      m_indices.try_emplace(entityNode, int32_t(m_indices.size()) + 1);
+    return it->second;
+  }
+};
+
+BrushModelLighting readBrushModelLighting(
+  const mdl::EntityNodeBase* entityNode, BrushModelIndices& indices)
 {
   auto result = BrushModelLighting{};
+  result.objectIndex = indices.indexOf(entityNode);
   if (!entityNode)
   {
     return result;
@@ -482,6 +519,15 @@ BrushModelLighting readBrushModelLighting(const mdl::EntityNodeBase* entityNode)
     result.minLight = color * *minLight;
   }
 
+  result.maxLight = std::max(number("_maxlight").value_or(0.0f), 0.0f);
+  result.lightColorScale =
+    std::clamp(number("_lightcolorscale").value_or(1.0f), 0.0f, 1.0f);
+
+  if (const auto alpha = number("_alpha"))
+  {
+    result.alpha = std::clamp(*alpha, 0.0f, 1.0f);
+  }
+
   if (const auto mask = number("_object_channel_mask"))
   {
     result.objectChannelMask = int32_t(*mask);
@@ -497,6 +543,22 @@ BrushModelLighting readBrushModelLighting(const mdl::EntityNodeBase* entityNode)
 
   const auto shadow = number("_shadow").value_or(0.0f);
   result.castsShadows = shadow > 0.0f ? true : shadow < 0.0f ? false : partOfWorld;
+
+  // A model can be told to cast a shadow onto itself alone, or onto the world alone,
+  // instead of onto everything. "_shadow" wins over both, as it does in the compilers.
+  if (!result.castsShadows)
+  {
+    if (number("_shadowself").value_or(number("_selfshadow").value_or(0.0f)) != 0.0f)
+    {
+      result.castsShadows = true;
+      result.shadowsSelfOnly = true;
+    }
+    else if (number("_shadowworldonly").value_or(0.0f) != 0.0f)
+    {
+      result.castsShadows = true;
+      result.shadowsWorldOnly = true;
+    }
+  }
 
   if (const auto lightIgnore = number("_lightignore"))
   {
@@ -575,6 +637,11 @@ void addBrushFace(
   shading.objectChannelMask = brushModel.objectChannelMask;
   shading.receivesLight = brushModel.receivesLight;
   shading.surfaceMinLight = brushModel.minLight;
+  shading.surfaceMaxLight = brushModel.maxLight;
+  shading.lightColorScale = brushModel.lightColorScale;
+  shading.objectIndex = brushModel.objectIndex;
+  shading.shadowsSelfOnly = brushModel.shadowsSelfOnly;
+  shading.shadowsWorldOnly = brushModel.shadowsWorldOnly;
 
   if (skyClassifier.isSky(material, surfaceFlags))
   {
@@ -599,7 +666,9 @@ void addBrushFace(
 
     // Drawn as see-through as the editor draws it, so that the preview shows the same
     // pool of water the view underneath it does. Light ignores it either way.
-    shading.alpha = nonSolid ? transparentAlpha : 1.0f;
+    // A model that says how see-through it is is taken at its word; otherwise a liquid
+    // is drawn as see-through as the editor draws it.
+    shading.alpha = brushModel.alpha.value_or(nonSolid ? transparentAlpha : 1.0f);
   }
 
   // Quake 2 marks emissive faces with a surface flag and puts the brightness in the
@@ -670,6 +739,11 @@ void addPatch(
   shading.objectChannelMask = brushModel.objectChannelMask;
   shading.receivesLight = brushModel.receivesLight;
   shading.surfaceMinLight = brushModel.minLight;
+  shading.surfaceMaxLight = brushModel.maxLight;
+  shading.lightColorScale = brushModel.lightColorScale;
+  shading.objectIndex = brushModel.objectIndex;
+  shading.shadowsSelfOnly = brushModel.shadowsSelfOnly;
+  shading.shadowsWorldOnly = brushModel.shadowsWorldOnly;
 
   if (skyClassifier.isSky(material, 0))
   {
@@ -1019,6 +1093,7 @@ PreviewScene buildPreviewScene(
     std::clamp(pref(Preferences::TransparentFaceAlpha), 0.0f, 1.0f);
 
   auto materials = MaterialLookup{materialCache, gl, options.maxTextureSize};
+  auto brushModelIndices = BrushModelIndices{};
   auto sink = TriangleSink{scene, {}};
 
   const auto& editorContext = map.editorContext();
@@ -1060,7 +1135,7 @@ PreviewScene buildPreviewScene(
         return;
       }
 
-      const auto brushModel = readBrushModelLighting(node.entity());
+      const auto brushModel = readBrushModelLighting(node.entity(), brushModelIndices);
       for (const auto& face : node.brush().faces())
       {
         if (editorContext.visible(node, face))
@@ -1083,7 +1158,7 @@ PreviewScene buildPreviewScene(
       {
         addPatch(
           node,
-          readBrushModelLighting(node.entity()),
+          readBrushModelLighting(node.entity(), brushModelIndices),
           skyClassifier,
           hiddenClassifier,
           materials,

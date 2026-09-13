@@ -905,6 +905,163 @@ TEST_CASE("tracePreviewPixel")
     CHECK(color.z() == Catch::Approx(display(50.0f)).margin(0.01));
   }
 
+  SECTION("\"_addmin\" adds the minimum light instead of putting a floor under it")
+  {
+    const auto lit = [](const bool addMinLight) {
+      auto test = TestScene{};
+      test.scene.globals.addMinLight = addMinLight;
+      test.scene.globals.minLight = vm::vec3f{100, 100, 100};
+      test.addPointLight(300.0f, PreviewAttenuation::None);
+      test.finish();
+      return test.shade(64);
+    };
+
+    // A floor under 300 does nothing; added to it, it lifts the surface to 400.
+    CHECK(lit(false) == Catch::Approx(display(300.0f)).margin(0.01));
+    CHECK(lit(true) == Catch::Approx(display(400.0f)).margin(0.01));
+  }
+
+  SECTION("\"_bleed\" lets a light round the corner onto the back of a surface")
+  {
+    const auto lit = [](const bool bleed) {
+      auto test = TestScene{};
+
+      // The light is under the floor, which faces up, so the only thing between the two
+      // is the angle: the floor is asked not to cast a shadow of its own.
+      for (auto& shading : test.scene.triangleShading)
+      {
+        shading.occludes = false;
+      }
+
+      auto light = TestScene::makePointLight(300.0f, PreviewAttenuation::None);
+      light.origin = vm::vec3f{0, 0, -100};
+      light.bleed = bleed;
+      light.angleScale = 1.0f;
+      test.scene.lights.push_back(light);
+      test.finish();
+      return test.shade(64);
+    };
+
+    CHECK(lit(false) == Catch::Approx(0.0).margin(0.001));
+    CHECK(lit(true) == Catch::Approx(display(300.0f)).margin(0.01));
+  }
+
+  SECTION("a brush model's own ceiling is used instead of the map's")
+  {
+    auto test = TestScene{};
+    test.scene.globals.maxLight = 200.0f;
+    test.addPointLight(300.0f, PreviewAttenuation::None);
+    test.finish();
+
+    // 2 * 50 is below what the light puts down, so the floor comes down to it; the map's
+    // own ceiling of 2 * 200 would have left it alone.
+    for (auto& shading : test.scene.triangleShading)
+    {
+      shading.surfaceMaxLight = 50.0f;
+    }
+
+    CHECK(test.shade(64) == Catch::Approx(display(100.0f)).margin(0.01));
+  }
+
+  SECTION("\"_lightcolorscale\" takes the colour out of what a model receives")
+  {
+    auto test = TestScene{};
+    auto light = TestScene::makePointLight(300.0f, PreviewAttenuation::None);
+    light.color = vm::vec3f{1.0f, 0.0f, 0.0f};
+    test.scene.lights.push_back(light);
+    test.finish();
+
+    for (auto& shading : test.scene.triangleShading)
+    {
+      shading.lightColorScale = 0.0f;
+    }
+
+    auto camera = PreviewCamera{};
+    camera.position = vm::vec3f{0, 0, 200};
+    camera.forward = vm::vec3f{0, 0, -1};
+    camera.right = vm::vec3f{1, 0, 0};
+    camera.up = vm::vec3f{0, 1, 0};
+    camera.halfWidth = camera.halfHeight = 0.0002f;
+    camera.width = camera.height = 1;
+
+    auto settings = PreviewTraceSettings{};
+    auto sum = vm::vec3f{0, 0, 0};
+    for (auto i = 0; i < 64; ++i)
+    {
+      sum = sum + tracePreviewPixel(test.scene, camera, settings, 0, 0, uint32_t(i));
+    }
+    const auto color = sum / 64.0f;
+
+    // A red light on a grey surface: every channel ends up at what the red one was.
+    CHECK(color.x() == Catch::Approx(display(300.0f)).margin(0.01));
+    CHECK(color.y() == Catch::Approx(color.x()).margin(0.01));
+    CHECK(color.z() == Catch::Approx(color.x()).margin(0.01));
+  }
+
+  SECTION("a model can be told to cast a shadow on itself alone")
+  {
+    // The obstacle belongs to a model of its own, and is asked to shadow only that
+    // model; the floor underneath is the world, so the light reaches it.
+    const auto lit = [](const bool selfOnly) {
+      auto test = TestScene{};
+      test.addPointLight(300.0f, PreviewAttenuation::None);
+      test.addQuad(
+        vm::vec3f{-50, -50, 50},
+        vm::vec3f{100, 0, 0},
+        vm::vec3f{0, 100, 0},
+        vm::vec3f{0, 0, 1});
+
+      for (auto i = test.scene.triangleShading.size() - 2;
+           i < test.scene.triangleShading.size();
+           ++i)
+      {
+        test.scene.triangleShading[i].objectIndex = 1;
+        test.scene.triangleShading[i].shadowsSelfOnly = selfOnly;
+      }
+
+      test.finish();
+      return test.shade(64, 25.0f);
+    };
+
+    CHECK(lit(false) == Catch::Approx(0.0).margin(0.001));
+    CHECK(lit(true) == Catch::Approx(display(300.0f)).margin(0.01));
+  }
+
+  SECTION("a model can be told to cast a shadow on the world alone")
+  {
+    // The floor belongs to a model rather than to the world, so an obstacle asked to
+    // shadow the world alone is not in the way of it.
+    const auto lit = [](const bool worldOnly) {
+      auto test = TestScene{};
+      test.addPointLight(300.0f, PreviewAttenuation::None);
+
+      for (auto& shading : test.scene.triangleShading)
+      {
+        shading.objectIndex = 2;
+      }
+
+      test.addQuad(
+        vm::vec3f{-50, -50, 50},
+        vm::vec3f{100, 0, 0},
+        vm::vec3f{0, 100, 0},
+        vm::vec3f{0, 0, 1});
+
+      for (auto i = test.scene.triangleShading.size() - 2;
+           i < test.scene.triangleShading.size();
+           ++i)
+      {
+        test.scene.triangleShading[i].objectIndex = 1;
+        test.scene.triangleShading[i].shadowsWorldOnly = worldOnly;
+      }
+
+      test.finish();
+      return test.shade(64, 25.0f);
+    };
+
+    CHECK(lit(false) == Catch::Approx(0.0).margin(0.001));
+    CHECK(lit(true) == Catch::Approx(display(300.0f)).margin(0.01));
+  }
+
   SECTION("a light does not reach a surface on another channel")
   {
     auto test = TestScene{};

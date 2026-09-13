@@ -141,6 +141,22 @@ struct PreviewTriangleShading
   vm::vec3f emission = vm::vec3f{0, 0, 0};
   /** Per brush model minimum light (_minlight on a bmodel), premultiplied by nothing. */
   vm::vec3f surfaceMinLight = vm::vec3f{0, 0, 0};
+  /** Per brush model ceiling ("_maxlight" on a bmodel); 0 means the map's. */
+  float surfaceMaxLight = 0.0f;
+  /**
+   * "_lightcolorscale" on the brush model: how much colour the light landing on it
+   * keeps. One leaves it alone, zero turns it grey.
+   */
+  float lightColorScale = 1.0f;
+  /**
+   * Which brush model this triangle belongs to, with zero for the world. Only shadows
+   * care: a model can be told to cast one on itself alone, or on the world alone.
+   */
+  int32_t objectIndex = 0;
+  /** "_shadowself": blocks light only where it lands on this same model. */
+  bool shadowsSelfOnly = false;
+  /** "_shadowworldonly": blocks light only where it lands on the world. */
+  bool shadowsWorldOnly = false;
 };
 
 /**

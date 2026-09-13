@@ -295,6 +295,19 @@ float angleTerm(const float cosTheta, const float angleScale)
 }
 
 /**
+ * The cosine a light sees the surface at, or nothing when the light is behind it.
+ *
+ * A light contributes nothing at all to a surface turned away from it, however shallow
+ * the angle. "_bleed" is what lets one round the corner onto the back of a thin wall:
+ * the size of the angle is taken and its sign thrown away.
+ */
+std::optional<float> incidence(const float cosTheta, const bool bleed)
+{
+  const auto value = bleed ? std::abs(cosTheta) : cosTheta;
+  return value > 0.0f ? std::optional{value} : std::nullopt;
+}
+
+/**
  * The fraction of a spotlight that reaches a point, from the cone and, if the light has
  * one, from the texture it projects.
  */
@@ -397,7 +410,8 @@ bool occluded(
   const vm::vec3f& origin,
   const vm::vec3f& direction,
   const float distance,
-  const int32_t shadowChannelMask)
+  const int32_t shadowChannelMask,
+  const int32_t receiverObjectIndex)
 {
   const auto ray = PreviewRay{origin, direction};
   return scene.bvh.occluded(
@@ -406,7 +420,23 @@ bool occluded(
     distance,
     [&](const uint32_t triangleIndex) {
       const auto& shading = scene.triangleShading[triangleIndex];
-      return shading.occludes && (shading.objectChannelMask & shadowChannelMask) != 0;
+      if (!shading.occludes || (shading.objectChannelMask & shadowChannelMask) == 0)
+      {
+        return false;
+      }
+
+      // A model told to shadow itself, or the world, alone is in the way of nothing
+      // else: the light carries on past it onto everything it was not asked to darken.
+      if (shading.shadowsSelfOnly && shading.objectIndex != receiverObjectIndex)
+      {
+        return false;
+      }
+      if (shading.shadowsWorldOnly && receiverObjectIndex != 0)
+      {
+        return false;
+      }
+
+      return true;
     },
     [&](const uint32_t triangleIndex, const float u, const float v) {
       return !hitAHole(scene, triangleIndex, u, v);
@@ -458,8 +488,8 @@ bool evaluateLight(
       light.penumbra > 0.0f ? std::cos(vm::to_radians(light.penumbra)) : 1.0f,
       rng);
 
-    const auto cosTheta = vm::dot(normal, toLight);
-    if (cosTheta <= 0.0f)
+    const auto cosTheta = incidence(vm::dot(normal, toLight), light.bleed);
+    if (!cosTheta)
     {
       return false;
     }
@@ -468,7 +498,7 @@ bool evaluateLight(
     candidate.infinite = true;
     candidate.contribution =
       light.color
-      * (light.intensity * light.styleScale * angleTerm(cosTheta, light.angleScale));
+      * (light.intensity * light.styleScale * angleTerm(*cosTheta, light.angleScale));
   }
   else
   {
@@ -483,8 +513,8 @@ bool evaluateLight(
     const auto distance = std::sqrt(distanceSquared);
     const auto toLight = delta / distance;
 
-    const auto cosTheta = vm::dot(normal, toLight);
-    if (cosTheta <= 0.0f)
+    const auto cosTheta = incidence(vm::dot(normal, toLight), light.bleed);
+    if (!cosTheta)
     {
       return false;
     }
@@ -514,7 +544,7 @@ bool evaluateLight(
     else
     {
       candidate.contribution =
-        light.color * (value * spot * angleTerm(cosTheta, light.angleScale));
+        light.color * (value * spot * angleTerm(*cosTheta, light.angleScale));
     }
   }
 
@@ -584,7 +614,12 @@ vm::vec3f gatherDirectLight(
     }
 
     if (occluded(
-          scene, shadowOrigin, candidate.toLight, distance, light.shadowChannelMask))
+          scene,
+          shadowOrigin,
+          candidate.toLight,
+          distance,
+          light.shadowChannelMask,
+          shading.objectIndex))
     {
       return;
     }
@@ -654,7 +689,11 @@ vm::vec3f gatherDirectLight(
  * for only having looked at one of them.
  */
 vm::vec3f gatherEmitters(
-  const PreviewScene& scene, const vm::vec3f& position, const vm::vec3f& normal, Rng& rng)
+  const PreviewScene& scene,
+  const vm::vec3f& position,
+  const vm::vec3f& normal,
+  const int32_t receiverObjectIndex,
+  Rng& rng)
 {
   if (scene.emitters.empty() || scene.totalEmitterArea <= 0.0f)
   {
@@ -723,7 +762,12 @@ vm::vec3f gatherEmitters(
   // off that channel casts a shadow from them.
   const auto shadowOrigin = offsetOrigin(position, normal);
   if (occluded(
-        scene, shadowOrigin, toLight, shadowRayDistance(shadowOrigin, samplePoint), 1))
+        scene,
+        shadowOrigin,
+        toLight,
+        shadowRayDistance(shadowOrigin, samplePoint),
+        1,
+        receiverObjectIndex))
   {
     return vm::vec3f{0, 0, 0};
   }
@@ -887,17 +931,21 @@ vm::vec3f tracePreviewPixel(
       // A surface light is a light like any other, so it belongs in the lightmap the
       // steps below act on rather than beside it. Its contribution comes back in display
       // units, which is what dividing puts back.
-      irradiance =
-        irradiance + gatherEmitters(scene, position, normal, rng) / PreviewLightUnitScale;
+      irradiance = irradiance
+                   + gatherEmitters(scene, position, normal, shading.objectIndex, rng)
+                       / PreviewLightUnitScale;
     }
 
-    // The three kinds of minimum light are all floors rather than contributions: the
-    // global one, the one a brush model carries, and whatever a delay 4 light in line of
-    // sight provides. The compilers put them in while lighting, so they are scaled by
-    // everything below like any other light.
+    // The three kinds of minimum light: the global one, the one a brush model carries,
+    // and whatever a delay 4 light in line of sight provides. The compilers put them in
+    // while lighting, so they are scaled by everything below like any other light.
+    //
+    // They are floors under what a surface receives rather than contributions to it,
+    // unless "_addmin" asks for the opposite.
     auto floorLight = maximum(scene.globals.minLight, shading.surfaceMinLight);
     floorLight = maximum(floorLight, localMinLight);
-    irradiance = maximum(irradiance, floorLight);
+    irradiance = scene.globals.addMinLight ? irradiance + floorLight
+                                           : maximum(irradiance, floorLight);
 
     // Subtractive lights can push the total below zero, but a surface cannot emit
     // negative light.
@@ -905,16 +953,29 @@ vm::vec3f tracePreviewPixel(
 
     // "_maxlight" is a ceiling on the brightest channel at twice its own value, and the
     // whole colour is brought down to it together rather than each channel being cut off
-    // on its own, so that a surface up against it keeps its hue.
-    if (scene.globals.maxLight > 0.0f)
+    // on its own, so that a surface up against it keeps its hue. A brush model carrying
+    // one of its own is held to that instead of the map's.
+    const auto maxLight =
+      shading.surfaceMaxLight > 0.0f ? shading.surfaceMaxLight : scene.globals.maxLight;
+    if (maxLight > 0.0f)
     {
-      const auto ceiling = scene.globals.maxLight * 2.0f;
+      const auto ceiling = maxLight * 2.0f;
       const auto peak =
         std::max(irradiance.x(), std::max(irradiance.y(), irradiance.z()));
       if (peak > ceiling)
       {
         irradiance = irradiance * (ceiling / peak);
       }
+    }
+
+    // "_lightcolorscale" takes the colour out of the light a model receives, mixing it
+    // towards the grey its brightest channel would be.
+    if (shading.lightColorScale < 1.0f)
+    {
+      const auto grey =
+        std::max(irradiance.x(), std::max(irradiance.y(), irradiance.z()));
+      irradiance = vm::vec3f{grey, grey, grey}
+                   + (irradiance - vm::vec3f{grey, grey, grey}) * shading.lightColorScale;
     }
 
     // "_range" scales every light's brightness without changing how far it reaches, and

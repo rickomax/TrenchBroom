@@ -95,6 +95,14 @@ struct PreviewLight
   /** The "_anglescale" key: how much the angle of incidence matters, 0..1. */
   float angleScale = 0.5f;
 
+  /**
+   * The "_bleed" key: whether the light reaches a surface that faces away from it.
+   *
+   * Light behind a surface contributes nothing at all otherwise, however shallow the
+   * angle; this lets it bleed around onto the back, which is what a thin wall wants.
+   */
+  bool bleed = false;
+
   bool spot = false;
   /** Cosine of the half angle where the cone ends. */
   float cosOuterCone = -1.0f;
@@ -175,6 +183,11 @@ struct PreviewGlobalLighting
 
   /** "_minlight": a floor on the light every surface receives. */
   vm::vec3f minLight = vm::vec3f{0, 0, 0};
+  /**
+   * "_addmin": whether the minimum light is added to what a surface receives rather
+   * than being a floor under it.
+   */
+  bool addMinLight = false;
 
   /** "_dist": scales the fade distance of every light. */
   float distScale = 1.0f;

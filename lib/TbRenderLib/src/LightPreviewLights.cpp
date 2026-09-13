@@ -29,6 +29,8 @@
 #include "mdl/WorldNode.h"
 
 #include "kd/overload.h"
+#include "kd/string_format.h"
+#include "kd/string_utils.h"
 
 #include "vm/scalar.h"
 
@@ -314,6 +316,36 @@ PreviewAttenuation attenuationFromDelay(const int32_t delay)
   }
 }
 
+/**
+ * The attenuation formula "delay" asks for, which the compilers accept by name as well
+ * as by number. An unknown name falls back to linear, as an unknown number does.
+ */
+std::optional<PreviewAttenuation> attenuationFromDelayProperty(const mdl::Entity& entity)
+{
+  const auto* value = findProperty(entity, {"delay", "_delay"});
+  if (!value)
+  {
+    return std::nullopt;
+  }
+
+  static const auto names = std::unordered_map<std::string, PreviewAttenuation>{
+    {"linear", PreviewAttenuation::Linear},
+    {"inverse", PreviewAttenuation::Inverse},
+    {"inverse2", PreviewAttenuation::InverseSquare},
+    {"infinite", PreviewAttenuation::None},
+    {"localmin", PreviewAttenuation::LocalMinLight},
+    {"inverse2a", PreviewAttenuation::InverseSquareOffset},
+  };
+
+  if (const auto it = names.find(kdl::str_to_lower(kdl::str_trim(*value)));
+      it != names.end())
+  {
+    return it->second;
+  }
+
+  return attenuationFromDelay(intProperty(entity, {"delay", "_delay"}).value_or(0));
+}
+
 using TargetIndex = std::unordered_map<std::string, vm::vec3f>;
 
 /**
@@ -380,10 +412,8 @@ void readCommonKeys(
   // NOTE: this is inferred from the key rather than from the game, which is the sort of
   // thing that should come from the game configuration once it can say so.
   const auto goldSrc = entity.property("_light") != nullptr;
-  light.attenuation = findProperty(entity, {"delay"})
-                        ? attenuationFromDelay(intProperty(entity, {"delay"}).value_or(0))
-                      : goldSrc ? PreviewAttenuation::InverseSquare
-                                : PreviewAttenuation::Linear;
+  light.attenuation = attenuationFromDelayProperty(entity).value_or(
+    goldSrc ? PreviewAttenuation::InverseSquare : PreviewAttenuation::Linear);
   light.falloff = std::max(floatProperty(entity, {"_falloff"}).value_or(0.0f), 0.0f);
   // An "_anglescale" outside the range it is defined over means "use the map's", which
   // is how a light says so: the compilers read -1 that way rather than clamping it to a
@@ -393,6 +423,8 @@ void readCommonKeys(
     entityAngleScale && *entityAngleScale >= 0.0f && *entityAngleScale <= 1.0f
       ? *entityAngleScale
       : globals.defaultAngleScale;
+
+  light.bleed = flagProperty(entity, {"_bleed"});
 
   light.deviance = std::max(floatProperty(entity, {"_deviance"}).value_or(0.0f), 0.0f);
   light.devianceSamples =
@@ -508,6 +540,7 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
                                .value_or(vm::vec3f{1, 1, 1});
   result.minLight = minLightColor * minLightIntensity;
 
+  result.addMinLight = flagProperty(worldspawn, {"_addmin"});
   result.distScale = std::max(floatProperty(worldspawn, {"_dist"}).value_or(1.0f), 0.0f);
   // ericw-tools halves every lightmap unless the map says otherwise, so a preview that
   // leaves it at one is twice as bright as the compile it is standing in for.
