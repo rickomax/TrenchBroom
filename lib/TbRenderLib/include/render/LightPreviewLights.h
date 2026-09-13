@@ -124,6 +124,22 @@ struct PreviewLight
   /** The "_bouncescale" key: how much this light contributes to indirect light. */
   float bounceScale = 1.0f;
 
+  /**
+   * The "_dirt" key: -1 turns dirt off for this light, 1 turns it on, 0 leaves it to
+   * the map.
+   */
+  int32_t dirt = 0;
+  /** "_dirtscale" and "_dirtgain" on the light; 0 means the map's. */
+  float dirtScale = 0.0f;
+  float dirtGain = 0.0f;
+  /**
+   * "_dirt_off_radius" and "_dirt_on_radius": dirt fades in between the two, measured
+   * from the light. Both have to be set for either to do anything.
+   */
+  float dirtOffRadius = 0.0f;
+  float dirtOnRadius = 0.0f;
+  bool dirtRadiusSet = false;
+
   /** The "_light_channel_mask" key, ANDed with a surface's object channel mask. */
   int32_t lightChannelMask = 1;
   /** The "_shadow_channel_mask" key; defaults to the light channel mask. */
@@ -219,6 +235,29 @@ struct PreviewGlobalLighting
   /** "_surflightscale" and "_surflightskyscale". */
   float surfaceLightScale = 1.0f;
   float surfaceSkyLightScale = 1.0f;
+
+  /**
+   * "_dirt": whether light is darkened where a surface is closed in on, which is the
+   * compilers' ambient occlusion.
+   */
+  bool dirt = false;
+  /** "_dirtmode": 0 takes the same directions every time, 1 picks them at random. */
+  int32_t dirtMode = 0;
+  /** "_dirtdepth": how far a surface looks for what is closing in on it. */
+  float dirtDepth = 128.0f;
+  /** "_dirtscale" and "_dirtgain": how strong the darkening is and how it is shaped. */
+  float dirtScale = 1.0f;
+  float dirtGain = 1.0f;
+  /** "_dirtangle": how far from the normal the search for occluders reaches. */
+  float dirtAngle = 88.0f;
+  /** "_minlight_dirt": whether the minimum light is darkened along with the rest. */
+  bool minLightDirt = false;
+
+  /**
+   * Whether anything in the map asks for dirt. Nothing pays for the rays it costs
+   * otherwise, which is the usual case.
+   */
+  bool dirtInUse = false;
 };
 
 /**

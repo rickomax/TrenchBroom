@@ -157,6 +157,8 @@ struct PreviewTriangleShading
   bool shadowsSelfOnly = false;
   /** "_shadowworldonly": blocks light only where it lands on the world. */
   bool shadowsWorldOnly = false;
+  /** "_dirt" "-1" on the brush model: this surface is never darkened by dirt. */
+  bool noDirt = false;
 };
 
 /**

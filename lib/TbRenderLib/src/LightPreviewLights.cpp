@@ -432,6 +432,16 @@ void readCommonKeys(
 
   light.bounceScale = floatProperty(entity, {"_bouncescale"}).value_or(1.0f);
 
+  light.dirt = intProperty(entity, {"_dirt"}).value_or(0);
+  light.dirtScale = std::max(floatProperty(entity, {"_dirtscale"}).value_or(0.0f), 0.0f);
+  light.dirtGain = std::max(floatProperty(entity, {"_dirtgain"}).value_or(0.0f), 0.0f);
+
+  const auto dirtOff = floatProperty(entity, {"_dirt_off_radius"});
+  const auto dirtOn = floatProperty(entity, {"_dirt_on_radius"});
+  light.dirtRadiusSet = dirtOff.has_value() && dirtOn.has_value();
+  light.dirtOffRadius = dirtOff.value_or(0.0f);
+  light.dirtOnRadius = dirtOn.value_or(0.0f);
+
   light.style = intProperty(entity, {"style"}).value_or(0);
   light.styleScale =
     averageLightStyleBrightness(light.style, findProperty(entity, {"pattern"}));
@@ -541,6 +551,18 @@ PreviewGlobalLighting parseGlobals(const mdl::Entity& worldspawn)
   result.minLight = minLightColor * minLightIntensity;
 
   result.addMinLight = flagProperty(worldspawn, {"_addmin"});
+
+  result.dirt = flagProperty(worldspawn, {"_dirt", "_dirty"});
+  result.dirtMode = intProperty(worldspawn, {"_dirtmode"}).value_or(0);
+  result.dirtDepth =
+    std::max(floatProperty(worldspawn, {"_dirtdepth"}).value_or(128.0f), 1.0f);
+  result.dirtScale =
+    std::clamp(floatProperty(worldspawn, {"_dirtscale"}).value_or(1.0f), 0.0f, 100.0f);
+  result.dirtGain =
+    std::clamp(floatProperty(worldspawn, {"_dirtgain"}).value_or(1.0f), 0.0f, 100.0f);
+  result.dirtAngle =
+    std::clamp(floatProperty(worldspawn, {"_dirtangle"}).value_or(88.0f), 1.0f, 90.0f);
+  result.minLightDirt = flagProperty(worldspawn, {"_minlight_dirt"});
   result.distScale = std::max(floatProperty(worldspawn, {"_dist"}).value_or(1.0f), 0.0f);
   // ericw-tools halves every lightmap unless the map says otherwise, so a preview that
   // leaves it at one is twice as bright as the compile it is standing in for.
@@ -965,6 +987,14 @@ PreviewLighting extractLighting(const mdl::Map& map)
       parseTexLights(*entity, result);
     }
   }
+
+  // Dirt costs a sheaf of rays at every point that is shaded, so nothing pays for it
+  // unless something in the map has asked for it: the map as a whole, its minimum light,
+  // a sun, or any one light.
+  result.globals.dirtInUse = result.globals.dirt || result.globals.minLightDirt
+                             || std::ranges::any_of(result.lights, [](const auto& light) {
+                                  return light.dirt > 0;
+                                });
 
   return result;
 }

@@ -426,6 +426,8 @@ struct BrushModelLighting
   bool shadowsSelfOnly = false;
   /** "_shadowworldonly": casts a shadow onto the world and nothing else. */
   bool shadowsWorldOnly = false;
+  /** "_dirt" "-1": this model is never darkened by dirt. */
+  bool noDirt = false;
   /** "_alpha": how much of the surface a ray sees, when the model says so itself. */
   std::optional<float> alpha;
 };
@@ -565,6 +567,9 @@ BrushModelLighting readBrushModelLighting(
     result.receivesLight = *lightIgnore == 0.0f;
   }
 
+  // "_dirt" "-1" on a model keeps dirt off it whatever the map asks for.
+  result.noDirt = number("_dirt").value_or(0.0f) < 0.0f;
+
   return result;
 }
 
@@ -642,6 +647,7 @@ void addBrushFace(
   shading.objectIndex = brushModel.objectIndex;
   shading.shadowsSelfOnly = brushModel.shadowsSelfOnly;
   shading.shadowsWorldOnly = brushModel.shadowsWorldOnly;
+  shading.noDirt = brushModel.noDirt;
 
   if (skyClassifier.isSky(material, surfaceFlags))
   {
@@ -744,6 +750,7 @@ void addPatch(
   shading.objectIndex = brushModel.objectIndex;
   shading.shadowsSelfOnly = brushModel.shadowsSelfOnly;
   shading.shadowsWorldOnly = brushModel.shadowsWorldOnly;
+  shading.noDirt = brushModel.noDirt;
 
   if (skyClassifier.isSky(material, 0))
   {

@@ -1062,6 +1062,77 @@ TEST_CASE("tracePreviewPixel")
     CHECK(lit(true) == Catch::Approx(display(300.0f)).margin(0.01));
   }
 
+  SECTION("dirt darkens a surface by how shut in it is")
+  {
+    // A floor with walls close in on either side is darkened; the same floor out in the
+    // open is not.
+    const auto lit = [](const bool dirt, const bool walls, const float scale = 1.0f) {
+      auto test = TestScene{};
+      test.scene.globals.dirt = dirt;
+      test.scene.globals.dirtInUse = dirt;
+      test.scene.globals.dirtScale = scale;
+      test.scene.globals.dirtDepth = 128.0f;
+      test.addPointLight(300.0f, PreviewAttenuation::None);
+
+      if (walls)
+      {
+        // A narrow slot around the point the camera looks at, close enough to shut it in
+        // but not between it and the light overhead.
+        for (const auto x : {-16.0f, 16.0f})
+        {
+          test.addQuad(
+            vm::vec3f{x, -64, 0},
+            vm::vec3f{0, 128, 0},
+            vm::vec3f{0, 0, 64},
+            vm::vec3f{x < 0 ? 1.0f : -1.0f, 0, 0});
+        }
+      }
+
+      test.finish();
+      return test.shade(256, 40.0f);
+    };
+
+    const auto open = lit(true, false);
+    const auto shutIn = lit(true, true);
+    const auto shutInWithoutDirt = lit(false, true);
+
+    // Out in the open there is nothing to darken it, so it reads the same either way.
+    CHECK(open == Catch::Approx(display(300.0f)).margin(0.02));
+    CHECK(shutInWithoutDirt == Catch::Approx(display(300.0f)).margin(0.02));
+
+    // Shut in, dirt takes a bite out of it.
+    CHECK(shutIn < open * 0.9f);
+    CHECK(shutIn > 0.0f);
+
+    // Half the scale takes half as much away.
+    const auto halfScale = lit(true, true, 0.5f);
+    CHECK(halfScale > shutIn);
+    CHECK(halfScale < open);
+  }
+
+  SECTION("a surface can be kept out of the dirt")
+  {
+    auto test = TestScene{};
+    test.scene.globals.dirt = true;
+    test.scene.globals.dirtInUse = true;
+    test.addPointLight(300.0f, PreviewAttenuation::None);
+    for (const auto x : {-16.0f, 16.0f})
+    {
+      test.addQuad(
+        vm::vec3f{x, -64, 0},
+        vm::vec3f{0, 128, 0},
+        vm::vec3f{0, 0, 64},
+        vm::vec3f{x < 0 ? 1.0f : -1.0f, 0, 0});
+    }
+    for (auto& shading : test.scene.triangleShading)
+    {
+      shading.noDirt = true;
+    }
+    test.finish();
+
+    CHECK(test.shade(256, 40.0f) == Catch::Approx(display(300.0f)).margin(0.02));
+  }
+
   SECTION("a light does not reach a surface on another channel")
   {
     auto test = TestScene{};

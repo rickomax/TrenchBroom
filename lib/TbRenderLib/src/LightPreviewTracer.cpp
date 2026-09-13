@@ -400,6 +400,120 @@ bool hitAHole(
 }
 
 /**
+ * How many directions a surface looks in for what is closing in on it.
+ *
+ * The compilers take forty eight every time, which they can afford once per lightmap
+ * sample. A preview is drawn over and over and averages what it finds, so it takes four
+ * at random each pass and lets the passes fill in the rest; with the gain left at one,
+ * which is where it shapes the result linearly, that comes to the same answer.
+ *
+ * Four is what the cost will bear: a scene asking for dirt takes about twice as long to
+ * trace as one that does not, where forty eight would be ten times.
+ */
+constexpr auto DirtRaysPerSample = 4;
+
+/**
+ * How closed in a surface is, from nought where nothing is near it to one where it is
+ * shut in on every side.
+ *
+ * Rays are cast within "_dirtangle" of the normal and each is followed for at most
+ * "_dirtdepth"; what comes back is how much of that depth they got through on average,
+ * turned around so that more occlusion is a larger number.
+ */
+float surfaceOcclusion(
+  const PreviewScene& scene,
+  const vm::vec3f& position,
+  const vm::vec3f& normal,
+  const int32_t objectChannelMask,
+  Rng& rng)
+{
+  const auto& globals = scene.globals;
+  const auto depth = globals.dirtDepth;
+  const auto cosMaxAngle = std::cos(vm::to_radians(globals.dirtAngle));
+
+  const auto origin = offsetOrigin(position, normal);
+  auto totalDistance = 0.0f;
+
+  for (auto i = 0; i < DirtRaysPerSample; ++i)
+  {
+    const auto direction = sampleCone(normal, cosMaxAngle, rng);
+    const auto ray = PreviewRay{origin, direction};
+
+    // A surface only looks for what is on its own channel, so a model moved off the
+    // default one is not shut in by geometry it does not share a channel with.
+    const auto hit = scene.bvh.intersect(
+      scene.trianglePositions,
+      ray,
+      depth,
+      [&](const uint32_t triangleIndex) {
+        const auto& shading = scene.triangleShading[triangleIndex];
+        return shading.occludes && (shading.objectChannelMask & objectChannelMask) != 0;
+      },
+      [&](const uint32_t triangleIndex, const float u, const float v) {
+        return !hitAHole(scene, triangleIndex, u, v);
+      });
+
+    totalDistance += hit ? std::min(depth, hit->distance) : depth;
+  }
+
+  const auto averageDistance = totalDistance / float(DirtRaysPerSample);
+  return std::clamp(1.0f - averageDistance / depth, 0.0f, 1.0f);
+}
+
+/**
+ * How much of a light survives the dirt at a point, from one where none of it is taken
+ * away to zero where all of it is.
+ *
+ * A light can be told to take part or stay out of it, and can carry a scale and a gain
+ * of its own; one that carries both radii fades its dirt in between them, measured from
+ * the light, so that nothing close to it is darkened.
+ */
+float dirtScaleFactor(
+  const PreviewGlobalLighting& globals,
+  const PreviewLight* light,
+  const float occlusion,
+  const float distance)
+{
+  if (!globals.dirtInUse)
+  {
+    return 1.0f;
+  }
+
+  // No light means the caller wants dirt whatever the map says, which is how the sky and
+  // the minimum light ask for it.
+  const auto useDirt = !light            ? true
+                       : light->dirt < 0 ? false
+                       : light->dirt > 0 ? true
+                                         : globals.dirt;
+  if (!useDirt || occlusion <= 0.0f)
+  {
+    return 1.0f;
+  }
+
+  const auto gain = light && light->dirtGain > 0.0f ? light->dirtGain : globals.dirtGain;
+  const auto scale =
+    light && light->dirtScale > 0.0f ? light->dirtScale : globals.dirtScale;
+
+  auto dirt = std::min(std::pow(occlusion, gain), 1.0f);
+  dirt = std::min(dirt * scale, 1.0f);
+
+  if (light && light->dirtRadiusSet)
+  {
+    if (distance < light->dirtOffRadius)
+    {
+      dirt = 0.0f;
+    }
+    else if (distance < light->dirtOnRadius)
+    {
+      const auto span = light->dirtOnRadius - light->dirtOffRadius;
+      dirt *= span > 0.0f ? (distance - light->dirtOffRadius) / span : 1.0f;
+    }
+  }
+
+  return 1.0f - dirt;
+}
+
+/**
  * Whether anything opaque stands between two points.
  *
  * Only surfaces that are part of the solid hull block the ray. Water, triggers and clip
@@ -568,6 +682,7 @@ vm::vec3f gatherDirectLight(
   const vm::vec3f& normal,
   const PreviewTriangleShading& shading,
   const bool bounceSource,
+  const float occlusion,
   vm::vec3f& localMinLight,
   Rng& rng)
 {
@@ -624,10 +739,13 @@ vm::vec3f gatherDirectLight(
       return;
     }
 
+    const auto dirt = dirtScaleFactor(
+      scene.globals, &light, occlusion, candidate.infinite ? 0.0f : distance);
+
     if (light.kind == PreviewLightKind::LocalMinLight)
     {
       // Non additive: the brightest local minimum light that can see this point wins.
-      localMinLight = maximum(localMinLight, candidate.contribution);
+      localMinLight = maximum(localMinLight, candidate.contribution * dirt);
     }
     else
     {
@@ -635,7 +753,7 @@ vm::vec3f gatherDirectLight(
       // applies to the light landing on a surface the path is about to bounce off, not
       // to the light the camera sees directly.
       const auto bounceScale = bounceSource ? light.bounceScale : 1.0f;
-      result = result + candidate.contribution * (scale * bounceScale);
+      result = result + candidate.contribution * (scale * bounceScale * dirt);
     }
   };
 
@@ -920,10 +1038,26 @@ vm::vec3f tracePreviewPixel(
     auto irradiance = vm::vec3f{0, 0, 0};
     auto localMinLight = vm::vec3f{0, 0, 0};
 
+    // How shut in the point is, which the lights reaching it are then darkened by
+    // according to what each of them and the map ask for. Nothing looks unless something
+    // in the map has asked for dirt, since looking costs a sheaf of rays.
+    const auto occlusion =
+      scene.globals.dirtInUse && !shading.noDirt && shading.receivesLight
+        ? surfaceOcclusion(scene, position, normal, shading.objectChannelMask, rng)
+        : 0.0f;
+
     if (shading.receivesLight)
     {
       irradiance = gatherDirectLight(
-        scene, settings, position, normal, shading, depth > 0, localMinLight, rng);
+        scene,
+        settings,
+        position,
+        normal,
+        shading,
+        depth > 0,
+        occlusion,
+        localMinLight,
+        rng);
     }
 
     if (shading.receivesLight)
@@ -943,6 +1077,10 @@ vm::vec3f tracePreviewPixel(
     // They are floors under what a surface receives rather than contributions to it,
     // unless "_addmin" asks for the opposite.
     auto floorLight = maximum(scene.globals.minLight, shading.surfaceMinLight);
+    if (scene.globals.minLightDirt)
+    {
+      floorLight = floorLight * dirtScaleFactor(scene.globals, nullptr, occlusion, 0.0f);
+    }
     floorLight = maximum(floorLight, localMinLight);
     irradiance = scene.globals.addMinLight ? irradiance + floorLight
                                            : maximum(irradiance, floorLight);
