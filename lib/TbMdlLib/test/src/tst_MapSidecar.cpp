@@ -107,8 +107,11 @@ TEST_CASE("MapSidecar")
     REQUIRE(isTerrainEntity(entity));
 
     // This is what a map whose sidecar has gone missing looks like: the classname and
-    // the id remain, so the generated brushes stay as ordinary geometry.
-    for (const auto& property : entity.properties())
+    // the id remain, so the generated brushes stay as ordinary geometry. The properties
+    // are read from a copy, since removing them from the entity being iterated would
+    // skip the one after each that goes.
+    const auto properties = entity.properties();
+    for (const auto& property : properties)
     {
       if (isSidecarPropertyKey(property.key()))
       {
