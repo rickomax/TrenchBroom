@@ -33,6 +33,7 @@
 #include "mdl/Map_Selection.h"
 #include "mdl/ModelUtils.h"
 #include "mdl/SetLinkIdsCommand.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/Transaction.h"
 #include "mdl/UpdateLinkedGroupsCommand.h"
 #include "mdl/UpdateLinkedGroupsHelper.h"
@@ -400,7 +401,10 @@ void renameSelectedGroups(Map& map, const std::string& name)
 
 bool canCreateLinkedDuplicate(const Map& map)
 {
-  return map.selection().hasOnlyGroups() && map.selection().groups.size() == 1u;
+  // Linked groups are kept identical, names included, and a spline's control points
+  // are found by their names: two splines sharing them would be one spline drawn twice.
+  return map.selection().hasOnlyGroups() && map.selection().groups.size() == 1u
+         && !isSplineGroup(*map.selection().groups.front());
 }
 
 GroupNode* createLinkedDuplicate(Map& map)

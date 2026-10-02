@@ -27,6 +27,7 @@
 #include "mdl/Entity.h"
 #include "mdl/EntityNode.h"
 #include "mdl/Grid.h"
+#include "mdl/GroupNode.h"
 #include "mdl/LayerNode.h"
 #include "mdl/Map.h"
 #include "mdl/MapFixture.h"
@@ -38,6 +39,8 @@
 #include "mdl/Matchers.h"
 #include "mdl/NodeHandles.h"
 #include "mdl/ParallelUVCoordSystem.h"
+#include "mdl/SplineEntity.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/TestFactory.h"
 #include "mdl/TestUtils.h"
 #include "mdl/WorldNode.h"
@@ -46,9 +49,11 @@
 #include "kd/ranges/zip_view.h"
 
 #include "vm/approx.h"
+#include "vm/mat_ext.h"
 #include "vm/vec_io.h" // IWYU pragma: keep
 
 #include <ranges>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
@@ -331,6 +336,47 @@ TEST_CASE("Map_Geometry")
         // these should be exactly integral
         CHECK(brushNode1->logicalBounds() == brush1ExpectedBounds);
         CHECK(brushNode2->logicalBounds() == brush2ExpectedBounds);
+      }
+
+      SECTION("a spline's group")
+      {
+        auto* splineGroup = createSplineGroupNode("track", 3);
+        addNodes(map, {{parentForNodes(map), {splineGroup}}});
+
+        const auto chain = findSplinePointChain(*findSplineHead(*splineGroup));
+        REQUIRE(chain.points.size() == 3u);
+
+        const auto tangentOut = [](const EntityNode& point) {
+          const auto* value =
+            point.entity().property(SplinePointPropertyKeys::TangentOut);
+          REQUIRE(value != nullptr);
+          return vm::parse<double, 3>(*value).value_or(vm::vec3d{0, 0, 0});
+        };
+
+        auto origins = std::vector<vm::vec3d>{};
+        auto tangents = std::vector<vm::vec3d>{};
+        for (const auto* point : chain.points)
+        {
+          origins.push_back(point->entity().origin());
+          tangents.push_back(tangentOut(*point));
+          REQUIRE(tangents.back() != vm::vec3d{0, 0, 0});
+        }
+
+        selectNodes(map, {splineGroup});
+        rotateSelection(
+          map, vm::vec3d{0, 0, 0}, vm::vec3d{0, 0, 1}, vm::to_radians(90.0));
+
+        // The points are carried around like any other entity, and their tangents turn
+        // with them, so the curve through them keeps its shape.
+        const auto rotation =
+          vm::rotation_matrix(vm::vec3d{0, 0, 1}, vm::to_radians(90.0));
+        for (size_t i = 0; i < chain.points.size(); ++i)
+        {
+          CAPTURE(i);
+          CHECK(chain.points[i]->entity().origin() == vm::approx{rotation * origins[i]});
+          CHECK(
+            tangentOut(*chain.points[i]) == vm::approx{rotation * tangents[i], 0.001});
+        }
       }
 
       SECTION("brush entity")

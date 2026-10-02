@@ -29,6 +29,7 @@
 #include "mdl/Node.h"
 #include "mdl/PatchNode.h"
 #include "mdl/SplineEntity.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/TerrainEntity.h"
 #include "mdl/WorldNode.h"
 
@@ -358,8 +359,11 @@ bool EditorContext::selectable(const EntityNode& entityNode) const
   // and all.
   const auto asAWhole = !entityNode.hasChildren() || isTerrainEntity(entityNode.entity());
 
+  // A spline's control points are the spline tool's to edit. Moved on their own, they
+  // would leave behind the brushes swept along them; deleted, they would break the
+  // chain the others are found by.
   return visible(entityNode) && editable(entityNode) && asAWhole
-         && inOpenGroup(entityNode);
+         && inOpenGroup(entityNode) && !isSplinePointNode(entityNode);
 }
 
 bool EditorContext::selectable(const BrushNode& brushNode) const

@@ -26,6 +26,7 @@
 #include "mdl/EntityRotation.h"
 #include "mdl/ModelDefinition.h"
 #include "mdl/PropertyDefinition.h"
+#include "mdl/SplineEntity.h"
 #include "mdl/Terrain.h"
 #include "mdl/TerrainEntity.h"
 
@@ -466,6 +467,13 @@ Result<void> Entity::transform(
     // origin among them, have just been written: there is nothing else to apply.
     *this = writeTerrainEntity(*this, *terrain);
     return kdl::void_success;
+  }
+
+  // A spline's control point carries its tangents, which have to turn with the rest of
+  // the spline for its curve to keep its shape.
+  if (isSplinePointEntity(*this))
+  {
+    transformSplinePointEntity(*this, transformation);
   }
 
   if (m_pointEntity)

@@ -26,6 +26,7 @@
 #include "kd/reflection_decl.h"
 
 #include "vm/bbox.h"
+#include "vm/mat.h"
 
 #include <optional>
 #include <string>
@@ -37,16 +38,33 @@ class Brush;
 class Entity;
 enum class MapFormat;
 
+/**
+ * A spline is kept in the map as a group of its own, which is what lets it be selected,
+ * copied and pasted as a whole. The group holds:
+ *
+ * - The spline's head: a func_group holding the brushes the sweep generates, and the
+ *   editor's settings for the spline. Its target names the first control point.
+ * - One info_spline_point entity per control point, each carrying its point's position as
+ *   its origin and targeting the next point. A closed spline's last point targets the
+ *   first; an open spline's last point targets nothing.
+ * - The entities the sweep generates, each carrying a marker naming the head.
+ *
+ * The control points are the part a game reads. They are ordinary entities in the
+ * compiled map, so an engine can find a spline by name and follow it from point to
+ * point. The segment from a point A to the point B it targets is the cubic Bezier curve
+ * whose control points are
+ *
+ *   A.origin, A.origin + A.tangent_out, B.origin + B.tangent_in, B.origin
+ *
+ * Every point carries its tangents, including one whose tangents the editor derives from
+ * its neighbours, so a game never has to know how they were made.
+ */
 namespace SplinePropertyKeys
 {
-/** Per point property; the index is appended, e.g. "_spline_point_0". The value has
- * the form "x y z roll scale locks", where locks is a bit mask (see SplineLock). */
-constexpr auto PointPrefix = "_spline_point_";
-/** Number of curve samples between two control points. */
+/** Number of curve samples between two control points. Its presence is also what marks
+ * an entity as a spline's head; it lives in the sidecar file, so a head that has lost
+ * its sidecar is a plain func_group again. */
 constexpr auto Subdivisions = "_spline_subdivisions";
-/** Present with value "1" if the spline is closed (the last point connects back to
- * the first). */
-constexpr auto Closed = "_spline_closed";
 /** Present with value "1" if the copies keep the template's UV alignment rather than
  * having it realigned onto the geometry the sweep produces. */
 constexpr auto LockUVs = "_spline_lock_uvs";
@@ -82,50 +100,110 @@ constexpr auto GeneratedBy = "_tb_spline_source";
 } // namespace SplinePropertyKeys
 
 /**
- * The classname used for spline entities. Spline entities use func_group so that map
- * compilers merge the generated brushes into the world geometry.
+ * The keys of a spline's control point entities, besides origin, targetname and target.
+ *
+ * These are for the game as much as for the editor, so none that a game is meant to
+ * read begins with an underscore: Quake and Quake 2 throw such keys away as they spawn
+ * an entity. Nor is the cross-section scale called "scale", which several engines take
+ * as the size to draw an entity's model at.
+ */
+namespace SplinePointPropertyKeys
+{
+/** The point's roll around the curve, in degrees. */
+constexpr auto Roll = "roll";
+/** The cross-section scale at the point; the swept profile tapers between points. */
+constexpr auto SectionScale = "section_scale";
+/** The offset from the point to the handle the curve arrives from, "x y z". */
+constexpr auto TangentIn = "tangent_in";
+/** The offset from the point to the handle the curve leaves toward, "x y z". */
+constexpr auto TangentOut = "tangent_out";
+/** Present with value "1" if the sweep's frame is anchored at the point, so that a
+ * twist from rolling other points cannot carry past it (see SplineLock::Twist). */
+constexpr auto TwistLock = "twist_lock";
+/** Present with value "1" if the editor derives the point's tangents from its
+ * neighbours. The tangents are written all the same; this only says the editor is free
+ * to rewrite them, so it is for the editor alone. */
+constexpr auto AutoTangent = "_auto_tangent";
+} // namespace SplinePointPropertyKeys
+
+/**
+ * The classname used for a spline's head. It is a func_group so that map compilers
+ * merge the generated brushes into the world geometry.
  */
 constexpr auto SplineEntityClassname = "func_group";
+
+/** The classname of a spline's control points. */
+constexpr auto SplinePointClassname = "info_spline_point";
 
 constexpr size_t SplineDefaultSubdivisions = 8;
 
 /**
- * The persistent state of a spline entity: its control points, the number of curve
- * samples per span, and the (optional) template group whose brushes get deformed
- * along the curve.
+ * What a spline's head holds: the targetname of the first control point, the number of
+ * curve samples per span, and the (optional) template group whose brushes get deformed
+ * along the curve. The points themselves are entities of their own.
  */
 struct SplineEntityData
 {
-  std::vector<SplinePoint> points;
+  std::string firstPoint;
   size_t subdivisions = SplineDefaultSubdivisions;
-  std::optional<IdType> templateGroupId;
-  bool closed = false;
+  std::optional<IdType> templateGroupId = std::nullopt;
   /** Whether every copy keeps the alignment the template was authored with. */
   bool lockUVs = false;
   /** Whether every copy is placed at the template's own size rather than stretched. */
   bool keepSize = false;
 
   kdl_reflect_decl(
-    SplineEntityData, points, subdivisions, templateGroupId, closed, lockUVs, keepSize);
+    SplineEntityData, firstPoint, subdivisions, templateGroupId, lockUVs, keepSize);
 };
 
 /**
- * Returns whether the given entity carries spline data.
+ * Returns whether the given entity is a spline's head: it carries the spline's settings
+ * and names a first point.
  */
 bool isSplineEntity(const Entity& entity);
 
 /**
- * Reads the spline data stored in the given entity's properties, or nullopt if the
- * entity is not a spline entity.
+ * Reads the settings stored in a spline head's properties, or nullopt if the entity is
+ * not a spline's head.
  */
 std::optional<SplineEntityData> parseSplineEntity(const Entity& entity);
 
 /**
- * Returns an entity carrying the given spline data in its properties. Any spline
- * properties not covered by the given data (e.g. stale point properties) are removed
+ * Returns an entity carrying the given spline settings in its properties, with its
+ * target naming the first point. Settings not covered by the given data are removed
  * from the given entity's properties.
  */
 Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data);
+
+/** Returns whether the given entity is a spline's control point. */
+bool isSplinePointEntity(const Entity& entity);
+
+/**
+ * Reads the control point a point entity describes. A key that is missing or cannot be
+ * read takes its default, and a point that does not say it has automatic tangents but
+ * lacks either tangent is given them, since there is nothing else to shape it with.
+ */
+SplinePoint parseSplinePointEntity(const Entity& entity);
+
+/**
+ * Returns the given entity carrying the control point at the given index of the given
+ * points. The tangents written are the ones the curve uses, worked out from the
+ * neighbouring points if the point's are automatic. Its other properties are kept,
+ * targetname and target included, which are the caller's to set.
+ */
+Entity writeSplinePointEntity(
+  const Entity& entity,
+  const std::vector<SplinePoint>& points,
+  size_t index,
+  bool closed);
+
+/**
+ * Applies the given transformation to the tangents a point entity carries, which are
+ * directions rather than positions and so are not moved, only turned and scaled. A
+ * mirror also turns the point's roll the other way, which is what keeps a curve banking
+ * into its bends after it has been mirrored. The origin is the caller's.
+ */
+void transformSplinePointEntity(Entity& entity, const vm::mat4x4d& transformation);
 
 /**
  * Reads the template brush snapshot stored in the given entity's properties. Invalid

@@ -80,15 +80,21 @@ enum class SplineHandlePart
  * control points; each point can be moved, rotated (rolled around the curve) and
  * locked. A spline can be linked to a group, in which case the group's brushes are
  * used as a template that is deformed along the curve, and the resulting brushes are
- * kept as children of the spline's entity. The group's point entities are replicated
+ * kept as children of the spline's head. The group's point entities are replicated
  * along the curve as well, as real entities so that the map compiles the same way it
  * would had they been placed by hand; since an entity holds only brushes and patches,
- * these are kept beside the spline rather than inside it, and carry a property naming
+ * these are kept beside the head rather than inside it, and carry a property naming
  * the spline they belong to.
  *
- * The spline is persisted in the map as a func_group entity carrying the control
- * points in its properties, so that it remains editable across sessions and its
- * brushes are merged into the world geometry by map compilers.
+ * Each spline lives in a group of its own, which holds its head, a func_group carrying
+ * the tool's settings and the swept brushes, an info_spline_point entity for each
+ * control point, chained by target and targetname, and the entities the sweep
+ * generates. The points are what a game reads; see mdl::SplinePropertyKeys for how. The
+ * group is what lets the spline be selected, moved, copied and pasted as a whole.
+ *
+ * The points are edited in place, so a key a mapper adds to one, such as a speed for
+ * something following the spline, is kept. Selecting a point selects its entity, which
+ * is how such a key is reached in the entity inspector.
  */
 class SplineTool : public Tool
 {
@@ -101,6 +107,10 @@ private:
   MapDocument& m_document;
 
   std::vector<mdl::SplinePoint> m_points;
+  /** The entity holding each of m_points, or nullptr for a point not yet in the map. */
+  std::vector<mdl::EntityNode*> m_pointNodes;
+  /** The entities of the points removed since the spline was last written. */
+  std::vector<mdl::EntityNode*> m_removedPointNodes;
   size_t m_subdivisions = mdl::SplineDefaultSubdivisions;
 
   /** Whether the spline is closed, i.e. the last point connects back to the first. */
@@ -125,12 +135,26 @@ private:
   /** Whether the selected point's tangent handles are shown and editable. */
   bool m_tangentEditMode = false;
 
-  /** The entity node holding the spline currently being edited, if any. */
+  /** The head of the spline currently being edited, if any. */
   mdl::EntityNode* m_splineNode = nullptr;
+  /** What holds the head: the spline's group, which outlasts every head written into it,
+   * so that a head put back by an undo can be found there. */
+  mdl::Node* m_splineParent = nullptr;
 
-  /** All other splines in the map, so they can be shown and picked up while the tool
-   * is active. Refreshed whenever the document changes. */
-  std::vector<std::pair<mdl::EntityNode*, mdl::SplineEntityData>> m_otherSplines;
+  /** A name the spline's points are to be renamed after when it is next written. */
+  std::optional<std::string> m_newName;
+
+  /** What is drawn of a spline that is not being edited. */
+  struct OtherSpline
+  {
+    std::vector<mdl::SplinePoint> points;
+    size_t subdivisions = mdl::SplineDefaultSubdivisions;
+    bool closed = false;
+  };
+
+  /** All other splines in the map, by their heads, so they can be shown and picked up
+   * while the tool is active. Refreshed whenever the document changes. */
+  std::vector<std::pair<mdl::EntityNode*, OtherSpline>> m_otherSplines;
 
   std::optional<size_t> m_selectedIndex;
   /** Which handle of the selected point is selected (for keyboard moves). */
@@ -254,6 +278,21 @@ private:
   bool tangentHandlesVisible() const;
 
 public:
+public: // naming
+  /**
+   * The name the spline's points are named after: a point is the name and its index,
+   * which is what something in the game finds the spline by. Empty if there is no
+   * spline yet.
+   */
+  std::string splineName() const;
+  /**
+   * Renames the spline's points after the given name, in order along the curve, and
+   * the spline's group with them. Whitespace, which would not survive being read back
+   * as a key's value by every engine, becomes underscores, and a name some other
+   * entity's name is already made of is given a number.
+   */
+  void setSplineName(const std::string& name);
+
 public: // closing
   /** Whether the spline is closed, i.e. the last point connects back to the first
    * and brushes are created on that segment as well. */
@@ -311,9 +350,23 @@ private:
   mdl::GroupNode* selectedGroup() const;
 
   void loadFromSelection();
-  void loadSplineNode(mdl::EntityNode* splineNode);
+  /** Takes up the spline with the given head. Keeping the selection is for reloading
+   * the spline being edited after something else changed it. */
+  void loadSplineNode(mdl::EntityNode* splineNode, bool keepSelection = false);
   void clearSpline();
   void refreshOtherSplines();
+
+  /**
+   * Puts the selected point's entity in the map's selection, or takes the spline's
+   * points out of it when no point is selected, so that the entity inspector shows the
+   * point being edited.
+   */
+  void selectPointEntity();
+
+  /** The names the points get when the spline is written: the ones they have, and new
+   * ones after the spline's name for points that have none, or for all of them if the
+   * spline is being renamed. */
+  std::vector<std::string> pointNames() const;
 
   /**
    * Writes the current spline state to the document by replacing the spline entity
@@ -356,9 +409,10 @@ private:
   QWidget* doCreatePage(QWidget* parent) override;
 
   void connectObservers();
-  void nodesWereAdded(const std::vector<mdl::Node*>& nodes);
-  void nodesWereRemoved(const std::vector<mdl::Node*>& nodes);
-  void nodesDidChange(const std::vector<mdl::Node*>& nodes);
+  /** Catches up with a change somebody else made to the map: picks up a spline that
+   * reappears, as one does when an edit is undone, reloads the one being edited, or
+   * lets go of it if it is gone. */
+  void documentDidChange(const std::vector<mdl::Node*>& addedNodes);
   void selectionDidChange();
 };
 

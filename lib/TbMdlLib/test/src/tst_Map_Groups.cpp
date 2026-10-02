@@ -668,6 +668,18 @@ TEST_CASE("Map_Groups")
     CHECK_THAT(*linkedGroupNode, MatchesNode(*groupNode));
   }
 
+  SECTION("A spline's group cannot be linked")
+  {
+    // Linked groups are kept identical, names and all, and a spline's points are found
+    // by their names.
+    auto* splineGroup = createSplineGroupNode("track", 2);
+    addNodes(map, {{parentForNodes(map), {splineGroup}}});
+    selectNodes(map, {splineGroup});
+
+    CHECK_FALSE(canCreateLinkedDuplicate(map));
+    CHECK(createLinkedDuplicate(map) == nullptr);
+  }
+
   SECTION("separateSelectedLinkedGroups")
   {
     auto* brushNode = createBrushNode(map);

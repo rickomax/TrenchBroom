@@ -23,6 +23,7 @@
 #include "mdl/Entity.h"
 #include "mdl/EntityProperties.h"
 #include "mdl/MapFormat.h"
+#include "mdl/Spline.h"
 #include "mdl/SplineEntities.h"
 #include "mdl/SplineEntity.h"
 
@@ -30,8 +31,14 @@
 
 #include "vm/approx.h"
 #include "vm/bbox.h"
+#include "vm/mat.h"
+#include "vm/mat_ext.h"
+#include "vm/scalar.h"
 #include "vm/vec.h"
 #include "vm/vec_io.h" // IWYU pragma: keep
+
+#include <string>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -40,37 +47,36 @@ namespace tb::mdl
 
 TEST_CASE("SplineEntity")
 {
-  const auto data = SplineEntityData{
-    {
-      SplinePoint{vm::vec3d{0, 0, 0}, 0.0, 1.0, SplineLock::None},
-      SplinePoint{vm::vec3d{64, 32, 16}, 45.0, 2.5, SplineLock::Twist},
-      SplinePoint{
-        vm::vec3d{128, 0, 0},
-        -90.0,
-        0.5,
-        SplineLock::None,
-        false,
-        vm::vec3d{-16, -8, 4},
-        vm::vec3d{24, 12, -6}},
-    },
-    12,
-    42,
-  };
+  const auto data = SplineEntityData{"track_0", 12, 42};
 
   SECTION("isSplineEntity")
   {
     CHECK_FALSE(isSplineEntity(Entity{}));
     CHECK(isSplineEntity(writeSplineEntity(Entity{}, data)));
+
+    // A head is known by its settings and by the point it starts from. Without either
+    // it is a plain func_group: what a map that has lost its sidecar holds, or one
+    // written before the points were entities of their own.
+    auto withoutTarget = writeSplineEntity(Entity{}, data);
+    withoutTarget.removeProperty(EntityPropertyKeys::Target);
+    CHECK_FALSE(isSplineEntity(withoutTarget));
+
+    auto withoutSettings = writeSplineEntity(Entity{}, data);
+    withoutSettings.removeProperty(SplinePropertyKeys::Subdivisions);
+    CHECK_FALSE(isSplineEntity(withoutSettings));
   }
 
   SECTION("writeSplineEntity and parseSplineEntity round-trip")
   {
     const auto entity = writeSplineEntity(Entity{}, data);
     CHECK(entity.classname() == SplineEntityClassname);
+    CHECK(*entity.property(EntityPropertyKeys::Target) == "track_0");
+    CHECK(parseSplineEntity(entity) == data);
 
-    const auto parsed = parseSplineEntity(entity);
-    REQUIRE(parsed.has_value());
-    CHECK(*parsed == data);
+    auto flagged = data;
+    flagged.lockUVs = true;
+    flagged.keepSize = true;
+    CHECK(parseSplineEntity(writeSplineEntity(Entity{}, flagged)) == flagged);
   }
 
   SECTION("parseSplineEntity returns nullopt for non-spline entities")
@@ -78,39 +84,20 @@ TEST_CASE("SplineEntity")
     CHECK(parseSplineEntity(Entity{}) == std::nullopt);
   }
 
-  SECTION("the closed flag round-trips")
+  SECTION("writeSplineEntity removes the settings the data no longer has")
   {
-    auto closedData = data;
-    closedData.closed = true;
+    auto flagged = data;
+    flagged.lockUVs = true;
+    flagged.keepSize = true;
+    const auto entity = writeSplineEntity(Entity{}, flagged);
 
-    const auto entity = writeSplineEntity(Entity{}, closedData);
-    CHECK(entity.property(SplinePropertyKeys::Closed) != nullptr);
-
-    const auto parsed = parseSplineEntity(entity);
-    REQUIRE(parsed.has_value());
-    CHECK(parsed->closed);
-
-    // Reopening the spline removes the property again.
-    const auto reopened = writeSplineEntity(entity, data);
-    CHECK(reopened.property(SplinePropertyKeys::Closed) == nullptr);
-    CHECK(!parseSplineEntity(reopened)->closed);
-  }
-
-  SECTION("writeSplineEntity removes stale point properties")
-  {
-    const auto entity = writeSplineEntity(Entity{}, data);
-
-    auto shorterData = data;
-    shorterData.points.pop_back();
-    shorterData.templateGroupId = std::nullopt;
-
-    const auto updatedEntity = writeSplineEntity(entity, shorterData);
-    CHECK(updatedEntity.property("_spline_point_2") == nullptr);
-    CHECK(updatedEntity.property("_spline_template_group") == nullptr);
-
-    const auto parsed = parseSplineEntity(updatedEntity);
-    REQUIRE(parsed.has_value());
-    CHECK(*parsed == shorterData);
+    auto cleared = data;
+    cleared.templateGroupId = std::nullopt;
+    const auto updated = writeSplineEntity(entity, cleared);
+    CHECK(updated.property(SplinePropertyKeys::TemplateGroupId) == nullptr);
+    CHECK(updated.property(SplinePropertyKeys::LockUVs) == nullptr);
+    CHECK(updated.property(SplinePropertyKeys::KeepSize) == nullptr);
+    CHECK(parseSplineEntity(updated) == cleared);
   }
 
   SECTION("writeSplineEntity preserves unrelated properties")
@@ -274,6 +261,240 @@ TEST_CASE("SplineEntity")
     const auto id = splineEntityId(written);
     CHECK_FALSE(id.empty());
     CHECK(splineEntityId(writeSplineEntity(written, data)) == id);
+  }
+}
+
+TEST_CASE("SplinePointEntity")
+{
+  const auto points = std::vector<SplinePoint>{
+    SplinePoint{vm::vec3d{0, 0, 0}},
+    SplinePoint{vm::vec3d{64, 32, 16}, 45.0, 2.5, SplineLock::Twist},
+    SplinePoint{
+      vm::vec3d{128, 0, 0},
+      -90.0,
+      0.5,
+      SplineLock::None,
+      false,
+      vm::vec3d{-16, -8, 4},
+      vm::vec3d{24, 12, -6}},
+    SplinePoint{vm::vec3d{96, -64, 32}},
+  };
+
+  const auto write = [&](const size_t index, const bool closed = false) {
+    return writeSplinePointEntity(Entity{}, points, index, closed);
+  };
+
+  const auto vectorProperty = [](const Entity& entity, const std::string& key) {
+    const auto* value = entity.property(key);
+    REQUIRE(value != nullptr);
+    const auto vector = vm::parse<double, 3>(*value);
+    REQUIRE(vector.has_value());
+    return *vector;
+  };
+
+  SECTION("isSplinePointEntity")
+  {
+    CHECK(isSplinePointEntity(write(0)));
+    CHECK_FALSE(isSplinePointEntity(Entity{}));
+    CHECK_FALSE(isSplinePointEntity(Entity{{{"classname", "path_corner"}}}));
+  }
+
+  SECTION("a point round trips through its entity")
+  {
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+      CAPTURE(i);
+      const auto entity = write(i);
+      CHECK(entity.classname() == SplinePointClassname);
+      CHECK(parseSplinePointEntity(entity) == points[i]);
+    }
+  }
+
+  SECTION("the keys a game reads are written for every point")
+  {
+    const auto automatic = write(1);
+    CHECK(*automatic.property(SplinePointPropertyKeys::Roll) == "45");
+    CHECK(*automatic.property(SplinePointPropertyKeys::SectionScale) == "2.5");
+    CHECK(*automatic.property(SplinePointPropertyKeys::TwistLock) == "1");
+    CHECK(*automatic.property(SplinePointPropertyKeys::AutoTangent) == "1");
+    // A point whose tangents the editor works out carries them all the same.
+    CHECK(automatic.property(SplinePointPropertyKeys::TangentIn) != nullptr);
+    CHECK(automatic.property(SplinePointPropertyKeys::TangentOut) != nullptr);
+
+    const auto manual = write(2);
+    CHECK(*manual.property(SplinePointPropertyKeys::TangentIn) == "-16 -8 4");
+    CHECK(*manual.property(SplinePointPropertyKeys::TangentOut) == "24 12 -6");
+    CHECK(manual.property(SplinePointPropertyKeys::TwistLock) == nullptr);
+    CHECK(manual.property(SplinePointPropertyKeys::AutoTangent) == nullptr);
+
+    // Quake and Quake 2 discard a key starting with an underscore as they spawn an
+    // entity, so none of these can.
+    for (const auto* key :
+         {SplinePointPropertyKeys::Roll,
+          SplinePointPropertyKeys::SectionScale,
+          SplinePointPropertyKeys::TangentIn,
+          SplinePointPropertyKeys::TangentOut,
+          SplinePointPropertyKeys::TwistLock})
+    {
+      CAPTURE(key);
+      CHECK(key[0] != '_');
+    }
+  }
+
+  SECTION("the curve a game draws through the points is the one the editor sweeps")
+  {
+    // A game knows nothing about how the tangents were made: it takes each segment as
+    // the Bezier curve the keys describe. That has to be the curve the editor sweeps
+    // along, whether the tangents are automatic or not and whether the spline is open
+    // or closed.
+    for (const auto closed : {false, true})
+    {
+      CAPTURE(closed);
+
+      auto entities = std::vector<Entity>{};
+      for (size_t i = 0; i < points.size(); ++i)
+      {
+        entities.push_back(write(i, closed));
+      }
+
+      const auto segments = closed ? points.size() : points.size() - 1;
+      for (size_t segment = 0; segment < segments; ++segment)
+      {
+        const auto& from = entities[segment];
+        const auto& to = entities[(segment + 1) % points.size()];
+
+        const auto p0 = from.origin();
+        const auto p1 = p0 + vectorProperty(from, SplinePointPropertyKeys::TangentOut);
+        const auto p3 = to.origin();
+        const auto p2 = p3 + vectorProperty(to, SplinePointPropertyKeys::TangentIn);
+
+        for (const auto t : {0.0, 0.25, 0.5, 0.75, 1.0})
+        {
+          CAPTURE(segment, t);
+          const auto u = 1.0 - t;
+          const auto bezier = p0 * (u * u * u) + p1 * (3.0 * u * u * t)
+                              + p2 * (3.0 * u * t * t) + p3 * (t * t * t);
+          // The keys are written to six significant digits.
+          CHECK(bezier == vm::approx{curvePoint(points, segment, t, closed), 0.01});
+        }
+      }
+    }
+  }
+
+  SECTION("a key that is missing or cannot be read takes its default")
+  {
+    const auto bare = Entity{{{"classname", SplinePointClassname}, {"origin", "1 2 3"}}};
+    CHECK(parseSplinePointEntity(bare) == SplinePoint{vm::vec3d{1, 2, 3}});
+
+    for (const auto* scale : {"0", "-1", "large"})
+    {
+      CAPTURE(scale);
+      auto entity = bare;
+      entity.addOrUpdateProperty(SplinePointPropertyKeys::SectionScale, scale);
+      CHECK(parseSplinePointEntity(entity).scale == 1.0);
+    }
+
+    // With only one of its tangents, a point has nothing to shape the curve with on the
+    // other side, so it falls back to automatic ones.
+    auto halfTangent = bare;
+    halfTangent.addOrUpdateProperty(SplinePointPropertyKeys::TangentIn, "8 0 0");
+    CHECK(parseSplinePointEntity(halfTangent).autoTangent);
+  }
+
+  SECTION("writing a point keeps the keys it does not own")
+  {
+    auto entity = Entity{{
+      {"classname", SplinePointClassname},
+      {"targetname", "track_1"},
+      {"target", "track_2"},
+      {"speed", "300"},
+    }};
+
+    entity = writeSplinePointEntity(entity, points, 1, false);
+    CHECK(*entity.property("targetname") == "track_1");
+    CHECK(*entity.property("target") == "track_2");
+    CHECK(*entity.property("speed") == "300");
+
+    // What the point no longer is goes away.
+    auto changed = points;
+    changed[1].locks = SplineLock::None;
+    changed[1].autoTangent = false;
+    entity = writeSplinePointEntity(entity, changed, 1, false);
+    CHECK(entity.property(SplinePointPropertyKeys::TwistLock) == nullptr);
+    CHECK(entity.property(SplinePointPropertyKeys::AutoTangent) == nullptr);
+  }
+
+  SECTION("transformSplinePointEntity")
+  {
+    const auto original = write(2);
+
+    SECTION("a rotation turns the tangents and leaves the roll alone")
+    {
+      auto entity = original;
+      transformSplinePointEntity(
+        entity,
+        vm::translation_matrix(vm::vec3d{100, 200, 300})
+          * vm::rotation_matrix(0.0, 0.0, vm::to_radians(90.0)));
+
+      // The tangents are offsets, which a translation does not move.
+      CHECK(
+        vectorProperty(entity, SplinePointPropertyKeys::TangentIn)
+        == vm::approx{vm::vec3d{8, -16, 4}});
+      CHECK(
+        vectorProperty(entity, SplinePointPropertyKeys::TangentOut)
+        == vm::approx{vm::vec3d{-12, 24, -6}});
+      CHECK(*entity.property(SplinePointPropertyKeys::Roll) == "-90");
+      CHECK(entity.origin() == original.origin());
+    }
+
+    SECTION("a scale stretches the tangents")
+    {
+      auto entity = original;
+      transformSplinePointEntity(entity, vm::scaling_matrix(vm::vec3d{2, 1, 0.5}));
+      CHECK(
+        vectorProperty(entity, SplinePointPropertyKeys::TangentIn)
+        == vm::approx{vm::vec3d{-32, -8, 2}});
+      CHECK(
+        vectorProperty(entity, SplinePointPropertyKeys::TangentOut)
+        == vm::approx{vm::vec3d{48, 12, -3}});
+    }
+
+    SECTION("a mirror turns the roll the other way")
+    {
+      auto entity = original;
+      transformSplinePointEntity(entity, vm::mirror_matrix<double>(vm::axis::x));
+      CHECK(
+        vectorProperty(entity, SplinePointPropertyKeys::TangentIn)
+        == vm::approx{vm::vec3d{16, -8, 4}});
+      CHECK(*entity.property(SplinePointPropertyKeys::Roll) == "90");
+    }
+
+    SECTION("which is what keeps a mirrored spline banking into its bends")
+    {
+      // Mirror every point across a vertical plane, the way transforming the spline's
+      // group would, and its frames have to come out as the mirror image of the
+      // original's: the up direction a game banks a follower toward is mirrored too.
+      const auto mirror = vm::mirror_matrix<double>(vm::axis::x);
+
+      auto mirrored = std::vector<SplinePoint>{};
+      for (size_t i = 0; i < points.size(); ++i)
+      {
+        auto entity = write(i);
+        REQUIRE(entity.transform(mirror, false).is_success());
+        mirrored.push_back(parseSplinePointEntity(entity));
+      }
+
+      const auto frames = computeNodeFrames(points, false);
+      const auto mirroredFrames = computeNodeFrames(mirrored, false);
+      REQUIRE(frames.size() == mirroredFrames.size());
+      for (size_t i = 0; i < frames.size(); ++i)
+      {
+        CAPTURE(i);
+        CHECK(
+          mirroredFrames[i].position == vm::approx{mirror * frames[i].position, 0.01});
+        CHECK(mirroredFrames[i].up == vm::approx{mirror * frames[i].up, 0.001});
+      }
+    }
   }
 }
 

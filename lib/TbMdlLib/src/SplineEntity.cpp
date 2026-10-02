@@ -32,6 +32,8 @@
 #include "kd/string_format.h"
 #include "kd/string_utils.h"
 
+#include "vm/mat.h"
+#include "vm/mat_ext.h"
 #include "vm/vec.h"
 #include "vm/vec_io.h"
 
@@ -46,11 +48,6 @@ namespace tb::mdl
 {
 namespace
 {
-
-std::string pointKey(const size_t index)
-{
-  return fmt::format("{}{}", SplinePropertyKeys::PointPrefix, index);
-}
 
 std::string templateBrushKey(const size_t index)
 {
@@ -229,73 +226,34 @@ std::optional<Brush> parseTemplateBrush(
   return std::move(brush) | kdl::value();
 }
 
-std::optional<SplinePoint> parsePoint(const std::string& value)
+std::optional<vm::vec3d> vectorProperty(const Entity& entity, const std::string& key)
 {
-  // Points with manual tangents append the in and out handle offsets.
-  if (const auto parsed = vm::parse<double, 12>(value))
-  {
-    return SplinePoint{
-      vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
-      (*parsed)[3],
-      (*parsed)[4],
-      SplineLock::Type((*parsed)[5]),
-      false,
-      vm::vec3d{(*parsed)[6], (*parsed)[7], (*parsed)[8]},
-      vm::vec3d{(*parsed)[9], (*parsed)[10], (*parsed)[11]}};
-  }
-
-  // The sixth component holds the lock flags (see SplineLock). Older splines wrote a
-  // boolean locked flag in its place, whose value 1 coincides with the Twist lock.
-  if (const auto parsed = vm::parse<double, 6>(value))
-  {
-    return SplinePoint{
-      vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
-      (*parsed)[3],
-      (*parsed)[4],
-      SplineLock::Type((*parsed)[5])};
-  }
-
-  // Older splines were written without the scale component.
-  if (const auto parsed = vm::parse<double, 5>(value))
-  {
-    return SplinePoint{
-      vm::vec3d{(*parsed)[0], (*parsed)[1], (*parsed)[2]},
-      (*parsed)[3],
-      1.0,
-      (*parsed)[4] != 0.0 ? SplineLock::Twist : SplineLock::None};
-  }
-
-  return std::nullopt;
+  const auto* value = entity.property(key);
+  return value ? vm::parse<double, 3>(*value) : std::nullopt;
 }
 
-std::string formatPoint(const SplinePoint& point)
+std::optional<double> numberProperty(const Entity& entity, const std::string& key)
 {
-  if (!point.autoTangent)
-  {
-    return fmt::format(
-      "{} {} {} {} {} {} {} {} {} {} {} {}",
-      point.position.x(),
-      point.position.y(),
-      point.position.z(),
-      point.roll,
-      point.scale,
-      point.locks,
-      point.tangentIn.x(),
-      point.tangentIn.y(),
-      point.tangentIn.z(),
-      point.tangentOut.x(),
-      point.tangentOut.y(),
-      point.tangentOut.z());
-  }
+  const auto* value = entity.property(key);
+  return value ? kdl::str_to_double(*value) : std::nullopt;
+}
 
-  return fmt::format(
-    "{} {} {} {} {} {}",
-    point.position.x(),
-    point.position.y(),
-    point.position.z(),
-    point.roll,
-    point.scale,
-    point.locks);
+bool flagProperty(const Entity& entity, const std::string& key)
+{
+  const auto* value = entity.property(key);
+  return value && *value != "0" && !value->empty();
+}
+
+void setFlagProperty(Entity& entity, const std::string& key, const bool set)
+{
+  if (set)
+  {
+    entity.addOrUpdateProperty(key, "1");
+  }
+  else
+  {
+    entity.removeProperty(key);
+  }
 }
 
 } // namespace
@@ -304,7 +262,9 @@ kdl_reflect_impl(SplineEntityData);
 
 bool isSplineEntity(const Entity& entity)
 {
-  return entity.property(pointKey(0)) != nullptr;
+  const auto* target = entity.property(EntityPropertyKeys::Target);
+  return entity.property(SplinePropertyKeys::Subdivisions) != nullptr && target
+         && !target->empty();
 }
 
 std::optional<SplineEntityData> parseSplineEntity(const Entity& entity)
@@ -315,19 +275,7 @@ std::optional<SplineEntityData> parseSplineEntity(const Entity& entity)
   }
 
   auto data = SplineEntityData{};
-
-  for (size_t i = 0;; ++i)
-  {
-    const auto* value = entity.property(pointKey(i));
-    if (!value)
-    {
-      break;
-    }
-    if (const auto point = parsePoint(*value))
-    {
-      data.points.push_back(*point);
-    }
-  }
+  data.firstPoint = *entity.property(EntityPropertyKeys::Target);
 
   if (const auto* subdivisions = entity.property(SplinePropertyKeys::Subdivisions))
   {
@@ -345,20 +293,8 @@ std::optional<SplineEntityData> parseSplineEntity(const Entity& entity)
     }
   }
 
-  if (const auto* closed = entity.property(SplinePropertyKeys::Closed))
-  {
-    data.closed = *closed != "0";
-  }
-
-  if (const auto* lockUVs = entity.property(SplinePropertyKeys::LockUVs))
-  {
-    data.lockUVs = *lockUVs != "0";
-  }
-
-  if (const auto* keepSize = entity.property(SplinePropertyKeys::KeepSize))
-  {
-    data.keepSize = *keepSize != "0";
-  }
+  data.lockUVs = flagProperty(entity, SplinePropertyKeys::LockUVs);
+  data.keepSize = flagProperty(entity, SplinePropertyKeys::KeepSize);
 
   return data;
 }
@@ -366,21 +302,6 @@ std::optional<SplineEntityData> parseSplineEntity(const Entity& entity)
 Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
 {
   auto result = entity;
-
-  // Remove all spline properties, including stale point properties beyond the new
-  // point count.
-  for (const auto& property : entity.properties())
-  {
-    if (property.hasPrefix(SplinePropertyKeys::PointPrefix))
-    {
-      result.removeProperty(property.key());
-    }
-  }
-  result.removeProperty(SplinePropertyKeys::Subdivisions);
-  result.removeProperty(SplinePropertyKeys::TemplateGroupId);
-  result.removeProperty(SplinePropertyKeys::Closed);
-  result.removeProperty(SplinePropertyKeys::LockUVs);
-  result.removeProperty(SplinePropertyKeys::KeepSize);
 
   result.addOrUpdateProperty(EntityPropertyKeys::Classname, SplineEntityClassname);
 
@@ -392,11 +313,7 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
     result.addOrUpdateProperty(SidecarPropertyKeys::DataId, generateSidecarId());
   }
 
-  for (size_t i = 0; i < data.points.size(); ++i)
-  {
-    result.addOrUpdateProperty(pointKey(i), formatPoint(data.points[i]));
-  }
-
+  result.addOrUpdateProperty(EntityPropertyKeys::Target, data.firstPoint);
   result.addOrUpdateProperty(
     SplinePropertyKeys::Subdivisions, kdl::str_to_string(data.subdivisions));
 
@@ -405,23 +322,103 @@ Entity writeSplineEntity(const Entity& entity, const SplineEntityData& data)
     result.addOrUpdateProperty(
       SplinePropertyKeys::TemplateGroupId, kdl::str_to_string(*data.templateGroupId));
   }
-
-  if (data.closed)
+  else
   {
-    result.addOrUpdateProperty(SplinePropertyKeys::Closed, "1");
+    result.removeProperty(SplinePropertyKeys::TemplateGroupId);
   }
 
-  if (data.lockUVs)
-  {
-    result.addOrUpdateProperty(SplinePropertyKeys::LockUVs, "1");
-  }
-
-  if (data.keepSize)
-  {
-    result.addOrUpdateProperty(SplinePropertyKeys::KeepSize, "1");
-  }
+  setFlagProperty(result, SplinePropertyKeys::LockUVs, data.lockUVs);
+  setFlagProperty(result, SplinePropertyKeys::KeepSize, data.keepSize);
 
   return result;
+}
+
+bool isSplinePointEntity(const Entity& entity)
+{
+  return entity.classname() == SplinePointClassname;
+}
+
+SplinePoint parseSplinePointEntity(const Entity& entity)
+{
+  auto point = SplinePoint{entity.origin()};
+
+  point.roll = numberProperty(entity, SplinePointPropertyKeys::Roll).value_or(0.0);
+
+  // A point squeezed to nothing, or turned inside out, has no cross-section to sweep.
+  if (const auto scale = numberProperty(entity, SplinePointPropertyKeys::SectionScale);
+      scale && *scale > 0.0)
+  {
+    point.scale = *scale;
+  }
+
+  point.locks = flagProperty(entity, SplinePointPropertyKeys::TwistLock)
+                  ? SplineLock::Twist
+                  : SplineLock::None;
+
+  const auto tangentIn = vectorProperty(entity, SplinePointPropertyKeys::TangentIn);
+  const auto tangentOut = vectorProperty(entity, SplinePointPropertyKeys::TangentOut);
+  point.autoTangent = flagProperty(entity, SplinePointPropertyKeys::AutoTangent)
+                      || !tangentIn || !tangentOut;
+  if (!point.autoTangent)
+  {
+    point.tangentIn = *tangentIn;
+    point.tangentOut = *tangentOut;
+  }
+
+  return point;
+}
+
+Entity writeSplinePointEntity(
+  const Entity& entity,
+  const std::vector<SplinePoint>& points,
+  const size_t index,
+  const bool closed)
+{
+  const auto& point = points[index];
+
+  auto result = entity;
+  result.addOrUpdateProperty(EntityPropertyKeys::Classname, SplinePointClassname);
+  result.setOrigin(point.position);
+  result.addOrUpdateProperty(
+    SplinePointPropertyKeys::Roll, kdl::str_to_string(point.roll));
+  result.addOrUpdateProperty(
+    SplinePointPropertyKeys::SectionScale, kdl::str_to_string(point.scale));
+  result.addOrUpdateProperty(
+    SplinePointPropertyKeys::TangentIn,
+    kdl::str_to_string(vm::correct(tangentInOffset(points, index, closed))));
+  result.addOrUpdateProperty(
+    SplinePointPropertyKeys::TangentOut,
+    kdl::str_to_string(vm::correct(tangentOutOffset(points, index, closed))));
+  setFlagProperty(
+    result, SplinePointPropertyKeys::TwistLock, (point.locks & SplineLock::Twist) != 0u);
+  setFlagProperty(result, SplinePointPropertyKeys::AutoTangent, point.autoTangent);
+
+  return result;
+}
+
+void transformSplinePointEntity(Entity& entity, const vm::mat4x4d& transformation)
+{
+  const auto linear = vm::strip_translation(transformation);
+
+  for (const auto* key :
+       {SplinePointPropertyKeys::TangentIn, SplinePointPropertyKeys::TangentOut})
+  {
+    if (const auto tangent = vectorProperty(entity, key))
+    {
+      entity.addOrUpdateProperty(key, kdl::str_to_string(vm::correct(linear * *tangent)));
+    }
+  }
+
+  // A mirror turns every rotation about the curve the other way.
+  if (vm::compute_determinant(linear) < 0.0)
+  {
+    if (const auto roll = numberProperty(entity, SplinePointPropertyKeys::Roll);
+        roll && *roll != 0.0)
+    {
+      entity.addOrUpdateProperty(
+        SplinePointPropertyKeys::Roll, kdl::str_to_string(-*roll));
+    }
+  }
 }
 
 std::vector<Brush> parseSplineTemplateBrushes(

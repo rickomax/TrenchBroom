@@ -26,6 +26,7 @@
 class QCheckBox;
 class QDoubleSpinBox;
 class QLabel;
+class QLineEdit;
 class QPushButton;
 
 namespace tb::ui
@@ -41,6 +42,7 @@ private:
   SplineTool& m_tool;
 
   QPushButton* m_addPoints = nullptr;
+  QLineEdit* m_name = nullptr;
   QLabel* m_templateLabel = nullptr;
   QPushButton* m_linkButton = nullptr;
   QPushButton* m_unlinkButton = nullptr;

@@ -27,6 +27,7 @@
 #include "mdl/BrushNode.h"
 #include "mdl/Entity.h"
 #include "mdl/EntityNode.h"
+#include "mdl/EntityProperties.h"
 #include "mdl/GroupNode.h"
 #include "mdl/Hit.h"
 #include "mdl/HitAdapter.h"
@@ -35,10 +36,13 @@
 #include "mdl/Map.h"
 #include "mdl/MapSidecar.h"
 #include "mdl/Map_Nodes.h"
+#include "mdl/Map_Selection.h"
+#include "mdl/NodeContents.h"
 #include "mdl/PatchNode.h"
 #include "mdl/PickResult.h"
 #include "mdl/SplineBrushes.h"
 #include "mdl/SplineEntities.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/Transaction.h"
 #include "mdl/WorldNode.h"
 #include "render/RenderService.h"
@@ -49,6 +53,7 @@
 #include "kd/ranges/to.h"
 #include "kd/result.h"
 #include "kd/set_temp.h"
+#include "kd/string_format.h"
 #include "kd/string_utils.h"
 
 #include "vm/vec.h"
@@ -57,6 +62,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <ranges>
 #include <unordered_map>
 
@@ -89,6 +95,19 @@ std::vector<mdl::Node*> collectBrushNodes(const mdl::EntityNode& entityNode)
     nodes.push_back(new mdl::BrushNode{std::move(brush)});
   }
   return nodes;
+}
+
+/** Takes the given nodes out of the selection before they are taken out of the map: a
+ * removed point may well be the one the entity inspector is showing. */
+void deselectRemoved(mdl::Map& map, const std::vector<mdl::Node*>& nodes)
+{
+  const auto selected =
+    nodes | std::views::filter([](const auto* node) { return node->selected(); })
+    | kdl::ranges::to<std::vector>();
+  if (!selected.empty())
+  {
+    deselectNodes(map, selected);
+  }
 }
 
 /** Spline point handles are drawn and picked larger than regular point handles. */
@@ -426,9 +445,11 @@ void SplineTool::addPoint(const vm::vec3d& point)
 {
   const auto index = m_points.empty() ? 0 : addPointAnchorIndex() + 1;
   m_points.insert(m_points.begin() + std::ptrdiff_t(index), mdl::SplinePoint{point});
+  m_pointNodes.insert(m_pointNodes.begin() + std::ptrdiff_t(index), nullptr);
   m_selectedIndex = index;
   m_selectedPart = SplineHandlePart::Point;
   commitSpline("Add Spline Point");
+  selectPointEntity();
 }
 
 bool SplineTool::canRemovePoint() const
@@ -445,6 +466,11 @@ void SplineTool::removePoint()
 
   const auto index = m_selectedIndex ? *m_selectedIndex : m_points.size() - 1;
   m_points.erase(std::next(m_points.begin(), std::ptrdiff_t(index)));
+  if (auto* pointNode = m_pointNodes[index])
+  {
+    m_removedPointNodes.push_back(pointNode);
+  }
+  m_pointNodes.erase(std::next(m_pointNodes.begin(), std::ptrdiff_t(index)));
   m_selectedIndex = std::nullopt;
   commitSpline("Remove Spline Point");
 }
@@ -478,6 +504,7 @@ bool SplineTool::selectPoint(const mdl::PickResult& pickResult)
 
   m_selectedIndex = index;
   m_selectedPart = part;
+  selectPointEntity();
   refreshViews();
   splineDidChangeNotifier();
   return true;
@@ -490,17 +517,11 @@ bool SplineTool::selectSpline(const mdl::PickResult& pickResult)
   const auto& hit = pickResult.first(type(mdl::BrushNode::BrushHitType));
   if (const auto faceHandle = mdl::hitToFaceHandle(hit))
   {
-    for (auto* candidate = static_cast<mdl::Node*>(faceHandle->node());
-         candidate != nullptr;
-         candidate = candidate->parent())
+    if (auto* head = mdl::findSplineHeadFor(*faceHandle->node());
+        head && head != m_splineNode)
     {
-      if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(candidate);
-          entityNode && entityNode != m_splineNode
-          && mdl::isSplineEntity(entityNode->entity()))
-      {
-        loadSplineNode(entityNode);
-        return true;
-      }
+      loadSplineNode(head);
+      return true;
     }
   }
   return false;
@@ -510,6 +531,7 @@ void SplineTool::deselectPoint()
 {
   m_selectedIndex = std::nullopt;
   m_selectedPart = SplineHandlePart::Point;
+  selectPointEntity();
   refreshViews();
   splineDidChangeNotifier();
 }
@@ -550,6 +572,7 @@ std::optional<std::tuple<vm::vec3d, vm::vec3d>> SplineTool::beginDragPoint(
   m_selectedIndex = index;
   m_selectedPart = part;
   m_dragState = DragState{index, part, m_points[index]};
+  selectPointEntity();
   splineDidChangeNotifier();
 
   auto initialPosition = m_points[index].position;
@@ -748,6 +771,45 @@ void SplineTool::moveSelectedPoint(const vm::vec3d& delta)
     point.position = point.position + delta;
     commitSpline("Move Spline Point");
   }
+}
+
+std::string SplineTool::splineName() const
+{
+  return m_splineNode ? mdl::splineName(*m_splineNode) : std::string{};
+}
+
+void SplineTool::setSplineName(const std::string& name)
+{
+  auto cleaned = kdl::str_trim(name);
+  std::ranges::replace_if(
+    cleaned,
+    [](const char c) { return std::isspace(static_cast<unsigned char>(c)); },
+    '_');
+  std::erase(cleaned, '"');
+
+  if (!m_splineNode || cleaned.empty() || cleaned == splineName())
+  {
+    return;
+  }
+
+  // The spline's own points are about to give up their names, so those do not count
+  // against the new one.
+  auto targetnames = mdl::collectTargetnames(m_document.map().worldNode());
+  for (const auto* pointNode : m_pointNodes)
+  {
+    if (pointNode)
+    {
+      if (
+        const auto* pointName =
+          pointNode->entity().property(mdl::EntityPropertyKeys::Targetname))
+      {
+        targetnames.erase(*pointName);
+      }
+    }
+  }
+
+  m_newName = mdl::uniqueSplineName(cleaned, targetnames);
+  commitSpline("Rename Spline");
 }
 
 bool SplineTool::closed() const
@@ -956,7 +1018,14 @@ void SplineTool::breakSpline()
     return;
   }
 
+  // What is broken out is left beside the spline rather than in its group, which is
+  // for what the spline makes.
   auto* parent = m_splineNode->parent();
+  if (const auto* groupNode = dynamic_cast<const mdl::GroupNode*>(parent);
+      groupNode && mdl::isSplineGroup(*groupNode) && groupNode->parent())
+  {
+    parent = groupNode->parent();
+  }
 
   auto transaction = mdl::Transaction{map, "Break Spline"};
   if (addNodes(map, {{parent, duplicates}}).empty())
@@ -1056,11 +1125,14 @@ void SplineTool::refreshOtherSplines()
       groupNode.visitChildren(thisLambda);
     },
     [&](mdl::EntityNode& entityNode) {
-      if (&entityNode != m_splineNode && mdl::isSplineEntity(entityNode.entity()))
+      if (&entityNode != m_splineNode)
       {
         if (const auto data = mdl::parseSplineEntity(entityNode.entity()))
         {
-          m_otherSplines.emplace_back(&entityNode, *data);
+          const auto chain = mdl::findSplinePointChain(entityNode);
+          m_otherSplines.emplace_back(
+            &entityNode,
+            OtherSpline{mdl::parseSplinePoints(chain), data->subdivisions, chain.closed});
         }
       }
     },
@@ -1072,30 +1144,35 @@ void SplineTool::loadFromSelection()
 {
   for (auto* node : m_document.map().selection().nodes)
   {
-    // Look for a selected spline entity, or a selected brush belonging to one.
+    // Look for a selected spline's group, or anything else belonging to a spline, or
+    // something inside a spline's group.
     for (auto* candidate = node; candidate != nullptr; candidate = candidate->parent())
     {
-      if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(candidate);
-          entityNode && mdl::isSplineEntity(entityNode->entity()))
+      if (auto* head = mdl::findSplineHeadFor(*candidate))
       {
-        loadSplineNode(entityNode);
+        loadSplineNode(head);
         return;
       }
     }
   }
 }
 
-void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
+void SplineTool::loadSplineNode(mdl::EntityNode* splineNode, const bool keepSelection)
 {
   if (const auto data = mdl::parseSplineEntity(splineNode->entity()))
   {
     auto& map = m_document.map();
+    const auto chain = mdl::findSplinePointChain(*splineNode);
 
     m_splineNode = splineNode;
-    m_points = data->points;
+    m_splineParent = splineNode->parent();
+    m_points = mdl::parseSplinePoints(chain);
+    m_pointNodes = chain.points;
+    m_removedPointNodes.clear();
+    m_newName = std::nullopt;
     m_subdivisions = data->subdivisions;
     m_templateGroupId = data->templateGroupId;
-    m_closed = data->closed;
+    m_closed = chain.closed;
     m_lockUVs = data->lockUVs;
     m_keepSize = data->keepSize;
     m_templateBrushes = mdl::parseSplineTemplateBrushes(
@@ -1103,12 +1180,19 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
     m_templateEntities = mdl::parseSplineTemplateEntities(splineNode->entity());
     m_templateBrushEntities = mdl::parseSplineTemplateBrushEntities(
       splineNode->entity(), map.worldNode().mapFormat(), map.worldBounds());
-    m_selectedIndex = std::nullopt;
     m_dragState = std::nullopt;
+
+    if (!keepSelection || (m_selectedIndex && *m_selectedIndex >= m_points.size()))
+    {
+      m_selectedIndex = std::nullopt;
+    }
 
     // Picking up an existing spline is usually done to edit its points, so disable
     // add point mode to prevent accidentally appending new points.
-    m_addPointMode = false;
+    if (!keepSelection)
+    {
+      m_addPointMode = false;
+    }
 
     refreshOtherSplines();
     refreshViews();
@@ -1119,10 +1203,15 @@ void SplineTool::loadSplineNode(mdl::EntityNode* splineNode)
 void SplineTool::clearSpline()
 {
   m_splineNode = nullptr;
+  m_splineParent = nullptr;
   m_points.clear();
+  m_pointNodes.clear();
+  m_removedPointNodes.clear();
+  m_newName = std::nullopt;
   m_subdivisions = mdl::SplineDefaultSubdivisions;
   m_closed = false;
   m_lockUVs = false;
+  m_keepSize = false;
   m_templateGroupId = std::nullopt;
   m_templateBrushes.clear();
   m_templateEntities.clear();
@@ -1134,33 +1223,89 @@ void SplineTool::clearSpline()
   splineDidChangeNotifier();
 }
 
+std::vector<std::string> SplineTool::pointNames() const
+{
+  auto targetnames = mdl::collectTargetnames(m_document.map().worldNode());
+
+  const auto name = m_newName      ? *m_newName
+                    : m_splineNode ? mdl::splineName(*m_splineNode)
+                                   : mdl::uniqueSplineName("spline1", targetnames);
+
+  // A renamed spline's points are numbered afresh in order along the curve. Otherwise a
+  // point keeps the name it has, which whatever in the map targets it relies on, and a
+  // new one takes the first number nothing else has.
+  auto names = std::vector<std::string>{};
+  for (size_t i = 0; i < m_points.size(); ++i)
+  {
+    if (m_newName)
+    {
+      names.push_back(mdl::splinePointName(name, i));
+      continue;
+    }
+
+    if (const auto* pointNode = m_pointNodes[i])
+    {
+      if (const auto* pointName =
+            pointNode->entity().property(mdl::EntityPropertyKeys::Targetname);
+          pointName && !pointName->empty())
+      {
+        names.push_back(*pointName);
+        continue;
+      }
+    }
+
+    for (size_t k = 0;; ++k)
+    {
+      if (auto candidate = mdl::splinePointName(name, k);
+          targetnames.insert(candidate).second)
+      {
+        names.push_back(std::move(candidate));
+        break;
+      }
+    }
+  }
+  return names;
+}
+
 void SplineTool::commitSpline(const std::string& commandName)
 {
   const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
   auto& map = m_document.map();
 
-  // The point entities the spline generated cannot live inside it, so they are beside
-  // it and have to be taken away by hand whenever it is rebuilt.
+  // The point entities the spline generated cannot live inside its head, so they are
+  // beside it and have to be taken away by hand whenever it is rebuilt.
   const auto generatedEntityNodes = findGeneratedEntityNodes();
 
   if (m_points.empty())
   {
     if (m_splineNode)
     {
+      // The spline's group goes with the last of what it holds.
       auto transaction = mdl::Transaction{map, commandName};
       auto nodesToRemove = generatedEntityNodes;
       nodesToRemove.push_back(m_splineNode);
+      nodesToRemove.insert(
+        nodesToRemove.end(), m_removedPointNodes.begin(), m_removedPointNodes.end());
+      deselectRemoved(map, nodesToRemove);
       removeNodes(map, nodesToRemove);
-      m_splineNode = nullptr;
       transaction.commit();
     }
+    m_splineNode = nullptr;
+    m_splineParent = nullptr;
+    m_pointNodes.clear();
+    m_removedPointNodes.clear();
+    m_newName = std::nullopt;
     refreshViews();
     splineDidChangeNotifier();
     return;
   }
 
+  const auto names = pointNames();
+  const auto newName = m_newName;
+  m_newName = std::nullopt;
+
   const auto data = mdl::SplineEntityData{
-    m_points, m_subdivisions, m_templateGroupId, m_closed, m_lockUVs, m_keepSize};
+    names.front(), m_subdivisions, m_templateGroupId, m_lockUVs, m_keepSize};
   auto entity = mdl::writeSplineTemplateBrushEntities(
     mdl::writeSplineTemplateEntities(
       mdl::writeSplineTemplateBrushes(
@@ -1191,7 +1336,42 @@ void SplineTool::commitSpline(const std::string& commandName)
     newNode->addChildren(createBrushNodes(*contents));
   }
 
+  // Every point is written, existing ones in place so that what the mapper added to
+  // them stays, each targeting the next, and the last the first if the spline is
+  // closed.
   auto newNodes = std::vector<mdl::Node*>{newNode};
+  auto pointsToUpdate = std::vector<std::pair<mdl::Node*, mdl::NodeContents>>{};
+  auto pointNodes = std::vector<mdl::EntityNode*>{};
+  for (size_t i = 0; i < m_points.size(); ++i)
+  {
+    auto* pointNode = m_pointNodes[i];
+    auto pointEntity = mdl::writeSplinePointEntity(
+      pointNode ? pointNode->entity() : mdl::Entity{}, m_points, i, m_closed);
+    pointEntity.addOrUpdateProperty(mdl::EntityPropertyKeys::Targetname, names[i]);
+
+    const auto isLast = i + 1 == m_points.size();
+    if (!isLast || m_closed)
+    {
+      pointEntity.addOrUpdateProperty(
+        mdl::EntityPropertyKeys::Target, names[(i + 1) % names.size()]);
+    }
+    else
+    {
+      pointEntity.removeProperty(mdl::EntityPropertyKeys::Target);
+    }
+
+    if (!pointNode)
+    {
+      pointNode = new mdl::EntityNode{std::move(pointEntity)};
+      newNodes.push_back(pointNode);
+    }
+    else if (pointEntity != pointNode->entity())
+    {
+      pointsToUpdate.emplace_back(pointNode, mdl::NodeContents{std::move(pointEntity)});
+    }
+    pointNodes.push_back(pointNode);
+  }
+
   if (contents)
   {
     for (auto* node : createEntityNodes(*contents, splineId))
@@ -1200,33 +1380,101 @@ void SplineTool::commitSpline(const std::string& commandName)
     }
   }
 
-  auto* parent = m_splineNode ? m_splineNode->parent() : parentForNodes(map, {});
-
   auto transaction = mdl::Transaction{map, commandName};
-  auto nodesToRemove = generatedEntityNodes;
+
+  auto added = false;
   if (m_splineNode)
   {
-    nodesToRemove.push_back(m_splineNode);
-  }
-  if (!nodesToRemove.empty())
-  {
-    removeNodes(map, nodesToRemove);
-  }
-  const auto addedNodes = addNodes(map, {{parent, newNodes}});
-  if (addedNodes.empty())
-  {
-    transaction.cancel();
-    m_splineNode = nullptr;
+    // A renamed spline's group takes the new name too.
+    if (auto* groupNode = dynamic_cast<mdl::GroupNode*>(m_splineNode->parent());
+        groupNode && newName)
+    {
+      auto group = groupNode->group();
+      group.setName(*newName);
+      pointsToUpdate.emplace_back(groupNode, mdl::NodeContents{std::move(group)});
+    }
+
+    // What is new goes in before what it replaces comes out, so that the spline's group
+    // is never left empty, which would take it away.
+    added = !addNodes(map, {{m_splineNode->parent(), newNodes}}).empty();
+    if (added && !pointsToUpdate.empty())
+    {
+      added = updateNodeContents(map, commandName, std::move(pointsToUpdate));
+    }
+    if (added)
+    {
+      auto nodesToRemove = generatedEntityNodes;
+      nodesToRemove.push_back(m_splineNode);
+      nodesToRemove.insert(
+        nodesToRemove.end(), m_removedPointNodes.begin(), m_removedPointNodes.end());
+      deselectRemoved(map, nodesToRemove);
+      removeNodes(map, nodesToRemove);
+    }
   }
   else
   {
+    auto* groupNode = new mdl::GroupNode{mdl::Group{mdl::splineName(*newNode)}};
+    groupNode->addChildren(newNodes);
+    added = !addNodes(map, {{parentForNodes(map, {}), {groupNode}}}).empty();
+  }
+
+  if (added)
+  {
     m_splineNode = newNode;
+    m_splineParent = newNode->parent();
+    m_pointNodes = std::move(pointNodes);
+    m_removedPointNodes.clear();
     transaction.commit();
+  }
+  else
+  {
+    transaction.cancel();
+    if (!m_splineNode)
+    {
+      m_points.clear();
+      m_pointNodes.clear();
+    }
   }
 
   refreshOtherSplines();
   refreshViews();
   splineDidChangeNotifier();
+}
+
+void SplineTool::selectPointEntity()
+{
+  const auto ignoreNotifications = kdl::set_temp{m_ignoreNotifications};
+  auto& map = m_document.map();
+
+  auto* pointNode = m_selectedIndex && *m_selectedIndex < m_pointNodes.size()
+                      ? m_pointNodes[*m_selectedIndex]
+                      : nullptr;
+
+  const auto& selectedNodes = map.selection().nodes;
+  if (pointNode)
+  {
+    if (selectedNodes.size() == 1 && selectedNodes.front() == pointNode)
+    {
+      return;
+    }
+
+    auto transaction = mdl::Transaction{map, "Select Spline Point"};
+    deselectAll(map);
+    selectNodes(map, {pointNode});
+    transaction.commit();
+    return;
+  }
+
+  // Without a point to show, a point of this spline that is still selected is let go of,
+  // but whatever else the mapper has selected, such as a template to link, stays.
+  const auto isOurPoint = [&](const mdl::Node* node) {
+    return std::ranges::find(m_pointNodes, node) != m_pointNodes.end()
+           || std::ranges::find(m_removedPointNodes, node) != m_removedPointNodes.end();
+  };
+  if (std::ranges::any_of(selectedNodes, isOurPoint))
+  {
+    deselectAll(map);
+  }
 }
 
 std::optional<SplineTool::TemplateContents> SplineTool::collectTemplate() const
@@ -1462,6 +1710,11 @@ bool SplineTool::doActivate()
 
 bool SplineTool::doDeactivate()
 {
+  // The point entities are the spline tool's to edit, so none is left selected for the
+  // other tools to take hold of.
+  m_selectedIndex = std::nullopt;
+  selectPointEntity();
+
   m_notifierConnection.disconnect();
   clearSpline();
   m_otherSplines.clear();
@@ -1477,73 +1730,89 @@ void SplineTool::connectObservers()
 {
   auto& map = m_document.map();
   m_notifierConnection += map.nodesWereAddedNotifier.connect(
-    [this](const auto& nodes) { nodesWereAdded(nodes); });
-  m_notifierConnection += map.nodesWereRemovedNotifier.connect(
-    [this](const auto& nodes) { nodesWereRemoved(nodes); });
-  m_notifierConnection += map.nodesDidChangeNotifier.connect(
-    [this](const auto& nodes) { nodesDidChange(nodes); });
+    [this](const auto& nodes) { documentDidChange(nodes); });
+  m_notifierConnection +=
+    map.nodesWereRemovedNotifier.connect([this](const auto&) { documentDidChange({}); });
+  m_notifierConnection +=
+    map.nodesDidChangeNotifier.connect([this](const auto&) { documentDidChange({}); });
   m_notifierConnection +=
     map.selectionDidChangeNotifier.connect([this](const auto&) { selectionDidChange(); });
 }
 
-void SplineTool::nodesWereAdded(const std::vector<mdl::Node*>& nodes)
+void SplineTool::documentDidChange(const std::vector<mdl::Node*>& addedNodes)
 {
   if (m_ignoreNotifications)
   {
     return;
   }
 
-  refreshOtherSplines();
-
-  if (m_splineNode != nullptr)
+  // A spline being dragged is reloaded once the drag is done with.
+  if (m_dragState)
   {
+    refreshOtherSplines();
     return;
   }
 
-  // Adopt a spline entity that reappears, e.g. when a spline edit is undone.
-  for (auto* node : nodes)
+  // Every edit replaces the spline's head, so undoing one takes the head away and puts
+  // back the one it replaced, beside the points in the spline's group. If the group has
+  // gone too, so has the spline. The head is checked rather than looked for among what
+  // was removed, since a removed group is all a removal names.
+  const auto& worldNode = m_document.map().worldNode();
+  if (m_splineNode && !m_splineNode->isDescendantOf(worldNode))
   {
-    if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(node);
-        entityNode && mdl::isSplineEntity(entityNode->entity()))
+    // A spline whose group has been dissolved shares its layer with whatever else is in
+    // it, other splines included, so the head taken is one whose points are this
+    // spline's.
+    const auto isOurs = [&](const mdl::EntityNode& head) {
+      return std::ranges::any_of(
+        mdl::findSplinePointChain(head).points, [&](const auto* pointNode) {
+          return std::ranges::find(m_pointNodes, pointNode) != m_pointNodes.end();
+        });
+    };
+
+    auto* parent = m_splineParent;
+    auto* replacement = static_cast<mdl::EntityNode*>(nullptr);
+    if (parent && (parent == &worldNode || parent->isDescendantOf(worldNode)))
     {
-      loadSplineNode(entityNode);
+      for (auto* child : parent->children())
+      {
+        if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(child);
+            entityNode && mdl::isSplineEntity(entityNode->entity())
+            && isOurs(*entityNode))
+        {
+          replacement = entityNode;
+          break;
+        }
+      }
+    }
+
+    if (replacement)
+    {
+      m_splineNode = replacement;
+    }
+    else
+    {
+      clearSpline();
+    }
+  }
+
+  if (m_splineNode)
+  {
+    loadSplineNode(m_splineNode, true);
+    return;
+  }
+
+  // Adopt a spline that reappears, e.g. when a spline edit is undone.
+  for (auto* node : addedNodes)
+  {
+    if (auto* head = mdl::findSplineHeadFor(*node))
+    {
+      loadSplineNode(head);
       return;
     }
   }
-}
-
-void SplineTool::nodesWereRemoved(const std::vector<mdl::Node*>& nodes)
-{
-  if (m_ignoreNotifications)
-  {
-    return;
-  }
-
-  if (m_splineNode && std::ranges::find(nodes, m_splineNode) != nodes.end())
-  {
-    clearSpline();
-  }
-  else
-  {
-    refreshOtherSplines();
-  }
-}
-
-void SplineTool::nodesDidChange(const std::vector<mdl::Node*>& nodes)
-{
-  if (m_ignoreNotifications)
-  {
-    return;
-  }
 
   refreshOtherSplines();
-
-  if (
-    m_splineNode
-    && std::ranges::find(nodes, static_cast<mdl::Node*>(m_splineNode)) != nodes.end())
-  {
-    loadSplineNode(m_splineNode);
-  }
 }
 
 void SplineTool::selectionDidChange()
@@ -1553,17 +1822,29 @@ void SplineTool::selectionDidChange()
     return;
   }
 
-  // Switch to a newly selected spline entity, but keep editing the current spline if
-  // the selection does not contain one.
+  // Switch to a newly selected spline, but keep editing the current spline if the
+  // selection does not contain one. Selecting one of the current spline's points, as
+  // undoing a selection does, selects that point.
   for (auto* node : m_document.map().selection().nodes)
   {
     for (auto* candidate = node; candidate != nullptr; candidate = candidate->parent())
     {
-      if (auto* entityNode = dynamic_cast<mdl::EntityNode*>(candidate);
-          entityNode && entityNode != m_splineNode
-          && mdl::isSplineEntity(entityNode->entity()))
+      if (auto* head = mdl::findSplineHeadFor(*candidate))
       {
-        loadSplineNode(entityNode);
+        if (head != m_splineNode)
+        {
+          loadSplineNode(head);
+          return;
+        }
+
+        if (const auto it = std::ranges::find(m_pointNodes, candidate);
+            it != m_pointNodes.end())
+        {
+          m_selectedIndex = size_t(std::distance(m_pointNodes.begin(), it));
+          m_selectedPart = SplineHandlePart::Point;
+          refreshViews();
+        }
+        splineDidChangeNotifier();
         return;
       }
     }

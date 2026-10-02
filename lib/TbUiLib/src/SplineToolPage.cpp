@@ -23,6 +23,7 @@
 #include <QCheckBox>
 #include <QDoubleSpinBox>
 #include <QLabel>
+#include <QLineEdit>
 #include <QPushButton>
 
 #include "mdl/Map.h"
@@ -55,6 +56,14 @@ void SplineToolPage::createGui()
   m_addPoints->setToolTip(
     tr("While enabled, clicking empty space appends new points to the spline; "
        "disable it to select and edit points without adding new ones"));
+
+  m_name = new QLineEdit{};
+  m_name->setPlaceholderText(tr("spline"));
+  m_name->setMaximumWidth(140);
+  m_name->setToolTip(
+    tr("The name the spline's points are named after: each point is this name and its "
+       "index, linked to the next by target, which is how a game finds and follows the "
+       "spline. Renaming numbers the points afresh in order along the curve."));
 
   m_templateLabel = new QLabel{tr("<none>")};
   m_linkButton = new QPushButton{tr("Link")};
@@ -135,6 +144,9 @@ void SplineToolPage::createGui()
 
   layout->addWidget(m_addPoints);
   layout->addSpacing(12);
+  layout->addWidget(new QLabel{tr("Name:")});
+  layout->addWidget(m_name);
+  layout->addSpacing(12);
   layout->addWidget(new QLabel{tr("Template:")});
   layout->addWidget(m_templateLabel);
   layout->addWidget(m_linkButton);
@@ -174,6 +186,14 @@ void SplineToolPage::createGui()
     if (!m_updatingControls)
     {
       m_tool.setAddPointMode(checked);
+    }
+  });
+  connect(m_name, &QLineEdit::editingFinished, this, [this]() {
+    if (!m_updatingControls)
+    {
+      m_tool.setSplineName(m_name->text().toStdString());
+      // A name that had to be changed to fit shows what it became.
+      updateControls();
     }
   });
   connect(m_linkButton, &QPushButton::clicked, this, [this]() { m_tool.linkTemplate(); });
@@ -253,6 +273,12 @@ void SplineToolPage::updateControls()
   m_updatingControls = true;
 
   m_addPoints->setChecked(m_tool.addPointMode());
+
+  m_name->setEnabled(m_tool.hasPoints());
+  if (!m_name->hasFocus())
+  {
+    m_name->setText(QString::fromStdString(m_tool.splineName()));
+  }
 
   const auto templateName = m_tool.templateName();
   m_templateLabel->setText(

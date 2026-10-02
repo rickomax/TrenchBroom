@@ -70,14 +70,26 @@ TEST_CASE("MapSidecar")
   {
     CHECK(isSidecarPropertyKey(TerrainPropertyKeys::Columns));
     CHECK(isSidecarPropertyKey(std::string{TerrainPropertyKeys::HeightsPrefix} + "3"));
-    CHECK(isSidecarPropertyKey(std::string{SplinePropertyKeys::PointPrefix} + "0"));
-    CHECK(isSidecarPropertyKey(SplinePropertyKeys::Closed));
+    CHECK(isSidecarPropertyKey(SplinePropertyKeys::Subdivisions));
+    CHECK(
+      isSidecarPropertyKey(std::string{SplinePropertyKeys::TemplateBrushPrefix} + "0"));
 
     // The classname, the origin and the id must stay in the map: without them the
     // entity could not be found again, and the geometry would move.
     CHECK(!isSidecarPropertyKey(EntityPropertyKeys::Classname));
     CHECK(!isSidecarPropertyKey("origin"));
     CHECK(!isSidecarPropertyKey(SidecarPropertyKeys::DataId));
+
+    // Nor may anything a spline's control points carry go: they are what a game reads,
+    // and a game never sees the sidecar. The head's target is how they are found.
+    CHECK(!isSidecarPropertyKey(EntityPropertyKeys::Target));
+    CHECK(!isSidecarPropertyKey(EntityPropertyKeys::Targetname));
+    CHECK(!isSidecarPropertyKey(SplinePointPropertyKeys::Roll));
+    CHECK(!isSidecarPropertyKey(SplinePointPropertyKeys::SectionScale));
+    CHECK(!isSidecarPropertyKey(SplinePointPropertyKeys::TangentIn));
+    CHECK(!isSidecarPropertyKey(SplinePointPropertyKeys::TangentOut));
+    CHECK(!isSidecarPropertyKey(SplinePointPropertyKeys::TwistLock));
+    CHECK(!isSidecarPropertyKey(SplinePointPropertyKeys::AutoTangent));
   }
 
   SECTION("sidecarPathForMap keeps the map's extension")
@@ -136,7 +148,7 @@ TEST_CASE("MapSidecar")
       SidecarRecord{
         "0123456789abcdef",
         {
-          EntityProperty{std::string{SplinePropertyKeys::PointPrefix} + "0", "0 0 0"},
+          EntityProperty{SplinePropertyKeys::Subdivisions, "8"},
         }},
     };
 
