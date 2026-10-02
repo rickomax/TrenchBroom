@@ -21,6 +21,7 @@
 
 #include "mdl/Spline.h"
 
+#include <map>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -99,5 +100,24 @@ std::unordered_set<std::string> collectTargetnames(const Node& node);
  */
 std::string uniqueSplineName(
   std::string_view preferred, const std::unordered_set<std::string>& targetnames);
+
+/**
+ * Makes the splines among the given nodes, which are about to be added to the given
+ * world, fit beside the ones already in it. A pasted or duplicated spline arrives with
+ * the names and the tool data id of the one it was copied from:
+ *
+ * - Its control points are renamed if any of their names is taken, in order along the
+ *   curve under a free spline name, and its group is given that name. Every target among
+ *   the given nodes that named one of the old points names the new one, so that copying
+ *   a spline along with something following it gives the copy something following it.
+ * - Its head is given a fresh tool data id if its own is taken, and the entities it
+ *   generated are marked with the new one; otherwise the spline the copy was made from
+ *   would take them for its own.
+ *
+ * A spline pasted where nothing clashes with it, such as one cut and pasted back, keeps
+ * its names.
+ */
+void makeAddedSplinesUnique(
+  const std::map<Node*, std::vector<Node*>>& nodesToAdd, const WorldNode& worldNode);
 
 } // namespace tb::mdl

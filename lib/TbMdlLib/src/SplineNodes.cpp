@@ -26,6 +26,7 @@
 #include "mdl/EntityProperties.h"
 #include "mdl/GroupNode.h"
 #include "mdl/LayerNode.h"
+#include "mdl/MapSidecar.h"
 #include "mdl/PatchNode.h"
 #include "mdl/SplineEntity.h"
 #include "mdl/WorldNode.h"
@@ -113,6 +114,20 @@ EntityNode* generatingHead(const EntityNode& entityNode)
   const auto* parent = entityNode.parent();
   return owner && !owner->empty() && parent ? headAmongChildren(*parent, *owner)
                                             : nullptr;
+}
+
+void replaceProperty(
+  Entity& entity,
+  const std::string& key,
+  const std::unordered_map<std::string, std::string>& replacements)
+{
+  if (const auto* value = entity.property(key))
+  {
+    if (const auto it = replacements.find(*value); it != replacements.end())
+    {
+      entity.addOrUpdateProperty(key, it->second);
+    }
+  }
 }
 
 } // namespace
@@ -279,6 +294,119 @@ std::string uniqueSplineName(
     if (!taken.contains(candidate))
     {
       return candidate;
+    }
+  }
+}
+
+void makeAddedSplinesUnique(
+  const std::map<Node*, std::vector<Node*>>& nodesToAdd, const WorldNode& worldNode)
+{
+  auto targetnames = collectTargetnames(worldNode);
+
+  auto ids = std::unordered_set<std::string>{};
+  visitEntityNodes(const_cast<WorldNode&>(worldNode), [&](const EntityNode& entityNode) {
+    if (const auto id = splineEntityId(entityNode.entity()); !id.empty())
+    {
+      ids.insert(id);
+    }
+  });
+
+  auto heads = std::vector<EntityNode*>{};
+  for (const auto& [parent, nodes] : nodesToAdd)
+  {
+    for (auto* node : nodes)
+    {
+      visitEntityNodes(*node, [&](EntityNode& entityNode) {
+        if (isSplineEntity(entityNode.entity()))
+        {
+          heads.push_back(&entityNode);
+        }
+      });
+    }
+  }
+
+  auto renamedPoints = std::unordered_map<std::string, std::string>{};
+  for (auto* head : heads)
+  {
+    const auto chain = findSplinePointChain(*head);
+    auto names = chain.points | std::views::transform([](const auto* point) {
+                   return point->entity().property(EntityPropertyKeys::Targetname);
+                 })
+                 | std::views::transform([](const auto* name) { return *name; })
+                 | kdl::ranges::to<std::vector>();
+
+    if (std::ranges::any_of(
+          names, [&](const auto& name) { return targetnames.contains(name); }))
+    {
+      const auto newName = uniqueSplineName(splineName(*head), targetnames);
+      for (size_t i = 0; i < names.size(); ++i)
+      {
+        auto newPointName = splinePointName(newName, i);
+        renamedPoints[names[i]] = newPointName;
+        names[i] = std::move(newPointName);
+      }
+
+      if (auto* groupNode = dynamic_cast<GroupNode*>(head->parent()))
+      {
+        auto group = groupNode->group();
+        group.setName(newName);
+        groupNode->setGroup(std::move(group));
+      }
+    }
+    targetnames.insert(names.begin(), names.end());
+
+    // The copy's generated entities are beside its head, so that is where the old id is
+    // swapped for the new one.
+    if (const auto id = splineEntityId(head->entity());
+        !id.empty() && !ids.insert(id).second)
+    {
+      auto newId = generateSidecarId();
+      while (!ids.insert(newId).second)
+      {
+        newId = generateSidecarId();
+      }
+
+      for (auto* sibling :
+           head->parent() ? head->parent()->children() : std::vector<Node*>{})
+      {
+        if (auto* entityNode = dynamic_cast<EntityNode*>(sibling))
+        {
+          if (const auto* owner =
+                entityNode->entity().property(SplinePropertyKeys::GeneratedBy);
+              owner && *owner == id)
+          {
+            auto entity = entityNode->entity();
+            entity.addOrUpdateProperty(SplinePropertyKeys::GeneratedBy, newId);
+            entityNode->setEntity(std::move(entity));
+          }
+        }
+      }
+
+      auto entity = head->entity();
+      entity.addOrUpdateProperty(SidecarPropertyKeys::DataId, newId);
+      head->setEntity(std::move(entity));
+    }
+  }
+
+  if (renamedPoints.empty())
+  {
+    return;
+  }
+
+  for (const auto& [parent, nodes] : nodesToAdd)
+  {
+    for (auto* node : nodes)
+    {
+      visitEntityNodes(*node, [&](EntityNode& entityNode) {
+        auto entity = entityNode.entity();
+        replaceProperty(entity, EntityPropertyKeys::Targetname, renamedPoints);
+        replaceProperty(entity, EntityPropertyKeys::Target, renamedPoints);
+        replaceProperty(entity, EntityPropertyKeys::Killtarget, renamedPoints);
+        if (entity != entityNode.entity())
+        {
+          entityNode.setEntity(std::move(entity));
+        }
+      });
     }
   }
 }

@@ -270,6 +270,115 @@ TEST_CASE("SplineNodes")
     // Only a name followed by an index is a point name.
     CHECK(uniqueSplineName("track", {"track", "track_a", "track_"}) == "track");
   }
+
+  SECTION("makeAddedSplinesUnique")
+  {
+    auto worldNode = WorldNode{{}, {}, MapFormat::Standard};
+    auto* layer = worldNode.defaultLayer();
+    auto* original = createSplineGroupNode("track", 3);
+    layer->addChild(original);
+
+    const auto* originalHead = findSplineHead(*original);
+    const auto originalId = splineEntityId(originalHead->entity());
+    const auto originalNames = namesOf(findSplinePointChain(*originalHead));
+
+    const auto copyOf = [&](const GroupNode& groupNode) {
+      return static_cast<GroupNode*>(groupNode.cloneRecursively(worldBounds));
+    };
+
+    SECTION("a copy beside its original is given names and an id of its own")
+    {
+      auto* copy = copyOf(*original);
+      makeAddedSplinesUnique({{layer, {copy}}}, worldNode);
+      layer->addChild(copy);
+
+      const auto* head = findSplineHead(*copy);
+      REQUIRE(head != nullptr);
+      const auto chain = findSplinePointChain(*head);
+      CHECK(
+        namesOf(chain) == std::vector<std::string>{"track2_0", "track2_1", "track2_2"});
+      CHECK_FALSE(chain.closed);
+      CHECK(copy->group().name() == "track2");
+
+      const auto id = splineEntityId(head->entity());
+      CHECK_FALSE(id.empty());
+      CHECK(id != originalId);
+      CHECK(
+        *generatedEntityOf(*copy)->entity().property(SplinePropertyKeys::GeneratedBy)
+        == id);
+
+      // The original is left as it was.
+      CHECK(namesOf(findSplinePointChain(*originalHead)) == originalNames);
+      CHECK(splineEntityId(originalHead->entity()) == originalId);
+      CHECK(
+        *generatedEntityOf(*original)->entity().property(SplinePropertyKeys::GeneratedBy)
+        == originalId);
+    }
+
+    SECTION("a closed copy stays closed")
+    {
+      auto* loop = createSplineGroupNode("loop", 3, true);
+      layer->addChild(loop);
+
+      auto* copy = copyOf(*loop);
+      makeAddedSplinesUnique({{layer, {copy}}}, worldNode);
+
+      const auto chain = findSplinePointChain(*findSplineHead(*copy));
+      CHECK(namesOf(chain) == std::vector<std::string>{"loop2_0", "loop2_1", "loop2_2"});
+      CHECK(chain.closed);
+
+      delete copy;
+    }
+
+    SECTION("copies pasted together are told apart from each other too")
+    {
+      auto* first = copyOf(*original);
+      auto* second = copyOf(*original);
+      makeAddedSplinesUnique({{layer, {first, second}}}, worldNode);
+
+      CHECK(first->group().name() == "track2");
+      CHECK(second->group().name() == "track3");
+      CHECK(
+        splineEntityId(findSplineHead(*first)->entity())
+        != splineEntityId(findSplineHead(*second)->entity()));
+
+      delete first;
+      delete second;
+    }
+
+    SECTION("something pasted along with the spline follows the copy")
+    {
+      auto* copy = copyOf(*original);
+      auto* follower =
+        new EntityNode{Entity{{{"classname", "func_train"}, {"target", "track_0"}}}};
+      auto* bystander =
+        new EntityNode{Entity{{{"classname", "trigger_once"}, {"target", "door"}}}};
+
+      makeAddedSplinesUnique({{layer, {copy, follower, bystander}}}, worldNode);
+
+      CHECK(*follower->entity().property("target") == "track2_0");
+      CHECK(*bystander->entity().property("target") == "door");
+
+      delete copy;
+      delete follower;
+      delete bystander;
+    }
+
+    SECTION("a spline that clashes with nothing keeps its names and its id")
+    {
+      // Which is what a spline cut and pasted back in looks like.
+      auto otherWorld = WorldNode{{}, {}, MapFormat::Standard};
+      auto* copy = copyOf(*original);
+      makeAddedSplinesUnique({{otherWorld.defaultLayer(), {copy}}}, otherWorld);
+
+      const auto* head = findSplineHead(*copy);
+      CHECK(namesOf(findSplinePointChain(*head)) == originalNames);
+      CHECK(copy->group().name() == "track");
+      CHECK(splineEntityId(head->entity()) == originalId);
+
+      delete copy;
+    }
+  }
 }
 
 } // namespace tb::mdl

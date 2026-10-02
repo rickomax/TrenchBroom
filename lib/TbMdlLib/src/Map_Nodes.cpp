@@ -40,6 +40,7 @@
 #include "mdl/PatchNode.h"
 #include "mdl/ReparentNodesCommand.h"
 #include "mdl/SetLinkIdsCommand.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/SwapNodeContentsCommand.h"
 #include "mdl/Transaction.h"
 #include "mdl/VisualEffect.h"
@@ -305,6 +306,14 @@ void duplicateSelectedNodes(Map& map)
 
   for (auto* original : map.selection().nodes)
   {
+    // A spline's point is only ever copied along with its spline. On its own, the copy
+    // would land in the spline's group, where nothing could select it again.
+    if (const auto* entityNode = dynamic_cast<const EntityNode*>(original);
+        entityNode && isSplinePointNode(*entityNode))
+    {
+      continue;
+    }
+
     auto* suggestedParent = parentForNodes(map, {original});
     auto* clone = original->cloneRecursively(map.worldBounds());
 
@@ -340,6 +349,7 @@ void duplicateSelectedNodes(Map& map)
 
   resetLinkIdsOfNonGroupedNodes(nodesToAdd);
   copyAndSetLinkIds(nodesToAdd, map.worldNode(), map.logger());
+  makeAddedSplinesUnique(nodesToAdd, map.worldNode());
 
   {
     auto transaction = Transaction{map, "Duplicate Objects"};

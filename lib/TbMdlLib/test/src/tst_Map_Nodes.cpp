@@ -39,6 +39,8 @@
 #include "mdl/Map_Selection.h"
 #include "mdl/Matchers.h"
 #include "mdl/PatchNode.h"
+#include "mdl/SplineEntity.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/TestFactory.h"
 #include "mdl/TestUtils.h"
 #include "mdl/VisualEffect.h"
@@ -326,6 +328,48 @@ TEST_CASE("Map_Nodes")
 
       CHECK(
         triggerVisualEffect.notifications == std::vector{VisualEffect::FlashSelection});
+    }
+
+    SECTION("A duplicated spline is given names and an id of its own")
+    {
+      auto* splineGroup = createSplineGroupNode("track", 2, true);
+      addNodes(map, {{parentForNodes(map), {splineGroup}}});
+      const auto* head = findSplineHead(*splineGroup);
+      REQUIRE(head != nullptr);
+
+      selectNodes(map, {splineGroup});
+      duplicateSelectedNodes(map);
+
+      REQUIRE(map.selection().groups.size() == 1u);
+      auto* duplicate = map.selection().groups.front();
+      REQUIRE(duplicate != splineGroup);
+
+      const auto* duplicateHead = findSplineHead(*duplicate);
+      REQUIRE(duplicateHead != nullptr);
+      CHECK(duplicate->group().name() == "track2");
+      CHECK(splineEntityId(duplicateHead->entity()) != splineEntityId(head->entity()));
+
+      const auto chain = findSplinePointChain(*duplicateHead);
+      REQUIRE(chain.points.size() == 2u);
+      CHECK(*chain.points[0]->entity().property("targetname") == "track2_0");
+      CHECK(*chain.points[1]->entity().property("target") == "track2_0");
+      CHECK(chain.closed);
+    }
+
+    SECTION("A spline's point is not duplicated on its own")
+    {
+      // Only the spline tool selects a point, for the entity inspector to show it. A
+      // copy of it would land in the spline's group, where nothing could select it.
+      auto* splineGroup = createSplineGroupNode("track", 2);
+      addNodes(map, {{parentForNodes(map), {splineGroup}}});
+      const auto chain = findSplinePointChain(*findSplineHead(*splineGroup));
+      REQUIRE(chain.points.size() == 2u);
+      const auto childCount = splineGroup->childCount();
+
+      selectNodes(map, {chain.points[0]});
+      duplicateSelectedNodes(map);
+
+      CHECK(splineGroup->childCount() == childCount);
     }
 
     SECTION("Nodes duplicated in a hidden layer become visible")

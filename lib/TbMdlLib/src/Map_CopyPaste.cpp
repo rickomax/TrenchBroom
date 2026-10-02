@@ -39,6 +39,7 @@
 #include "mdl/NodeWriter.h"
 #include "mdl/PasteType.h"
 #include "mdl/PatchNode.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/Transaction.h"
 #include "mdl/UpdateBrushFaceAttributes.h"
 #include "mdl/WorldNode.h"
@@ -221,6 +222,7 @@ bool pasteNodes(Map& map, const std::vector<Node*>& nodes)
 {
   const auto nodesToAdd = extractNodesToPaste(nodes, parentForNodes(map));
   fixRedundantPersistentIds(nodesToAdd, allPersistentGroupIds(map.worldNode()));
+  makeAddedSplinesUnique(nodesToAdd, map.worldNode());
   fixRecursiveLinkedGroups(nodesToAdd, map.logger());
   copyAndSetLinkIds(nodesToAdd, map.worldNode(), map.logger());
 
@@ -252,9 +254,18 @@ bool pasteBrushFaces(Map& map, const std::vector<BrushFace>& faces)
 
 std::string serializeSelectedNodes(Map& map)
 {
+  // A spline's point is only ever copied along with its spline, whose group is what
+  // holds it; on its own it would be pasted with the name of the point it was copied
+  // from.
+  const auto nodes = map.selection().nodes | std::views::filter([](const auto* node) {
+                       const auto* entityNode = dynamic_cast<const EntityNode*>(node);
+                       return !entityNode || !isSplinePointNode(*entityNode);
+                     })
+                     | kdl::ranges::to<std::vector>();
+
   auto stream = std::stringstream{};
   auto writer = NodeWriter{map.worldNode(), stream};
-  writer.writeNodes(map.selection().nodes, map.taskManager());
+  writer.writeNodes(nodes, map.taskManager());
   return stream.str();
 }
 

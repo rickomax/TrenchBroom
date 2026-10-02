@@ -21,6 +21,7 @@
 #include "mdl/BrushNode.h"
 #include "mdl/CatchConfig.h"
 #include "mdl/EntityNode.h"
+#include "mdl/EntityProperties.h"
 #include "mdl/GameInfo.h"
 #include "mdl/GroupNode.h"
 #include "mdl/LayerNode.h"
@@ -33,9 +34,14 @@
 #include "mdl/Map_Selection.h"
 #include "mdl/PasteType.h"
 #include "mdl/PatchNode.h"
+#include "mdl/SplineEntity.h"
+#include "mdl/SplineNodes.h"
 #include "mdl/TestFactory.h"
 #include "mdl/TestUtils.h"
 #include "mdl/WorldNode.h"
+
+#include <string>
+#include <vector>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -481,6 +487,94 @@ common/caulk
         REQUIRE(pastedGroupNode != groupNode);
 
         CHECK(pastedGroupNode->persistentId() == persistentGroupId);
+      }
+    }
+
+    SECTION("Paste gives a copied spline names and an id of its own")
+    {
+      auto& map = fixture.create();
+
+      auto* splineGroup = createSplineGroupNode("track", 3);
+      addNodes(map, {{parentForNodes(map), {splineGroup}}});
+
+      const auto* head = findSplineHead(*splineGroup);
+      REQUIRE(head != nullptr);
+      const auto id = splineEntityId(head->entity());
+
+      selectNodes(map, {splineGroup});
+      const auto str = serializeSelectedNodes(map);
+
+      const auto pointNames = [](const EntityNode& splineHead) {
+        auto names = std::vector<std::string>{};
+        for (const auto* point : findSplinePointChain(splineHead).points)
+        {
+          names.push_back(*point->entity().property(EntityPropertyKeys::Targetname));
+        }
+        return names;
+      };
+
+      SECTION("Copy and paste renames the copy's points")
+      {
+        deselectAll(map);
+        REQUIRE(paste(map, str) == PasteType::Node);
+
+        auto* pastedGroupNode =
+          dynamic_cast<GroupNode*>(map.worldNode().defaultLayer()->children().back());
+        REQUIRE(pastedGroupNode != nullptr);
+        REQUIRE(pastedGroupNode != splineGroup);
+
+        // The copy is a whole spline in its own right, and so is the original.
+        const auto* pastedHead = findSplineHead(*pastedGroupNode);
+        REQUIRE(pastedHead != nullptr);
+        CHECK(
+          pointNames(*pastedHead)
+          == std::vector<std::string>{"track2_0", "track2_1", "track2_2"});
+        CHECK(pastedGroupNode->group().name() == "track2");
+        CHECK(
+          pointNames(*head) == std::vector<std::string>{"track_0", "track_1", "track_2"});
+
+        // And the entities it generated are its own, so that rebuilding the original
+        // does not take them away.
+        const auto pastedId = splineEntityId(pastedHead->entity());
+        CHECK(pastedId != id);
+        for (const auto* child : pastedGroupNode->children())
+        {
+          if (const auto* entityNode = dynamic_cast<const EntityNode*>(child);
+              entityNode && isSplineGeneratedEntity(entityNode->entity()))
+          {
+            CHECK(
+              *entityNode->entity().property(SplinePropertyKeys::GeneratedBy)
+              == pastedId);
+          }
+        }
+      }
+
+      SECTION("A point is not copied without its spline")
+      {
+        deselectAll(map);
+        const auto chain = findSplinePointChain(*head);
+        REQUIRE(!chain.points.empty());
+        selectNodes(map, {chain.points.front()});
+
+        CHECK(serializeSelectedNodes(map).empty());
+      }
+
+      SECTION("Cut and paste keeps the spline's names")
+      {
+        removeSelectedNodes(map);
+        deselectAll(map);
+        REQUIRE(paste(map, str) == PasteType::Node);
+
+        auto* pastedGroupNode =
+          dynamic_cast<GroupNode*>(map.worldNode().defaultLayer()->children().back());
+        REQUIRE(pastedGroupNode != nullptr);
+
+        const auto* pastedHead = findSplineHead(*pastedGroupNode);
+        REQUIRE(pastedHead != nullptr);
+        CHECK(
+          pointNames(*pastedHead)
+          == std::vector<std::string>{"track_0", "track_1", "track_2"});
+        CHECK(splineEntityId(pastedHead->entity()) == id);
       }
     }
 
